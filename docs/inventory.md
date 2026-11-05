@@ -280,3 +280,30 @@ yaml が未適用だった段階1では、`id` と `calibration_dir` もデフ�
 ## 未確認
 
 実機（`mock:=false`）の実動作。ユーザーの確認待ち。
+
+---
+
+# 段階2a 完了: 実機確認で判明した問題2（2026-11-06）
+
+実機（`mock:=false`）での確認結果（ユーザー報告）。
+
+## 問題2: home の折りたたみ姿勢が衝突と判定され、Plan & Execute が中止される
+
+- 現象: home の折りたたみ姿勢（shoulder_lift −1.749、elbow_flex 1.700、wrist_flex 1.313 rad）が `upper_arm_link`–`wrist_link` の衝突と判定され、Plan & Execute が中止された。
+- 付随して、shoulder_lift と elbow_flex は関節リミットをそれぞれ 0.004 rad、0.010 rad 超えている。ただしこれは中止の原因ではない（原因は上記の衝突判定）。
+- 回避方法: 最初の動作を home から少し開いた姿勢で始める（実機で確認済み）。
+- 対応: **SRDF は変更していない**（MoveIt 本体の設定は変更しない方針）。
+- 未修正の課題（段階2b 以降）:
+  - SRDF の `elbow_flex`（関節名）の行。段階1から出ている警告 `Link 'elbow_flex' is not known to URDF. Cannot disable/enable collisons.` と同じ箇所とみられる（リンクとして指定されている可能性。未調査）。
+  - home 姿勢と関節リミットの関係（上記 0.004 / 0.010 rad の超過）。
+
+## 段階2a の状態
+
+| 項目 | 状態 |
+|---|---|
+| `colcon build` | 通過（7 パッケージ） |
+| mock（`mock:=true`）の軌道実行 | 確認済み |
+| 実機（`mock:=false`） | 起動・動作を確認（ユーザー報告）。問題2の回避方法を含む |
+| 既知の問題1〜5 | 解消 |
+| 既知の問題6（SRDF の warning） | 未解消（問題2と同じ SRDF の課題として段階2b 以降） |
+| 問題2 | 回避方法あり。根本対応は段階2b 以降 |
