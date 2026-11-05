@@ -53,7 +53,6 @@ def generate_launch_description():
         move_group_configuration,
     ]
 
-    # ★ /joint_states → /follower/joint_states にリマップ（常時）
     add_debuggable_node(
         ld,
         package="moveit_ros_move_group",
@@ -63,9 +62,6 @@ def generate_launch_description():
         parameters=move_group_params,
         extra_debug_args=["--debug"],
         additional_env={"DISPLAY": os.environ.get("DISPLAY", "")},
-        remappings=[
-            ("/joint_states", "/follower/joint_states"),
-        ],
     )
 
     return ld

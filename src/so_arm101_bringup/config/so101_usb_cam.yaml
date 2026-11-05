@@ -20,7 +20,7 @@
     focus: -1
 
 # Node name should be fit the this format: <namespace>/<camera_name> from the so101_cameras.yaml
-/follower/cam_front:
+/cam_front:
   ros__parameters:
     video_device: "/dev/video0"
     frame_id: "cam_front"

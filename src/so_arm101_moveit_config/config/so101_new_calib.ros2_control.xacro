@@ -10,10 +10,9 @@
                     <plugin>mock_components/GenericSystem</plugin>
                 </xacro:if>
                 <xacro:unless value="${use_fake_hardware}">
-                    <!-- 実機用: so101_ros2_bridgeのトピック経由で接続 -->
-                    <plugin>joint_state_topic_hardware_interface/JointStateTopicSystem</plugin>
-                    <param name="joint_commands_topic">/follower/joint_commands</param>
-                    <param name="joint_states_topic">/follower/joint_states</param>
+                    <!-- 実機用: So101HardwareBridge。ルートの /joint_commands と /joint_states_raw で
+                         so_arm101_lerobot_bridge と接続する（段階2bで置き換え予定） -->
+                    <plugin>so_arm101_hardware/So101HardwareBridge</plugin>
                 </xacro:unless>
             </hardware>
             <joint name="shoulder_pan">

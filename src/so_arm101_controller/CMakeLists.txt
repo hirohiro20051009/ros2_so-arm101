@@ -9,7 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 # Install other directories
-install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

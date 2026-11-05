@@ -51,10 +51,10 @@ leaving_singularity_threshold_multiplier: 2.0  # 奇異点から離れる方向�
 # --- 通信トピック設定 ---
 cartesian_command_in_topic: ~/delta_twist_cmds # 空間速度指定（Twist）の入力トピック名
 joint_command_in_topic: ~/delta_joint_cmds     # 関節角度増分（JointJog）の入力トピック名
-joint_topic: /follower/joint_states            # 現在の関節状態を取得するトピック名
+joint_topic: /joint_states            # 現在の関節状態を取得するトピック名
 status_topic: ~/status                         # MoveIt Servoの動作ステータス出力トピック名
 
-command_out_topic: /follower/arm_controller/joint_trajectory  # アームのコントローラ（ROS 2 Control）へ送る出力トピック名
+command_out_topic: /arm_controller/joint_trajectory  # アームのコントローラ（ROS 2 Control）へ送る出力トピック名
 
 # --- 衝突検知（Collision Checking）設定 ---
 check_collisions: true                         # リアルタイムの衝突チェックを有効化

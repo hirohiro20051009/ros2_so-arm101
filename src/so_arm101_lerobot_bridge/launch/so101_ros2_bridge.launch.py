@@ -63,7 +63,7 @@ def generate_launch_description():
             # Pass the robot_type as a ROS parameter named 'type'
             {'type': robot_type},
         ],
-        namespace=robot_type,
+        # namespace は付けない（ルート名前空間）。'type' は LeRobot のロボット種別キー
     )
 
     return LaunchDescription(

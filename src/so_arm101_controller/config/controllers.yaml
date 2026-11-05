@@ -1,0 +1,52 @@
+# ros2_control コントローラ設定（mock / 実機 共通、ルート名前空間）
+#
+# 統合元:
+#   - so_arm101_moveit_config/config/ros2_controllers.yaml （MoveIt Setup Assistant 生成。無変更・未使用）
+#   - 旧 so101_controllers.yaml の /follower ブロック（実機側。値は全て引き継ぎ）
+# /follower と /leader の名前空間は廃止した。
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: position_controllers/GripperActionController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+arm_controller:
+  ros__parameters:
+    update_rate: 25
+    type: joint_trajectory_controller/JointTrajectoryController
+    joints:
+      - shoulder_pan
+      - shoulder_lift
+      - elbow_flex
+      - wrist_flex
+      - wrist_roll
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+
+    gains:
+      shoulder_pan:  {p: 0.0, i: 0.0, d: 0.0}
+      shoulder_lift: {p: 0.0, i: 0.0, d: 0.0}
+      elbow_flex:    {p: 0.0, i: 0.0, d: 0.0}
+      wrist_flex:    {p: 0.0, i: 0.0, d: 0.0}
+      wrist_roll:    {p: 0.0, i: 0.0, d: 0.0}
+
+    open_loop_control: true
+    state_publish_rate: 50.0
+    action_monitor_rate: 20.0
+
+    time_scaling: 1.1
+
+gripper_controller:
+  ros__parameters:
+    type: position_controllers/GripperActionController
+    joint: gripper

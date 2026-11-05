@@ -35,10 +35,6 @@ def generate_launch_description():
                 moveit_config.robot_description,
                 {"publish_frequency": LaunchConfiguration("publish_frequency")},
             ],
-            remappings=[
-                # real時: 実機のjoint_statesをrspに渡す
-                ("/joint_states", "/follower/joint_states"),
-            ],
         )
     )
     return ld

@@ -131,3 +131,100 @@ static_virtual_joint_tfs, rsp, move_group, moveit_rviz, (warehouse_db: `db:=true
 - `colcon build --symlink-install`（`/opt/ros/humble` のみ source）: 7 パッケージ成功。
 - `demo.launch.py`（mock）: `move_group`、`robot_state_publisher`、`controller_manager`、`joint_state_broadcaster`（active）が起動。arm / gripper は上記 3 により未 spawn。`/follower` ノードは存在しない。
 - 実機は起動していない。
+
+---
+
+# 段階2a: パッケージ改名と bringup 統合（2026-11-05）
+
+## パッケージ名の対応
+
+| 旧 | 新 |
+|---|---|
+| so101_description | so_arm101_description |
+| so101_moveit_config | so_arm101_moveit_config |
+| so101_controller | so_arm101_controller |
+| so101_hardware_interface | so_arm101_hardware |
+| so101_ros2_bridge | so_arm101_lerobot_bridge（暫定名。段階2bで置き換え。`so_arm101_bridge` は rosbridge 用に予約） |
+| so101_bringup | so_arm101_bringup |
+| apriltag_test | （2a の対象外、変更なし） |
+
+変更したのはパッケージ名のみ（ディレクトリ、package.xml、CMake、Python モジュール名、`package://` と `$(find)`、プラグイン名 `so_arm101_hardware/So101HardwareBridge`）。URDF のリンク名・関節名・フレーム名、C++ の namespace・クラス名・ライブラリ名、実行ファイル名、launch ファイル名は変えていない。
+
+## 起動入口
+
+`so_arm101_bringup/launch/bringup.launch.py`（引数 `mock`、既定 true / `use_rviz` / `db`）と、これにカメラを加えた `bringup_with_cameras.launch.py`。
+
+- 共通（ルート名前空間）: static TF（world→base_link）、`robot_state_publisher` 1つ、`ros2_control_node` 1つ、spawner（3 秒遅延）、move_group、RViz。
+- `mock:=true`: `mock_components/GenericSystem`。
+- `mock:=false`: `So101HardwareBridge` + LeRobot bridge ノード（`type:=follower`、namespace なし）を追加で起動。
+- `/follower` 名前空間と TF の `follower/` プレフィックスは廃止した。
+
+## /follower をルートに揃えた方法
+
+bridge と `So101HardwareBridge` のトピック名（`joint_commands`、`joint_states_raw`）は相対名で、`/follower` は起動側が付けた namespace だけだった（`ros2_control_node` の `__ns` がプロセス内の全ノードに効くため、プラグイン内ノードも同じ namespace になっていた）。bridge のコード変更は不要で、launch から `namespace=` を外した。実機のトピックは `/joint_commands`、`/joint_states_raw`、`/joint_states`（joint_state_broadcaster）。
+
+## コントローラ設定の統合
+
+統合先: `so_arm101_controller/config/controllers.yaml`（ルート）。
+
+| 項目 | moveit_config `ros2_controllers.yaml` | 旧実機側 `/follower` | 統合後 |
+|---|---|---|---|
+| cm `update_rate` | 50 | 50 | 50 |
+| arm `type` | なし | JointTrajectoryController | あり |
+| arm `update_rate` | なし | 25 | 25 |
+| arm `gains`（p/i/d=0） | なし | あり | 引き継ぎ |
+| arm `open_loop_control` | なし | true | **true（引き継ぎ済み。起動後に `ros2 param get` で True を確認）** |
+| arm `state_publish_rate` | なし | 50.0 | 50.0（確認済み） |
+| arm `action_monitor_rate` | なし | 20.0 | 20.0 |
+| arm `time_scaling` | なし | 1.1 | 1.1 |
+| gripper `type` | なし | あり | あり |
+| `/leader` ブロック | - | あり | 廃止 |
+
+`ros2_controllers.yaml`（moveit_config）は無変更のまま未使用（Setup Assistant の再生成で上書きされるため）。原本の `so101_controllers.yaml` は `archive/stage2a/controller/config/` に保存。
+
+## MoveIt 側の変更（承認済み A〜F）
+
+| # | 対象 | 変更 |
+|---|---|---|
+| A | `config/moveit_controllers.yaml` | `follower/` プレフィックスを削除（controller_names と2つのキー） |
+| B | `launch/move_group.launch.py` | `/joint_states`→`/follower/joint_states` のリマップを削除 |
+| C | `launch/rsp.launch.py` | 同上 |
+| D | `config/so101_new_calib.ros2_control.xacro` | real 分岐を `JointStateTopicSystem`+`/follower/*` から `so_arm101_hardware/So101HardwareBridge` に置換。関節定義は変更なし（mock/real で関節とリンクの一覧が同一であることを確認） |
+| E | `config/servo.yaml` | 2 行から `/follower` を削除 |
+| F | `launch/demo.launch.py` | `archive/stage2a/` へ移動 |
+
+SRDF、kinematics、joint_limits、pilz、initial_positions、`ros2_controllers.yaml`、URDF は変更していない。
+
+## 段階1の既知の問題の解消
+
+| 問題 | 結果 |
+|---|---|
+| 1. MoveIt の送信先が `/follower` | 解消。A・B・C・E |
+| 2. mock と MoveIt の名前空間の食い違い | 解消。全てルート |
+| 3. spawner が不正ノード名で失敗 | 解消。A。arm / gripper / joint_state_broadcaster の 3 つが active |
+| 4. real 時に `ros2_control_node` が無い | 解消。モードに関わらず常に 1 つ起動 |
+| 5. rsp 二重 | 解消。rsp は 1 つ |
+| 6. SRDF の warning（`Link 'elbow_flex' is not known to URDF`） | **未解消**。SRDF は変更禁止のため記録のみ |
+
+## archive/stage2a/ に移したもの（理由は `archive/stage2a/README.md`）
+
+bringup の `so101_robot.launch.py`、`include/follower.launch.py`、`robot_display*.rviz`。controller の launch 2 つと旧 yaml。description の launch 3 つと `display.rviz`。moveit_config の `demo.launch.py`。`build/install/log` は `archive/stage1_build/`（gitignore）へ退避。
+
+## 文字列のみ変更
+
+`io.yaml`、`runner.py`（ポリシー用、未使用）の `/follower/...` と、`so101_usb_cam.yaml` の `/follower/cam_front` をルートにした。
+
+## 検証結果
+
+- `colcon build`（`/opt/ros/humble` のみ source）: 7 パッケージ成功（改名後と統合後の両方）。
+- `mock:=true`（`use_rviz:=false`）: `/follower` を含むノード・トピック・アクションなし。`robot_state_publisher` 1、`ros2_control_node` 1。`arm_controller` / `gripper_controller` / `joint_state_broadcaster` が active。
+- 軌道実行: `/arm_controller/follow_joint_trajectory` に goal → SUCCEEDED、関節が目標へ移動。`/move_action`（plan+execute、RViz の MotionPlanning が使う経路）→ SUCCEEDED、関節が目標付近へ移動。
+- `use_rviz:=true`: RViz が起動し controller は active のまま。ログのエラーは octomap センサ未定義と `/recognize_objects` 不在のみ。RViz 画面上の操作は未実施（人手で確認）。
+- `mock:=false`: **起動していない**。xacro 展開のみ確認（plugin が `So101HardwareBridge`、`/follower` 文字列なし）。実機での確認は未実施。
+
+## 残課題（段階2a の範囲外）
+
+- description の `so101_new_calib.urdf.xacro` / `ros2_control.xacro`（`mode` による real/isaac/gazebo 切替）は、launch が archive へ移ったため未使用。moveit_config 側の xacro と重複している。
+- 実機側の bridge は LeRobot 依存のまま（段階2bで置き換え予定）。
+- `so101_cameras.yaml` の実カメラは `cam_side` のみ。`camera.launch.py` は mock でも起動する。
+- xacro の `load_yaml() directly is deprecated` 警告。

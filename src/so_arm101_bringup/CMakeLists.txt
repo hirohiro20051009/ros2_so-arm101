@@ -11,7 +11,7 @@ find_package(ament_cmake REQUIRED)
 # manually. find_package(<dependency> REQUIRED)
 
 # Install other directories
-install(DIRECTORY config rviz DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
 install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}
         # FILES_MATCHING PATTERN "*.launch.py"

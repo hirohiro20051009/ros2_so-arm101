@@ -9,6 +9,13 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <exec_depend>so_arm101_description</exec_depend>
+  <exec_depend>so_arm101_moveit_config</exec_depend>
+  <exec_depend>so_arm101_controller</exec_depend>
+  <exec_depend>so_arm101_hardware</exec_depend>
+  <exec_depend>so_arm101_lerobot_bridge</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>usb_cam</exec_depend>
   <exec_depend>realsense2_camera</exec_depend>
   <!-- (Optional) if you use the RS URDF/meshes -->
