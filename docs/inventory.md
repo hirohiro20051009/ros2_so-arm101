@@ -228,3 +228,55 @@ bringup の `so101_robot.launch.py`、`include/follower.launch.py`、`robot_disp
 - 実機側の bridge は LeRobot 依存のまま（段階2bで置き換え予定）。
 - `so101_cameras.yaml` の実カメラは `cam_side` のみ。`camera.launch.py` は mock でも起動する。
 - xacro の `load_yaml() directly is deprecated` 警告。
+
+---
+
+# 段階2a 追補: 実機起動時の `Failed to send commands to robot: 10`（2026-11-05）
+
+## 症状と原因
+
+`mock:=false` で `follower_ros2_node` が 50 Hz（ros2_control の `update_rate`）で `Failed to send commands to robot: 10` を出し続け、腕が動かない。
+
+`/follower` 名前空間を外したことで、`so101_follower_params.yaml` が**初めて適用された**ため。
+
+- yaml の最上位キーは `so101_follower_interface`（先頭に `/` なし）。launch のノード名と一致するのは名前空間なしのときだけ。
+  段階1（`namespace=follower`、実ノードは `/follower/so101_follower_interface`）では適用されていなかった。
+- ダミーノードで実測（同一 launch 設定、宣言のみ。ハード・LeRobot には触れない）:
+
+  | namespace | `max_relative_target` | `publish_rate` |
+  |---|---|---|
+  | follower（段階1相当） | 0 | 30.0 |
+  | なし（2a） | 10 | 50.0 |
+
+- `bridge.py:251-254` は int の `max_relative_target` を取り、`0` のときだけ `None` に変換する。非0 の int はそのまま `SO101FollowerConfig` に渡る。
+- LeRobot 0.4.2 の `ensure_safe_goal_position`（`lerobot/robots/utils.py:76-83`）は `float` と `dict` のみ許容し、それ以外は `raise TypeError(max_relative_target)`。`isinstance(10, float)` は False なので `TypeError(10)`。`send_action` は `sync_write` の前に例外となり、腕に指令が届かない。
+- yaml に `10.0` と書く方法も不可（宣言が int なので型不一致）。
+
+## 修正
+
+`so_arm101_lerobot_bridge/config/so101_follower_params.yaml`:
+
+| キー | 旧 | 新 |
+|---|---|---|
+| `max_relative_target` | 10 | **0**（無制限＝None。段階1と同じ） |
+| `publish_rate` | 50.0 | **30.0**（段階1と同じ。今回のエラーの原因ではない） |
+
+`id`、`calibration_dir`、`use_degrees`、`disable_torque_on_disconnect` は変更していない。インストール済み yaml をダミーノードで読み、`max_relative_target=0`、`publish_rate=30.0` を確認した。実機は起動していない。
+
+注意: `max_relative_target: 0` は 1 コマンドあたりの最大変位の安全上限を無効にする（段階1と同じ状態に戻るだけ）。上限を有効にしたい場合は、bridge で `float()` にする小変更が必要（未実施）。
+
+## 見つかった事実: キャリブレーションファイルが変わっていた
+
+yaml が未適用だった段階1では、`id` と `calibration_dir` もデフォルトだった。
+
+| | 段階1（yaml 無効） | 2a（yaml 有効） |
+|---|---|---|
+| `id` | `Tzili` | `so101_follower` |
+| ファイル | パッケージ同梱 `config/calibration/Tzili.json`（2026-03-09、上流由来） | `~/.cache/huggingface/lerobot/calibration/robots/so101_follower/so101_follower.json`（2026-09-07） |
+
+2 つのファイルは全関節で値が異なる（例: gripper の range は 1515〜3009 と 1900〜3385）。bridge は `connect(calibrate=False)` でモータには書き込まない。2a では自機のキャリブレーションが初めて使われていると考えられる（モータ側の値との一致は未確認）。段階1の角度変換は上流の `Tzili.json` に基づいていた可能性がある。このため `id` / `calibration_dir` は段階1相当に戻していない。
+同梱の `Tzili.json` / `Gili.json` は上流の他機体用で、`id` を変えない限り使われない。
+
+## 未確認
+
+実機（`mock:=false`）の実動作。ユーザーの確認待ち。

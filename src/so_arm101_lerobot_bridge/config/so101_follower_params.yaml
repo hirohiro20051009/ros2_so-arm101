@@ -5,6 +5,8 @@ so101_follower_interface:
     id: "so101_follower"
     calibration_dir: "/home/hirok/.cache/huggingface/lerobot/calibration/robots/so101_follower"
     use_degrees: true
-    max_relative_target: 10 # default is none
+    # 0 = 無制限(None)。整数の非0値は LeRobot の ensure_safe_goal_position が
+    # TypeError(10) にするため使えない(float のみ許容)。段階1(/follower 時はこの yaml が未適用)と同じ値
+    max_relative_target: 0
     disable_torque_on_disconnect: true
-    publish_rate: 50.0
+    publish_rate: 30.0  # 段階1と同じ値
