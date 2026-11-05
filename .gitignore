@@ -1,0 +1,18 @@
+# ROS 2
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Local backups
+*.bak
+*.bak_*
+*_org
+
+# Editor / OS
+*.swp
+*~
+.DS_Store

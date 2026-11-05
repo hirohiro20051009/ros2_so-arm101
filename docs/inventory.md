@@ -1,0 +1,133 @@
+# 旧ワークスペース `~/ros2_so101/src` インベントリ
+
+調査日: 2026-11-05 / 調査方法: 読み取りのみ（ファイルの変更・コピーなし）
+
+## 1. 概要
+
+- 対象: `~/ros2_so101/src`（`package.xml` 10個、トップレベル3ディレクトリ: `so101_ros2/`, `so101_moveit_config/`, `apriltag_test/`）
+- 由来は「寄せ集め」: nimiCurtis 製 `so101_ros2` 一式 + 自作の MoveIt 設定 + 自作の AprilTag 起動
+- **LeRobot 依存は `so101_ros2_bridge` に集中**しており、実機起動 `so101_robot.launch.py` は必ずこれを起動する
+
+## 2. ネストした .git の列挙
+
+| 場所 | .git | remote URL |
+|---|---|---|
+| `~/ros2_so101/src` 配下（全深度） | **0個**（`.gitmodules` も無し） | - |
+| `~/ros2_so101/.git`（親。src の1階層上） | 1個 | `https://github.com/hirohiro20051009/ros2_so101.git`（origin, fetch/push） |
+
+- `~/ros2_so101` 配下（build/install/log除く）に存在する .git は親の1個だけ。
+- src は親リポジトリが 225 ファイルを丸ごと追跡（履歴: "Track so101_ros2 source in parent repository" 等）。
+- `so101_ros2` と `system_data_recorder` は本来 clone / submodule だが、**.git が剥がされたベンダリング状態**。
+  したがって下表の「由来」のうち nimiCurtis 系は README / LICENSE / package.xml からの**推定**であり、
+  `git remote` で確認できた URL ではない。
+
+## 3. パッケージ表
+
+凡例: ○=使用 / ×=不使用。「起動で使用」は include を辿った推移的な使用を含む。
+
+| パッケージ | パス（src からの相対） | 由来 | 役割 | 主な依存 | LeRobot依存 | `so101_robot.launch.py` | `demo.launch.py` |
+|---|---|---|---|---|---|---|---|
+| so101_description | so101_ros2/so101_description | 推定: github.com/nimiCurtis/so101_ros2（MIT、maintainer Nimrod） | URDF/xacro/メッシュ/rviz。`rsp.launch.py` が `mode`(real/isaac/gazebo) で ros2_control プラグインを切替 | urdf, xacro, robot_state_publisher, controller_manager, rviz2, ign_ros2_control, topic_based_ros2_control, ros_gz_* | なし | ○ rsp.launch.py（`display:=true` で display.launch.py） | ○ moveit_config の urdf.xacro が `so101_new_calib.urdf` を include |
+| so101_controller | so101_ros2/so101_controller | 同上 | controller_manager 起動 + spawner（arm / gripper / joint_state_broadcaster）。`so101_controllers.yaml` | rclcpp, rclpy, controller_manager, so101_description | なし | ○ | ×（moveit_config 側に自前の ros2_controllers.yaml） |
+| so101_hardware_interface | so101_ros2/so101_hardware_interface | 同上 | ros2_control SystemInterface `So101HardwareBridge`（C++）。`joint_commands` を publish、`joint_states` を subscribe するトピック橋渡し。**Feetech を直接叩くわけではない** | hardware_interface, pluginlib, rclcpp_lifecycle, rmw_cyclonedds_cpp | 直接なし（相手の bridge ノード経由で間接依存） | ○ description の xacro が `mode=real` でプラグイン指定（launch には直接現れない） | × |
+| so101_ros2_bridge | so101_ros2/so101_ros2_bridge | 同上 | LeRobot の SO101Follower/Leader ↔ ROS2 トピック変換、SmolVLA policy runner。entry: `follower_ros2_node` / `leader_ros2_node` / `policy_runner_ros2_node` | rclpy（package.xml に lerobot の記載なし＝pip 側の暗黙依存） | **あり（強い）**: `bridge/bridge.py`, `bridge/build.py`, `utils/conversion.py`, `policy/smolvla.py` が `import lerobot.*`。config の `calibration_dir` が `~/.cache/huggingface/lerobot/calibration/...` | ○ `follower_ros2_node` のみ（leader / policy は未使用） | ×（real 運転時は `/follower/*` トピックで間接依存） |
+| so101_bringup | so101_ros2/so101_bringup | 同上 | ランチャ集。`so101_robot.launch.py` → `include/follower.launch.py`。ほか with_cameras / record / teleoperate、`include/{leader,camera,sim_isaac,policy}` | usb_cam, realsense2_camera, realsense2_description | なし（include 先で間接） | ○（本体） | × |
+| so101_teleop | so101_ros2/so101_teleop | 同上 | leader 腕 → follower の teleop（C++ component `LeaderTeleopComponent`）、MoveIt 連携 | moveit_*, control_toolbox, joy, tf2_eigen 等 | なし | × | × |
+| so101_ros2 | so101_ros2/so101_ros2 | 同上 | メタパッケージ（exec_depend のみ） | 上記 6 パッケージ | なし | × | × |
+| system_data_recorder | so101_ros2/ros2_externals/system_data_recorder | 推定: github.com/nimiCurtis/system_data_recorder（README に submodule として記載）。maintainer は Geoffrey Biggs (Open Robotics)、Apache-2.0 | rosbag2 記録（分割ファイルの外部バックアップ） | rosbag2_*, rclcpp_lifecycle, yaml_cpp_vendor | なし | ×（`so101_record.launch.py` からのみ） | × |
+| so101_moveit_config | so101_moveit_config | 自作（MoveIt Setup Assistant 生成物。maintainer hirok。package.xml の url は moveit2 の雛形のまま） | MoveIt 設定（SRDF / kinematics / joint_limits / servo）と `demo.launch.py`。`use_fake_hardware` で mock / 実機を切替 | moveit_ros_move_group, moveit_kinematics, moveit_planners, controller_manager, so101_description, warehouse_ros_mongo 等 | なし（real 時は `joint_state_topic_hardware_interface` で `/follower/*` を購読＝bridge 経由で間接依存） | × | ○（本体。default は `mock_components/GenericSystem`） |
+| apriltag_test | apriltag_test | 自作（`ros2 pkg create` の雛形のまま。description / license は TODO） | `apriltag_d415.launch.py` で apriltag_ros を D415 画像に接続、`tags_36h11.yaml` | package.xml に runtime 依存の宣言なし（実際は apriltag_ros, realsense2_camera が必要） | なし | × | × |
+
+## 4. 起動別の使用範囲
+
+### `so101_robot.launch.py`（so101_bringup）
+`include/follower.launch.py` を呼び、以下を起動する。
+1. so101_description `rsp.launch.py`（`mode:=real`, `type:=follower`）
+2. so101_ros2_bridge `so101_ros2_bridge.launch.py`（`follower_ros2_node`、**lerobot 使用**）
+3. so101_controller `controller_manager.launch.py`（3 秒遅延）
+4. so101_controller `so101_controllers.launch.py`（6 秒遅延、3 つの spawner）
+5. `display:=true` のとき so101_description `display.launch.py`（rviz、3 秒遅延）
+
+→ 使用パッケージ: bringup / description / ros2_bridge / controller / hardware_interface（プラグインとして）。**LeRobot 依存あり**。
+
+### `demo.launch.py`（so101_moveit_config）
+static_virtual_joint_tfs, rsp, move_group, moveit_rviz, (warehouse_db: `db:=true`), ros2_control_node（**`use_fake_hardware` が true のときのみ**）, spawn_controllers を起動する。
+
+- 既定（`use_fake_hardware:=true`）: `mock_components/GenericSystem`。**LeRobot 不要**。
+- `use_fake_hardware:=false`: `joint_state_topic_hardware_interface` が `/follower/joint_commands` / `/follower/joint_states` を使う。ただし現行 `demo.launch.py` は real 時に ros2_control_node を起動しない（`demo.launch.py.bak` には real 用ノードがあり、現行では削除されている）。bridge 側が別途起動している前提。
+
+## 5. 所見
+
+1. **LeRobot 依存は `so101_ros2_bridge` に集中**。実機経路（so101_robot.launch.py）はこれを必ず起動する。依存が無いのは demo の mock 経路のみ。
+2. 実機用 ros2_control プラグインが 2 系統併存している。
+   - description 側: `so101_hardware_interface/So101HardwareBridge`（トピック橋渡し）
+   - moveit_config 側: `joint_state_topic_hardware_interface/JointStateTopicSystem`
+
+   どちらも最終的に bridge（= lerobot）頼みで、目標の `so_arm101_hardware`（Feetech 直接）の置換対象。
+3. `so101_new_calib.ros2_control.xacro` が description と moveit_config に**重複**している（内容は別: 前者は mode 切替、後者は use_fake_hardware 切替）。MoveIt 本体の設定は変更禁止のため扱いに注意。
+4. 不要物の候補（事実の記録のみ。削除はせず、整理時は archive/ へ移動し理由を記録）:
+   `*.bak*`（`demo.launch.py.bak` 等、`so101_controllers.yaml.bak_before_openloop`）、`bridge/bridge.py_org`、`__pycache__`、`so101_ros2/docs/_build`、sim_isaac / policy 系 launch。
+5. 親リポジトリの `.gitignore` は `archive/`, `*.bak*`, `*_org`, `setup_so101.sh`, `readme.txt` 等を除外している。
+6. 参照元として src の外に `~/ros2_so101/test`（自作の解析 IK・Diff-IK・キャリブ用スクリプト）がある。目標構成の ik / calibration の元になるが、今回の調査範囲外なので詳細は扱わない。
+7. README が要求する forked LeRobot（`github.com/nimiCurtis/lerobot`）は src 外の Python 環境にあり、このインベントリには含まれない。
+
+## 6. 確度の注記
+
+- **確認済み**: .git の有無と親リポジトリの remote、package.xml の内容、launch の include 関係、`import lerobot` の箇所。
+- **推定**: nimiCurtis 系パッケージの GitHub 由来（README の clone 先 / LICENSE の著作権者 / maintainer 名による）。.git が無いため、どのコミットを取り込んだかは不明。
+- **未確認**: 実行時の挙動（launch は起動しておらず、コードの静的読解のみ）。サーボを動かすコマンドは一切実行していない。
+
+---
+
+# 段階1: 取り込み結果（2026-11-05）
+
+旧WS `~/ros2_so101/src` は読み取りのみ。新WS `src/` にパッケージ名を変えずにコピーした（階層は `src/<pkg>` に平坦化）。
+
+## 残したもの
+
+| パッケージ | 由来 | 範囲 |
+|---|---|---|
+| so101_description | 推定: nimiCurtis/so101_ros2 | 丸ごと |
+| so101_controller | 同上 | 丸ごと（`*.bak_before_openloop` を除く） |
+| so101_hardware_interface | 同上 | 丸ごと |
+| so101_ros2_bridge | 同上 | 丸ごと（`bridge.py_org`、`__pycache__` を除く）。leader / policy ノードも含む |
+| so101_bringup | 同上 | 下記の一部のみ |
+| so101_moveit_config | 自作（Setup Assistant 生成） | 丸ごと（`*.bak`、`__pycache__` を除く）。設定は未変更 |
+| apriltag_test | 自作（雛形） | 丸ごと |
+
+`so101_bringup` に残したファイル（follower と camera 系）:
+`launch/so101_robot.launch.py`, `launch/so101_robot_with_cameras.launch.py`, `launch/include/follower.launch.py`, `launch/include/camera.launch.py`, `rviz/*.rviz`（2個）, `config/{so101_realsense2,so101_usb_cam,so101_cameras}.yaml`, `CMakeLists.txt`, `package.xml`。
+
+## LICENSE
+
+`so101_ros2` の LICENSE（MIT, Copyright 2025 nimiCurtis）を `LICENSE.so101_ros2` として残した。取り込んだ so101_description / controller / hardware_interface / ros2_bridge / bringup が対象。
+
+## 外したものと理由
+
+| 対象 | 理由 |
+|---|---|
+| so101_teleop | leader 腕テレオペ用。目標構成（bridge 経由の座標・姿勢指令）で不要。他パッケージから参照なし |
+| so101_ros2（メタ） | exec_depend のみ。外したパッケージを含むため無意味 |
+| system_data_recorder | 模倣学習用の rosbag 記録。目標構成に無い（Apache-2.0、同梱しないためライセンス転記なし） |
+| bringup: leader / policy / sim_isaac / record / teleoperate の launch、`so101_sdr.yaml` | leader・LeRobot policy・Isaac Sim・記録は目標構成の範囲外。残す launch からの参照なし（静的に確認） |
+| `*.bak*`, `*_org`, `*.py_org`, `__pycache__`, `docs/_build`, `*.yaml_org` | バックアップ・生成物 |
+| so101_ros2 直下の README / CONTRIBUTING / docs / media / .github / build.sh / pyproject.toml 等 | パッケージではない。LeRobot 前提の手順が中心 |
+
+旧WSのファイルは削除していない。
+
+## 既知の問題（記録のみ。MoveIt 設定は変更していない）
+
+静的調査と mock 起動確認（`demo.launch.py use_rviz:=false`、40 秒）で判明した。
+
+1. **MoveIt の送信先は `/follower`**: `moveit_controllers.yaml` のコントローラ名は `follower/arm_controller`、`follower/gripper_controller`。アクションは `/follower/arm_controller/follow_joint_trajectory`、`/follower/gripper_controller/gripper_cmd`。`move_group` / `rsp` の `/joint_states` も `/follower/joint_states` にリマップされている。
+2. **mock の ros2_control はルート名前空間**: `ros2_controllers.yaml` は `/follower` なしのため、mock のコントローラ（`/arm_controller` 等）と食い違う。mock の `joint_state_broadcaster` は `/joint_states` に出すが、購読者は 0（`move_group` / `rsp` は `/follower/joint_states` を購読）。
+3. **mock 起動時に arm / gripper の spawner が失敗する**: `generate_spawn_controllers_launch` が `moveit_controllers.yaml` から spawner を作るため、`spawner_follower/arm_controller` が不正なノード名（`/` を含む）になり `InvalidNodeNameException` で落ちる。結果、active なのは `joint_state_broadcaster` のみ。mock では軌道実行できない。
+4. `demo.launch.py` は `use_fake_hardware:=false` のとき `ros2_control_node` を起動しない（`.bak` には存在した）。
+5. `demo.launch.py` 単体では `/follower` 側は起動しない。`so101_robot.launch.py` を同時起動すると、ルートの mock と `/follower` の実機側が併存し、`rsp` も二重になる。
+6. SRDF に関する warning（`Link 'elbow_flex' is not known to URDF`）が出る。
+
+## 検証結果
+
+- `colcon build --symlink-install`（`/opt/ros/humble` のみ source）: 7 パッケージ成功。
+- `demo.launch.py`（mock）: `move_group`、`robot_state_publisher`、`controller_manager`、`joint_state_broadcaster`（active）が起動。arm / gripper は上記 3 により未 spawn。`/follower` ノードは存在しない。
+- 実機は起動していない。
