@@ -16,3 +16,6 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# Archived generated build outputs
+archive/stage1_build/
