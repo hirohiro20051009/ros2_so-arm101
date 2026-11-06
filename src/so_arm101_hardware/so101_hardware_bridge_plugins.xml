@@ -1,9 +1,21 @@
-<library path="so101_hardware_bridge">
+<class_libraries>
+  <library path="so101_hardware_bridge">
     <class name="so_arm101_hardware/So101HardwareBridge"
            type="so101_hardware_interface::So101HardwareBridge"
            base_class_type="hardware_interface::SystemInterface">
       <description>
         A ros2_control hardware interface bridge that communicates with a Python hardware node for the SO101 robot.
+        (LeRobot bridge 経由。比較用に残す。)
       </description>
     </class>
-</library>
+  </library>
+  <library path="so_arm101_sts3215">
+    <class name="so_arm101_hardware/Sts3215System"
+           type="so_arm101_hardware::Sts3215System"
+           base_class_type="hardware_interface::SystemInterface">
+      <description>
+        Feetech STS3215 を直接読む SystemInterface。段階2b-2 は読み取り専用（レジスタに書き込まない、command は破棄）。
+      </description>
+    </class>
+  </library>
+</class_libraries>

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true">
+    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true hardware:=lerobot serial_port:=/dev/ttyACM0 calibration_file:='' read_only:=true">
         <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
 
         <ros2_control name="${name}" type="system">
@@ -10,9 +10,18 @@
                     <plugin>mock_components/GenericSystem</plugin>
                 </xacro:if>
                 <xacro:unless value="${use_fake_hardware}">
-                    <!-- 実機用: So101HardwareBridge。ルートの /joint_commands と /joint_states_raw で
-                         so_arm101_lerobot_bridge と接続する（段階2bで置き換え予定） -->
-                    <plugin>so_arm101_hardware/So101HardwareBridge</plugin>
+                    <xacro:if value="${hardware == 'feetech'}">
+                        <!-- 実機用(自前ドライバ): Feetech STS3215 を直接読む。段階2b-2 は読み取り専用 -->
+                        <plugin>so_arm101_hardware/Sts3215System</plugin>
+                        <param name="serial_port">${serial_port}</param>
+                        <param name="calibration_file">${calibration_file}</param>
+                        <param name="read_only">${read_only}</param>
+                    </xacro:if>
+                    <xacro:unless value="${hardware == 'feetech'}">
+                        <!-- 実機用(LeRobot 経由): So101HardwareBridge。ルートの /joint_commands と /joint_states_raw で
+                             so_arm101_lerobot_bridge と接続する -->
+                        <plugin>so_arm101_hardware/So101HardwareBridge</plugin>
+                    </xacro:unless>
                 </xacro:unless>
             </hardware>
             <joint name="shoulder_pan">

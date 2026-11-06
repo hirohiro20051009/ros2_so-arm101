@@ -405,3 +405,107 @@ SRDF、kinematics、joint_limits、`moveit_controllers.yaml`、`ros2_controllers
 
 - 2b-2: 変換スクリプト、読み取り専用ドライバ、テスト、比較スクリプト（書き込み・トルクには触れない）。
 - 2b-3: 書き込みモード（トルク ON、Goal_Position）。別途承認。
+
+---
+
+# 段階2b-2: 読み取り専用ドライバ `Sts3215System`（2026-11-06）
+
+実機（サーボ）は動かしていない。実ポートも開いていない（結合確認は pty 上の偽サーボ）。実機比較はユーザーが `docs/feetech_readonly_check.md` に従って行う。
+
+## 追加・変更したファイル
+
+**新規**
+| ファイル | 内容 |
+|---|---|
+| `src/so_arm101_hardware/include/so_arm101_hardware/{serial_port,sts3215_bus,calibration,sts3215_system}.hpp` | ヘッダ |
+| `src/so_arm101_hardware/src/{serial_port,sts3215_bus,calibration,sts3215_system}.cpp` | termios シリアル / 読み取り専用バス / yaml 読込と変換 / `SystemInterface` |
+| `src/so_arm101_hardware/config/follower_calibration.yaml` | 自前キャリブ yaml（変換元 `so101_follower.json`、2026-09-07、変換日 2026-11-06） |
+| `src/so_arm101_hardware/test/test_conversion.cpp` | 変換の正解表照合ほか |
+| `src/so_arm101_hardware/test/test_sts3215_bus.cpp` | パケット・エラー処理（pty 上の偽サーボ） |
+| `src/so_arm101_hardware/test/data/conversion_golden.csv` | LeRobot 0.4.2 `_normalize` による正解表（24,596 行、1.3 MB） |
+| `tools/convert_lerobot_calibration.py` | json → yaml 変換（一回だけ使う。lerobot を import しない） |
+| `tools/gen_conversion_golden.py` | 正解表の生成（lerobot を使う開発用。シリアルは開かない） |
+| `tools/record_joint_states.py` | `/joint_states` を指定秒数記録して CSV に保存 |
+| `tools/compare_joint_states.py` | 2 つの CSV を関節ごとに比較（平均・最大・標準偏差、rad と tick、合否） |
+| `tools/lerobot_readonly_state.py` | 【比較専用】LeRobot の bus を読み取り専用で開いて CSV 記録（実機ポートを開く。書き込みを不可能にしてある） |
+| `tools/fake_sts3215.py` | pty 上の偽サーボ（結合確認用） |
+| `docs/third_party.md` | LeRobot 0.4.2（Apache-2.0）等の出典とライセンス |
+| `docs/feetech_readonly_check.md` | ユーザー向け実機確認手順（コマンドつき） |
+
+**変更**
+| ファイル | 変更 |
+|---|---|
+| `src/so_arm101_hardware/{CMakeLists.txt,package.xml,so101_hardware_bridge_plugins.xml}` | 新ライブラリ `so_arm101_sts3215`、yaml-cpp、gtest、プラグイン登録（ルートを `<class_libraries>` に変更し 2 クラス） |
+| `src/so_arm101_moveit_config/config/so101_new_calib.urdf.xacro` | **G**: `xacro:arg` 4 つ（hardware, serial_port, calibration_file, read_only）を追加しマクロへ渡す |
+| `src/so_arm101_moveit_config/config/so101_new_calib.ros2_control.xacro` | **H**: マクロ引数を追加。`hardware=='feetech'` で `Sts3215System` と `<param>`（serial_port, calibration_file, read_only）。それ以外は従来の `So101HardwareBridge`。関節定義は不変 |
+| `src/so_arm101_bringup/launch/bringup.launch.py` | `hardware:=lerobot｜feetech`（`mock:=false` のときだけ有効、既定 lerobot）、`serial_port`、`calibration_file`、`read_only` を追加。rsp を bringup 内の Node にした |
+| `src/so_arm101_bringup/launch/bringup_with_cameras.launch.py` | `hardware` を引き継ぐ |
+| `docs/inventory.md` | この節 |
+
+MoveIt の他の設定（SRDF、kinematics、joint_limits、moveit_controllers.yaml、ros2_controllers.yaml、URDF のリンク・関節・フレーム）は変更していない。
+
+## ドライバの仕様
+
+- **書き込み禁止**: バスクラスが送れる命令は `Read(0x02)` と `SyncRead(0x82)` だけ。書き込み系（WRITE / REG_WRITE / ACTION / SYNC_WRITE）は型として存在しない。トルクにも触れない。テスト（`NeverSendsAnythingButReadInstructions`）で、偽サーボが受けた命令コードが 0x02 / 0x82 のみであることを確認。結合確認でも偽サーボが「想定外の命令」を受けていない。
+- **読み取り**: 周期ごとに全関節の `Present_Position`(reg56) を 1 回 SYNC_READ。bit15 を sign-magnitude として解釈。ステータスパケットごとにチェックサム・ID・ERR バイト・長さを検証。
+- **起動時診断**（読み取りのみ）: 各関節の Model_Number(777 以外は起動中止)、Return_Delay_Time、Homing_Offset(**bit11 の sign-magnitude**)、Min/Max_Position_Limit を読み、yaml の `eeprom.*` と比較。関節ごとに 1 行ログ（一致は INFO `MATCH`、差があれば WARN `MISMATCH homing_offset(servo A, yaml B)` 等）。最後に `n/6 joints match`。不一致でも止まらない。
+- **読み取り失敗の扱い**:
+  1. 失敗（タイムアウト / チェックサム / ID 不一致 / ERR / 長さ不正）したら受信バッファを捨てて **1 回再試行**。
+  2. 再試行も失敗したら前回値を保持し、`read failed (...); consecutive=n/10; holding previous values` を WARN（最初の 1 回と 10 回ごと）。
+  3. **連続 10 回**失敗で `read()` が `ERROR` を返し、**state を NaN にする**（古い値が有効値として流れ続けない）。controller_manager はハードウェアを `unconfigured` にして、`/joint_states` は NaN になる（結合確認で確認）。
+  4. 復帰したら `read recovered after n consecutive failures`。再試行・失敗の回数は deactivate 時に `reads / retried / failed_cycles` として INFO に出す。
+  5. 後続 ID が先に応答した場合は「その ID は無応答」として Timeout 扱い（欠落サーボの原因が分かるように）。
+  - 既定値: パケットあたりのタイムアウト 10 ms、連続失敗の上限 10（ハードウェアパラメータ `timeout_ms` / `max_consecutive_failures` で変更可。xacro は出していない）。
+- **command は破棄**: `write()` は何もしない。command は read のたびに state へ追従させる（`open_loop_control: true` を維持）。起動時に WARN を 1 回（`READ-ONLY mode: ... commands are DISCARDED. The arm will not move.`）。さらに実際に指令と実測が 0.02 rad 以上ずれたとき 1 回だけ WARN。
+- **velocity の state**: 現状の `So101HardwareBridge` と同じ**位置の有限差分**。`So101HardwareBridge` は LeRobot bridge が計算した値をそのまま受ける（`bridge.py:138-143`: `(pos − 前回pos) / dt`、フィルタなし、最初の 1 回は 0.0、publish_rate 30 Hz）。`Sts3215System` も `(pos − 前回pos) / dt`（dt は controller_manager の時刻差、50 Hz）、フィルタなし、起動後の最初の 1 回は 0.0。静止していても 1 tick の量子化で最大 0.077 rad/s のノイズが出る（1 tick = 0.00153 rad ÷ 0.02 s）。
+- **排他**: `TIOCEXCL` でポートを排他にする。他のプロセスが開いていれば起動時に `cannot open serial port` で失敗する。
+- 変換は純関数 `raw_to_rad(const JointCalibration&, int angle_ticks, int raw)`（`calibration.cpp`）として切り出し、テストから直接呼んでいる。
+
+## 変換の検証（ハード不要）
+
+LeRobot 0.4.2 `MotorsBus._normalize()` を**接続せずに**直接呼んで正解表を作った（`tools/gen_conversion_golden.py`。`PortHandler.openPort` を例外にしてシリアルを開けないようにしている）。出典: `lerobot/motors/motors_bus.py` の `MotorsBus._normalize()`（Apache-2.0、`docs/third_party.md`）。
+
+- **LeRobot の clamp をソースで確認した**（`motors_bus.py:783`）: `bounded_val = min(max_, max(min_, val))`。これは RANGE_M100_100 と RANGE_0_100 に使われ、**DEGREES は `val` をそのまま使う（clamp なし）**（790-793）。したがって C++ も gripper は `[min,max]` に clamp、angle 関節は clamp なし。
+- 正解表: 全 6 関節 × raw 0〜4095 の全値 + 範囲外 3 点（−100、4096、5000）= 各 4,099 点、計 24,594 点。
+- **一致の基準: |Δrad| ≤ 1e-12**。どちらも IEEE754 double で数回の四則演算だけで、演算順序も LeRobot に合わせている（`(raw − center)·360/angle_ticks` の後に `·(π/180)`、CPython の `math.radians` と同じ）。誤差は 1e-15 程度のはずで、基準には 3 桁の余裕がある。
+- **結果: 全 6 関節で最大誤差 0 rad（ビット単位で一致）**。gripper の clamp（範囲外の raw が 0 と 100% になる）と angle 関節の clamp なし（raw=0 で −184.4°）も確認。
+
+テスト結果（`colcon test --packages-select so_arm101_hardware`）: `test_conversion` 7 件 PASSED、`test_sts3215_bus` 15 件 PASSED、失敗 0。
+- `test_conversion`: 正解表との一致 / gripper の clamp / angle の clamp なし / gripper の tick 換算 / yaml の内容 / 壊れた yaml の拒否 / sign-magnitude。
+- `test_sts3215_bus`: 要求パケットのバイト列（SDK と一致）/ 書き込み系命令が型に無い / SYNC_READ・READ / タイムアウト（失敗 ID の特定）/ チェックサム不良 / ERR バイト / ID 不一致 / 前に雑音が入るケース / 失敗後の復帰 / ポート未オープン / 書き込み命令を送らないこと / ポートの排他。
+
+## 結合確認（pty 上の偽サーボ。実機・実ポートは開いていない）
+
+`tools/fake_sts3215.py` に対して `bringup.launch.py mock:=false hardware:=feetech serial_port:=<pty>` を起動。
+- 起動時診断が 6 関節とも MATCH（`6/6 joints match`）。Homing_Offset を −140 にした偽サーボでは該当関節だけ WARN `MISMATCH homing_offset(servo -140, yaml 112)`（負の値の bit11 デコードも確認）。
+- `/joint_states` は期待値どおり（pan: raw 2197 → 0.15267 rad、gripper: raw 2400 → 0.5877 rad）、velocity は静止で 0。コントローラ 3 つ active、50 Hz。
+- 一時的な無応答（0.15 s）→ `read recovered after 7 consecutive failures`。長い無応答 → 連続 10 回で ERROR、ハードウェアが `unconfigured`、`/joint_states` が NaN。
+- 実在しないポートを指定 → `cannot open serial port: open(...) failed: No such file or directory` を出して `ros2_control_node` が停止。LeRobot bridge は起動しない。
+- `hardware:=feetech` が LeRobot を使っていないこと: 環境変数が空の環境で、`follower_ros2_node` / lerobot / miniforge3 を含むプロセスなし、bridge 系ノード・トピックなし、`ros2_control_node` の maps に lerobot / miniforge3 なし（0）、`libso_arm101_sts3215.so` の依存に python / lerobot / conda なし。
+
+## mock の回帰（変更なし）
+
+- `mock:=true`: `mock_components/GenericSystem`、rsp 1・ros2_control_node 1、コントローラ 3 つ active、`/follower` なし、`open_loop_control` True、`FollowJointTrajectory` と `/move_action`（plan+execute）が SUCCEEDED。
+- **`mock:=true hardware:=feetech serial_port:=/tmp/nonexistent_tty` でも結果は同じ**（hardware / serial_port は無視される。ログに Sts3215 / ポートの記述なし）。
+- xacro 展開: mock では `hardware` に関わらず `mock_components/GenericSystem`、`mock:=false` は `hardware:=lerobot`（既定）で `So101HardwareBridge`、`hardware:=feetech` で `Sts3215System`。関節・リンク・limit の定義は全ケースで同一（md5 一致）。
+- bridge の起動条件（`mock=false` かつ `hardware=lerobot` のときだけ）を 8 通りで評価して確認。`mock:=false hardware:=lerobot` の起動は実機に触れるので実行していない。
+
+## 2b-1 の計画から変えた点
+
+1. バスクラスに `ping` を作っていない。機種番号の読み取り（reg3）が存在確認を兼ねる。
+2. xacro H の `<param>` は `serial_port` / `calibration_file` / `read_only` の 3 つ。`baudrate` は yaml の `bus.baudrate` を使う（二重定義を避ける）。`timeout_ms` / `max_consecutive_failures` はハードウェアパラメータとして読むが xacro は出さない。
+3. rsp は `moveit_config` の `rsp.launch.py`（新しい mappings を渡せない）を使わず、bringup 内の Node にした。`ros2_control_node` と同じ `robot_description` になる。`rsp.launch.py` 自体は無変更・未使用。
+4. 変換の一致基準を 1e-9（2b-1 の案）から **1e-12** に厳しくした（実測は 0）。
+5. 連続失敗時に **state を NaN にする**処理を追加。結合確認で、ERROR 後はハードウェアが `unconfigured` になるが `/joint_states` は 50 Hz で配信され続けることが分かった。そのとき値が前回値のまま流れる可能性があったため NaN にした（修正前の値そのものは確認していない。修正後は NaN になることを確認）。
+6. 比較の「最大差」を「A と B の全サンプルの組合せで最悪の差」と定義した（`max(|minA−maxB|, |maxA−minB|)`）。両者に ±1 tick の揺らぎがあると、平均が同じでも 2 tick になりうる（合格基準の上限ちょうど）。
+7. `tools/fake_sts3215.py`（偽サーボ）を追加した（結合確認用）。
+8. `read_only` の launch 引数は `true` のみ許可（`false` は xacro 側にも来ない。万一渡るとドライバが起動を拒否する）。
+9. テスト用の正解表 CSV を 1.3 MB でコミットする（全 raw 値を網羅するため）。
+
+## 残課題（段階2b-2 以降）
+
+- Eye-to-Hand の TF（11/04）と ~/ros2_so101/test の数値は Tzili.json で変換した関節角が前提。新環境で取り直す（段階2e）
+- 実機での比較（`docs/feetech_readonly_check.md`）は未実施。サーボ EEPROM の Homing_Offset / limit が json と一致しているかは、実機で起動時診断を見るまで不明。
+- 角度の分母 `angle_ticks: 4095`（LeRobot 等価）は物理的には 4096 の可能性がある。誤差は最大でも 1500 tick で約 0.4 tick。段階2c で再検討。
+- 書き込みモード（トルク ON、Goal_Position）は段階2b-3（別途承認）。段階2c は Homing_Offset / Min/Max_Position_Limit の書き込み、MIN/MAX の記録手順、yaml への保存が必要（設計は「段階2b-1」）。
+- `hardware:=feetech` は 50 Hz の SYNC_READ を 1 サイクルで実行する。実機での往復時間（Return_Delay_Time の現在値を含む）は未測定。失敗が頻発する場合は `timeout_ms` を調整する。

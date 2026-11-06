@@ -15,12 +15,14 @@ def generate_launch_description():
     args = [
         DeclareLaunchArgument('mock', default_value='true'),
         DeclareLaunchArgument('use_rviz', default_value='true'),
+        DeclareLaunchArgument('hardware', default_value='lerobot'),
     ]
     bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(bringup_pkg, 'launch', 'bringup.launch.py')),
         launch_arguments={
             'mock': LaunchConfiguration('mock'),
             'use_rviz': LaunchConfiguration('use_rviz'),
+            'hardware': LaunchConfiguration('hardware'),
         }.items(),
     )
     cameras = IncludeLaunchDescription(
