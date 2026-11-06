@@ -307,3 +307,101 @@ yaml が未適用だった段階1では、`id` と `calibration_dir` もデフ�
 | 既知の問題1〜5 | 解消 |
 | 既知の問題6（SRDF の warning） | 未解消（問題2と同じ SRDF の課題として段階2b 以降） |
 | 問題2 | 回避方法あり。根本対応は段階2b 以降 |
+
+---
+
+# 段階2b-1: Feetech 自前ドライバの調査と設計（2026-11-06）
+
+方針: 最終的に LeRobot（コードもキャリブファイルも）に依存しない。`so101_follower.json`（2026-09-07 作成）は yaml を作るための**一回だけの変換元**で、ドライバは json を読まない。比較の基準は「`so101_follower.json` を使った LeRobot 経由の `/joint_states`」（段階1の `Tzili.json` ではない）。
+**[事実]** = ソースで確認、**[推測]** = 未確認。`SP` = `~/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages`（参照のみ。import しない）。
+
+## 変換の連鎖
+
+```
+サーボ Present_Position(reg56, 2B, bit15=符号)
+ → decode_sign_magnitude(bit15)              SP/lerobot/motors/motors_bus.py:1088, encoding_utils.py:29
+ → _normalize()                              motors_bus.py:770-797
+     angle(DEGREES):       deg = (raw − (min+max)/2)·360/4095        :790-793（clamp なし、分母は 4095）
+     gripper(RANGE_0_100): pct = (clamp(raw,min,max)−min)/(max−min)·100   :787-789
+ → obs["<joint>.pos"]                        robots/so101_follower/so101_follower.py:173-191
+ → bridge: rad = math.radians(値)            so_arm101_lerobot_bridge/bridge/bridge.py:132-133（use_degrees=true）
+ → /joint_states_raw → So101HardwareBridge → joint_state_broadcaster → /joint_states
+```
+
+- モータ定義: angle 5 関節 = `MotorNormMode.DEGREES`、gripper = `RANGE_0_100`（`so101_follower.py:48-59`）。
+- **ソフト変換で使うのは `range_min/max` だけ**。`homing_offset` はサーボの EEPROM(reg31) に書かれる値で、`Present_Position = Actual_Position − Homing_Offset`（`feetech/feetech.py:283-292`）。**読んだ raw に既に含まれる**。bridge は `connect(calibrate=False)`（`bridge.py:103`）なので書き込まない。
+- `drive_mode` は全関節 0。DEGREES 分岐は参照しない（`motors_bus.py:779` で取得、790-793 で未使用）→ angle 関節に符号反転はない。
+- gripper: LeRobot は 0〜100%、bridge はこれを**度とみなして `radians()`**（`bridge.py:132-133`）。gripper_rad = pct·π/180（0〜1.745 rad、URDF 上限 1.74533 と一致）。
+- 1 tick = 2π/4095 = 0.0015344 rad（angle 関節）。
+
+`so101_follower.json`（2026-09-07）の値:
+
+| joint | id | range_min | range_max | center=(min+max)/2 | homing_offset |
+|---|---|---|---|---|---|
+| shoulder_pan | 1 | 743 | 3452 | 2097.5 | 135 |
+| shoulder_lift | 2 | 842 | 3216 | 2029.0 | 112 |
+| elbow_flex | 3 | 862 | 3088 | 1975.0 | 122 |
+| wrist_flex | 4 | 889 | 3185 | 2037.0 | 89 |
+| wrist_roll | 5 | 164 | 3965 | 2064.5 | 1164 |
+| gripper | 6 | 1900 | 3385 | （linear 0→min, 100→max） | 107 |
+
+## STS3215 通信仕様（`SP/lerobot/motors/feetech/tables.py`、`SP/scservo_sdk/`）
+
+- プロトコル 0、**1,000,000 bps**、8 データビット（`port_handler.py:92-107`）。ポートは `/dev/ttyACM0`（`so101_follower_params.yaml`）。
+- パケット `FF FF <ID> <LEN> <INST> <PARAM…> <CHK>`、`CHK = ~sum(ID..PARAM) & 0xFF`（`protocol_packet_handler.py:69-100`）。応答 `FF FF <ID> <LEN> <ERR> <DATA…> <CHK>`、`LEN`=データ長+2。
+- 命令: PING=1, READ=2, WRITE=3, SYNC_READ=0x82, SYNC_WRITE=0x83, BROADCAST=0xFE（`scservo_def.py`）。SYNC_READ 要求: `ID=0xFE, LEN=n+4, INST=0x82, [addr, 長さ, id1…idn]`（`protocol_packet_handler.py:431-447`）。応答は**各サーボが個別のステータスパケットを順に返す**（`group_sync_read.py:66-69`）。
+- レジスタ（`tables.py:41-101`）: Model_Number(3,2) / ID(5) / Return_Delay_Time(7) / Min_Position_Limit(9,2) / Max_Position_Limit(11,2) / Homing_Offset(31,2) / Torque_Enable(40) / Goal_Position(42,2) / Lock(55) / **Present_Position(56,2)**。
+- 符号は sign-magnitude: Present/Goal_Position は bit15、Homing_Offset は bit11（`tables.py:207-215`）。リトルエンディアン。
+- LeRobot の `SO101Follower.connect()` は `configure()`（`so101_follower.py:149-171`）で書き込み、最後に Torque_Enable=1/Lock=1 を書く＝**bridge 起動中はトルク ON**。`disconnect()` は `disable_torque_on_disconnect: true` で Torque_Enable=0/Lock=0（`motors_bus.py:450-469`）＝**bridge 停止で腕が脱力する**。
+- **[推測]** EEPROM の現在値（homing_offset など）が json と一致しているか、Return_Delay_Time の現在値は未確認。2b-2 の起動時診断（読み取りのみ）で確認する。
+
+## yaml の置き場所と形式
+
+置き場所: `src/so_arm101_hardware/config/follower_calibration.yaml`（この腕固有の値。コミットする）。
+段階2c は**同じ形式の中身を差し替えるだけ**にする。
+
+```yaml
+schema_version: 1
+source: {kind: converted_from_lerobot_json, file: <json のパス>, file_date: 2026-09-07, converted_at: <日付>}
+bus: {baudrate: 1000000, protocol: 0}
+conversion: {angle_ticks: 4095}        # LeRobot 等価。物理的には 4096 の可能性（2c で再検討）
+joints:                                # URDF の関節名で引く
+  shoulder_pan: {id: 1, kind: angle, direction: 1, center: 2097.5, min: 743, max: 3452,
+                 eeprom: {homing_offset: 135, min_limit: 743, max_limit: 3452}}
+  gripper:      {id: 6, kind: linear_percent, direction: 1, min: 1900, max: 3385, eeprom: {...}}
+```
+
+- angle: `rad = direction·(raw − center)·2π/angle_ticks`（clamp なし）。
+- linear_percent: `pct = (clamp(raw,min,max)−min)/(max−min)·100`（`direction=−1` なら `100−pct`）、`rad = radians(pct)`。
+- `center` は LeRobot 等価では (min+max)/2 だが明示的に保持する。`eeprom.*` は**変換に使わない診断専用**（EEPROM の実値との比較用）。
+
+**段階2c で「LeRobot に頼らない」ために必要なもの**: ① `Homing_Offset` の書き込み（sign-magnitude bit11。EEPROM 書込みには Torque_Enable=0 と Lock=0 が必要。値は `pos − int((4096−1)/2)`、事前に offset=0・limit=0〜4095 へリセット: `motors_bus.py:660-711`、`feetech.py:283-292`）② `Min/Max_Position_Limit` の書き込み ③ 脱力状態での MIN/MAX 記録手順 ④ yaml への保存。`wrist_roll` は span 3801 tick（ほぼ 1 回転）で、homing_offset が無いと 0/4095 で値が折り返すため、②③ とあわせて省略できない。⑤ 書き込み経路（2b-3）が前提。
+
+## ドライバ設計
+
+`so_arm101_hardware` に新クラス `so_arm101_hardware/Sts3215System`（`hardware_interface::SystemInterface`）を追加。`So101HardwareBridge` は比較用に残す。シリアルは **termios 直書き**（追加依存なし。libserial / Boost.Asio / 公式 C++ SDK は採用しない。公式 SDK は rosdep に無くライセンス未確認）。追加依存は yaml-cpp のみ。
+
+| ファイル | 役割 |
+|---|---|
+| `serial_port.{hpp,cpp}` | termios（`B1000000`、8N1、raw、`poll` 付き read、`TIOCEXCL`） |
+| `sts3215_bus.{hpp,cpp}` | パケット組立・チェックサム・`ping`・`read`・`sync_read`・sign-magnitude。**書き込み API を持たない** |
+| `calibration.{hpp,cpp}` | yaml 読込と raw→rad の純関数 |
+| `sts3215_system.{hpp,cpp}` | `SystemInterface`。Present_Position の読み取りのみ。`write()` は何もしない |
+
+launch: `bringup.launch.py` に `hardware:=lerobot|feetech`（`mock:=false` のときだけ有効、既定 `lerobot`）、`serial_port`、`calibration_file`、`read_only` を追加。`mock:=true` の挙動は変えない。
+
+## MoveIt 設定の変更（G・H。承認済み）
+
+SRDF、kinematics、joint_limits、`moveit_controllers.yaml`、`ros2_controllers.yaml`、URDF のリンク・関節・フレームは変更しない。
+
+- **G** `so_arm101_moveit_config/config/so101_new_calib.urdf.xacro`: `xacro:arg` を 4 つ追加（`hardware`=lerobot、`serial_port`=/dev/ttyACM0、`calibration_file`=空、`read_only`=true）し、`so101_new_calib_ros2_control` マクロへ渡す。
+- **H** `so_arm101_moveit_config/config/so101_new_calib.ros2_control.xacro`: マクロの引数に同じ 4 つを追加。`use_fake_hardware` が false の分岐を `hardware == 'feetech'` で分け、feetech のとき `<plugin>so_arm101_hardware/Sts3215System</plugin>` と `<param>`（`serial_port`、`calibration_file`、`read_only`）を出す。それ以外は現行の `So101HardwareBridge`。関節定義は不変。
+
+## 比較の前提（実機手順は 2b-2 で docs に書く）
+
+同じポートは同時に使えない。LeRobot 経路は起動中トルク ON、停止でトルク OFF（腕が落ちる）。基準は「LeRobot 経路で記録 → 停止（腕に手を添える）→ 同じ姿勢で feetech を記録」。合格基準: 静止姿勢で各関節の平均差 ≤ 1 tick、最大差 ≤ 2 tick、EEPROM の homing_offset / limit が json と一致。
+
+## 段階 2b-2 以降
+
+- 2b-2: 変換スクリプト、読み取り専用ドライバ、テスト、比較スクリプト（書き込み・トルクには触れない）。
+- 2b-3: 書き込みモード（トルク ON、Goal_Position）。別途承認。
