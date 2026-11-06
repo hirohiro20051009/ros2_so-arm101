@@ -16,6 +16,30 @@ mkdir -p ~/so_arm101_check          # 記録の保存先（リポジトリの外
 - 同じシリアルポートは同時に開けない。LeRobot 経路と feetech 経路は**同時に起動しない**（feetech 側は `TIOCEXCL` で排他にしているので、他が開いていれば起動時に失敗する）。
 - ビルド済みであること: `cd ~/ros2_so-arm101 && colcon build --symlink-install`。
 
+## 0.5 LeRobot 側の記録には何を使うか（launch か、読み取り専用ツールか）と、腕のトルク
+
+LeRobot 側の基準は、**姿勢によって使うものが違う**。
+
+| 姿勢 | LeRobot 側の記録に使うもの | 理由 |
+|---|---|---|
+| P1: home の折りたたみ姿勢 | **`hardware:=lerobot` の launch**（＋ `record_joint_states.py`） | 「LeRobot 経由の `/joint_states`」そのもの（比較の基準の定義）。bridge の変換経路ごと確認できる |
+| P2: 手で動かした姿勢（pan・roll・gripper） | **`tools/lerobot_readonly_state.py`**（launch は使わない） | launch は接続時にトルクを ON にするので、手で姿勢を作ったり変えたりできない（ON の間は保持される）。このツールはトルクに触れないので、脱力したまま手で作った姿勢を読める |
+
+各ケースでの**腕のトルク**と、サーボに書き込むもの:
+
+| | 開始時 | 実行中 | 終了時 | サーボへの書き込み |
+|---|---|---|---|---|
+| `hardware:=lerobot` の launch | 接続時の `configure()` が一度トルクを OFF にして設定を書き、**最後に ON にする**（Torque_Enable=1, Lock=1） | **ON**（腕は保持される。指令 Goal_Position も毎周期書く） | Ctrl-C で **OFF**（Torque_Enable=0, Lock=0。`disable_torque_on_disconnect: true`）→ **腕が脱力する** | する（Return_Delay_Time、加速度、PID の P/I/D、gripper のトルク制限、Operating_Mode、トルク、Goal_Position） |
+| `tools/lerobot_readonly_state.py` | **触れない**（接続時の状態のまま） | **触れない** | **触れない**（`disconnect(disable_torque=False)`） | しない（送るのは PING / READ / SYNC_READ だけ。下記のとおりバイト列で強制） |
+| `hardware:=feetech`（自前ドライバ） | **触れない** | **触れない** | **触れない** | しない（READ / SYNC_READ だけ。型として書き込み命令が存在しない） |
+
+つまり、手順 1 の launch を止めた後は**腕が脱力した状態**になり、その後のツールと feetech はどちらもその状態を変えない（脱力のまま）。
+逆に、腕が保持されている（手で動かせない）状態でツールを実行すると、**ツールはトルクを切らない**ので保持されたまま。無理に動かさず、先に保持している側（launch など）を正常に終了させる。
+
+`tools/lerobot_readonly_state.py` の書き込み禁止は二重:
+1. **送信バイト列の検査**（最終防衛線）: SDK の `port_handler.writePort` をラップし、送るパケットの命令コードが PING(0x01) / READ(0x02) / SYNC_READ(0x82) 以外なら例外にする。公開メソッド、低レベルの `_write` / `_sync_write` / `_disable_torque`、SDK の直呼びのどれでも、書き込み命令はシリアルに出ない。
+2. LeRobot の公開メソッド `write` / `sync_write` / `enable_torque` / `disable_torque` / `write_calibration` / `configure_motors` を例外にする（呼んだ箇所で早く失敗させる）。既定の `disconnect()`（トルクを OFF にする書き込みをする）もこれで例外になる。
+
 ## 1. 基準を取る（LeRobot 経路、折りたたみ姿勢 P1）
 
 腕を **home の折りたたみ姿勢**（機械的に静止する姿勢）にしておく。
@@ -34,6 +58,13 @@ python3 ~/ros2_so-arm101/tools/record_joint_states.py --seconds 5 --out ~/so_arm
 
 **停止する**: 腕に片手を添えてから、ターミナル1で Ctrl-C。bridge は終了時にトルクを OFF にする（`disable_torque_on_disconnect: true`）ので**腕が脱力する**。
 折りたたみ姿勢なら機械的に止まるはず。そのまま 2 秒待つ（脱力で数 tick ずれることがある）。
+
+**（推奨）ツール自体の確認**: 腕は脱力した折りたたみ姿勢のまま、同じ姿勢で読み取り専用ツールを実行して、launch の記録と比べる。これで「ツールの値 ＝ bridge 経由の値」を確かめてから、手順 4（P2）でツールを基準に使える。
+```bash
+~/miniforge3/envs/ros2_lerobot/bin/python ~/ros2_so-arm101/tools/lerobot_readonly_state.py --seconds 5 --out ~/so_arm101_check/lerobot_P1_tool.csv
+python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot_P1.csv ~/so_arm101_check/lerobot_P1_tool.csv
+```
+全関節 PASS なら、ツールは基準として使える。FAIL の関節があれば、手順 4 の前に原因（脱力による姿勢のずれなど）を確認する。このツールはポートを開く（他のプロセスが使っていないこと）。トルクには触れない。
 
 ## 2. feetech で同じ姿勢を記録して比較する
 
@@ -89,7 +120,7 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 
 折りたたみ姿勢だけだと、可動域の中央付近の値しか確認できない。pan・roll・gripper は重力で姿勢が変わらない（摩擦で保持される）ので、手で動かした姿勢で、LeRobot と feetech を順に読んで比較できる。
 
-LeRobot の bridge は接続時にトルクを ON にして手で姿勢を作れないので、**読み取り専用の比較スクリプト**を使う（`bus.connect()` の ping とレジスタ読み出しと `sync_read` だけ。configure もトルク操作も書き込みも不可能にしてある。終了時もトルクに触れない）。
+P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツール `tools/lerobot_readonly_state.py` を使う**（理由とトルクの扱いは 0.5 節）。launch は接続時にトルクを ON にして腕を保持してしまい、手で姿勢を作れない。ツールは `bus.connect()` の ping とレジスタ読み出しと `sync_read` だけを行い、configure もトルク操作も書き込みもしない（バイト列検査で強制）。終了時もトルクに触れない。
 
 1. 手順 1〜2 の後、いずれの launch も止まっていること。腕は脱力しているので、折りたたみ姿勢で支える。
 2. 手で動かす: shoulder_pan を片側へ約 30°、wrist_roll を約 60°、gripper を半開き。**他の関節（lift、elbow、wrist_flex）は折りたたみのまま動かさない**。手を離しても pan・roll・gripper が動かないことを確認する。
@@ -142,7 +173,7 @@ ls -l /proc/$P/fd | grep ttyACM
 注意: `ps` に `python3 .../ros2 launch ...` は出る（ros2 launch 自体が Python）。見るのは **`lerobot` / `miniforge3` / `follower_ros2_node` を含むか**であって、python の有無ではない。
 
 ## 7. 報告してほしいもの
-- `compare_joint_states.py` の出力（P1、P2 の両方）
+- `compare_joint_states.py` の出力（P1、ツール自体の確認 `lerobot_P1` vs `lerobot_P1_tool`、P2 の3つ）
 - `feetech_launch.log` の `[diag]` 行（MATCH / MISMATCH）
 - 手順 6 の出力
 - 想定と違う挙動（例: `read failed` が頻発する、FAIL の関節がある）

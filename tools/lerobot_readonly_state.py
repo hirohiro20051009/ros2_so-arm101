@@ -6,9 +6,14 @@
 目的: bridge は接続時にトルクを ON にする（configure()）ため手で姿勢を作れない。このスクリプトは
   FeetechMotorsBus.connect()（ping とレジスタ読み出しのみ）と sync_read("Present_Position") だけを使い、
   configure() やトルク操作をしない。出力は record_joint_states.py と同じ CSV（rad）。
-安全策:
-  - bus の write / sync_write / enable_torque / disable_torque / write_calibration を例外にして、書き込みを不可能にしている。
-  - 終了は disconnect(disable_torque=False)。既定の disconnect() はトルクを OFF にする書き込みをするので使わない。
+安全策（二重）:
+  1. 送信バイト列の検査（最終防衛線）: port_handler.writePort をラップし、送信パケットの命令コードが
+     PING(0x01) / READ(0x02) / SYNC_READ(0x82) 以外なら例外にする。どの経路（公開メソッド、_write、_sync_write、
+     _disable_torque、SDK 直呼び）でも、書き込み命令は 1 バイトもシリアルに出ない。
+  2. LeRobot の公開メソッド write / sync_write / enable_torque / disable_torque / write_calibration /
+     configure_motors を例外にする（呼んだ箇所が分かるように早く失敗させる）。
+  - 終了は disconnect(disable_torque=False)。既定の disconnect() はトルクを OFF にする書き込みをするので使わない
+    （上の 2 により、既定のまま呼んでも例外になり書き込まれない）。
   - 他のプロセス（bridge / feetech ドライバ）が同じポートを使っていないこと。
   - so_arm101 のドライバはこのスクリプトに依存しない（比較の基準を作るためだけに lerobot を使う）。
 変換: LeRobot 0.4.2 の MotorsBus._normalize（Apache-2.0）→ bridge と同じ math.radians(値)。
@@ -27,8 +32,30 @@ JOINTS = [('shoulder_pan', 1, MotorNormMode.DEGREES), ('shoulder_lift', 2, Motor
           ('wrist_roll', 5, MotorNormMode.DEGREES), ('gripper', 6, MotorNormMode.RANGE_0_100)]
 
 
+READ_ONLY_INSTRUCTIONS = {0x01: 'PING', 0x02: 'READ', 0x82: 'SYNC_READ'}
+
+
 def _forbidden(*_a, **_k):
     raise RuntimeError('このスクリプトはサーボに書き込まない')
+
+
+def install_write_guards(bus):
+    """bus を読み取り専用にする。bus.connect() より前に呼ぶこと。"""
+    # 1. 送信バイト列の検査: FF FF <ID> <LEN> <INST> ... の INST が読み取り系でなければ送らない
+    port = bus.port_handler
+    original_write_port = port.writePort
+
+    def guarded_write_port(packet):
+        inst = packet[4] if len(packet) > 4 else None
+        if len(packet) < 6 or packet[0] != 0xFF or packet[1] != 0xFF or inst not in READ_ONLY_INSTRUCTIONS:
+            port.is_using = False  # SDK の txPacket が立てたフラグを戻す（以降の読み取りを妨げない）
+            raise RuntimeError(f'書き込み/不明な命令を送ろうとした: {bytes(packet).hex()} (INST={inst})')
+        return original_write_port(packet)
+
+    port.writePort = guarded_write_port
+    # 2. 公開メソッドを例外にする
+    for name in ('write', 'sync_write', 'enable_torque', 'disable_torque', 'write_calibration', 'configure_motors'):
+        setattr(bus, name, _forbidden)
 
 
 def main():
@@ -45,8 +72,7 @@ def main():
                                        range_min=c['range_min'], range_max=c['range_max']) for n, c in cal.items()}
     bus = FeetechMotorsBus(port=args.port, motors={n: Motor(i, 'sts3215', m) for n, i, m in JOINTS},
                            calibration=calibration)
-    for name in ('write', 'sync_write', 'enable_torque', 'disable_torque', 'write_calibration', 'configure_motors'):
-        setattr(bus, name, _forbidden)
+    install_write_guards(bus)
     bus.connect()  # ping + 読み出しのみ
     rows = []
     try:

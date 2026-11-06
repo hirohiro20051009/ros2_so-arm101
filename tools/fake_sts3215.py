@@ -7,7 +7,7 @@
 <dir>/positions.json  {"1": 2097, ...}  各 ID の Present_Position（毎回読み直す。無ければ中心/中点）
 <dir>/mode            ok | silent | corrupt   応答の挙動（毎回読み直す）
 --homing-offset ID=値 : その ID の EEPROM Homing_Offset を yaml と違う値にする（診断の MISMATCH 確認用）
-対応する命令は READ(0x02) と SYNC_READ(0x82) のみ。それ以外が来たら "UNEXPECTED INSTRUCTION" と標準エラーに出す
+対応する命令は PING(0x01)・READ(0x02)・SYNC_READ(0x82) のみ。受けた命令の回数は <dir>/instructions.json に書く。それ以外が来たら "UNEXPECTED INSTRUCTION" と標準エラーに出す
 （ドライバが書き込み命令を送っていないことの確認）。
 """
 import argparse
@@ -86,6 +86,7 @@ def main():
         return bytes([0xFF, 0xFF] + body + [c])
 
     buf = bytearray()
+    counts = {}
     while True:
         try:
             buf += os.read(master, 256)
@@ -100,7 +101,14 @@ def main():
             pkt = bytes(buf[:buf[3] + 4])
             del buf[:buf[3] + 4]
             id_, inst = pkt[2], pkt[4]
-            if inst == 0x02:
+            counts[inst] = counts.get(inst, 0) + 1
+            with open(os.path.join(args.state_dir, 'instructions.json'), 'w') as f:
+                json.dump({hex(k): v for k, v in counts.items()}, f)
+            if inst == 0x01:  # PING: ERR=0 のステータス（LeRobot の ping 用）
+                body = [id_, 2, 0]
+                if id_ in joints and mode() == 'ok':
+                    os.write(master, bytes([0xFF, 0xFF] + body + [chk(body)]))
+            elif inst == 0x02:
                 os.write(master, respond(id_, pkt[5], pkt[6]))
             elif inst == 0x82:
                 for sid in pkt[7:-1]:

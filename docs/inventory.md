@@ -509,3 +509,29 @@ LeRobot 0.4.2 `MotorsBus._normalize()` を**接続せずに**直接呼んで正�
 - 角度の分母 `angle_ticks: 4095`（LeRobot 等価）は物理的には 4096 の可能性がある。誤差は最大でも 1500 tick で約 0.4 tick。段階2c で再検討。
 - 書き込みモード（トルク ON、Goal_Position）は段階2b-3（別途承認）。段階2c は Homing_Offset / Min/Max_Position_Limit の書き込み、MIN/MAX の記録手順、yaml への保存が必要（設計は「段階2b-1」）。
 - `hardware:=feetech` は 50 Hz の SYNC_READ を 1 サイクルで実行する。実機での往復時間（Return_Delay_Time の現在値を含む）は未測定。失敗が頻発する場合は `timeout_ms` を調整する。
+
+---
+
+# 段階2b-2 追補: `tools/lerobot_readonly_state.py` の位置づけと書き込み禁止の強化（2026-11-06）
+
+## 追加した理由
+`hardware:=lerobot` の launch は、接続時に `configure()`（`so101_follower.py:149-171`）がトルクを一度 OFF にして設定を書き、**最後にトルクを ON にする**（`torque_disabled()`、`motors_bus.py:583-597`）。実行中は腕が保持され、手で姿勢を作れない。停止するとトルク OFF（脱力）。
+重力の影響を受けない関節（shoulder_pan、wrist_roll、gripper）を**手で動かした姿勢**で比較したいので、LeRobot 側の基準を「トルクに触れずに読むだけ」で取る手段が必要になった。それがこのツール（比較専用。ドライバは依存しない）。
+使い分け: P1（折りたたみ姿勢）は launch（基準の定義そのもの）、P2（手で動かした姿勢）はこのツール。詳細とトルクの表は `docs/feetech_readonly_check.md` の 0.5 節。P1 では launch の記録とツールの記録も比較し、ツールが bridge 経路と同じ値を返すことを確かめる手順にした。
+
+## 書き込み禁止の方法（二重）
+1. **送信バイト列の検査**（最終防衛線）: `bus.port_handler.writePort` をラップし、送るパケット `FF FF <ID> <LEN> <INST> …` の `INST` が PING(0x01) / READ(0x02) / SYNC_READ(0x82) 以外なら `RuntimeError`（違反時は SDK の `is_using` フラグも戻す）。公開メソッド・低レベルメソッド・SDK 直呼びのどの経路でも、書き込み命令がシリアルに出ない。
+2. LeRobot の公開メソッド `write` / `sync_write` / `enable_torque` / `disable_torque` / `write_calibration` / `configure_motors` を、bus インスタンスの属性として `RuntimeError` を投げる関数に差し替える（呼んだ箇所で早く失敗させる）。終了は `disconnect(disable_torque=False)`。既定の `disconnect()` は内部で `self.disable_torque()` を呼ぶので、1 と 2 のどちらでも例外になり書き込まれない。
+
+## 初版の抜けと修正（実装時に見つけた）
+初版は 2 だけで、**低レベルの `_write` / `_sync_write` / `_disable_torque`（`setup_motor` などが直接呼ぶ）は塞がれていなかった**。現行のスクリプトはこれらに到達しないが、保証としては弱かったので 1 を追加した。
+さらに検証で、違反時に SDK の `is_using` フラグが立ったまま残り、後続のケースが「Port is in use」で**偶然**止まる（ガードの効果ではない）ことが分かったため、違反時にフラグを戻すようにし、検証は各ケースを独立に行うようにした。
+
+## 検証（pty 上の偽サーボ。実機・実ポートは開いていない）
+`tools/fake_sts3215.py`（PING / READ / SYNC_READ のみ応答、受けた命令の回数を記録）に対して、conda の Python でスクリプトを実行した。
+- 正常系: `connect()`（ping と読み出し）と `sync_read` が通り、CSV を出力。
+- 次の 7 経路がすべて**ガードによる例外**で止まった（偽サーボの命令カウンタに書き込み命令は無し。受けたのは PING / READ / SYNC_READ のみ）: `bus.write('Torque_Enable')`、`bus.enable_torque()`、`bus._write(Torque_Enable=1)`（INST=3）、`bus._disable_torque()`（INST=3）、`bus._sync_write(Goal_Position)`（INST=0x83）、SDK 直呼び `packet_handler.write1ByteTxRx(Torque_Enable)`（INST=3）、既定の `bus.disconnect()`。例外の後も読み取りは続けられる。
+- 同じ偽サーボ・同じ raw 値で、ツールの CSV（LeRobot 経由の変換）と C++ ドライバ（`hardware:=feetech`）の `/joint_states` の CSV を `compare_joint_states.py` で比較 → 全関節 PASS、差は 0 tick。ソフト側（変換とパケット処理）の等価性の確認であり、実機の確認ではない。
+
+## 未確認
+実機でこのツールを実行していない。実機の `connect()` 中に、LeRobot が読み取り以外の命令を送らないことは、ソース確認（`motors_bus.py:414-444`、`feetech.py:156-168` は ping と読み取りのみ）と偽サーボでの確認、およびバイト列検査で担保している。
