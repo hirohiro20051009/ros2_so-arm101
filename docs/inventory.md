@@ -751,3 +751,50 @@ EEPROM／SRAM の区分（2b-3a で確認）、電源投入時の Torque_Limit�
 - Torque_Limit(48) / Goal_Velocity(46) が SRAM か（このデータでは不明。設計は区分に依存しない）。
 - Lock=1 のまま SRAM（Acceleration など）へ書けるか。
 - 通信断でサーボが最後の目標を保持し続けること、JTC が 25 Hz で指令を更新していること（2b-3b）。
+
+---
+
+# 段階2b-3b の計画 v4（書き込みモード）— 承認済み（2026-11-10）
+
+v3（上の「段階2b-3 の計画 v3」）からの差分。v3 の表・異常時の分類 A〜D・変化量の制限・設定不一致の扱いはそのまま有効。根拠は「段階2b-3a 実機確認」。
+承認された確認事項: ① Acceleration 既定 50（単位は未確認。W1 で調整）、② Goal_Velocity≠0 なら中止（書き直さない）、③ 1 Hz 監視は必須、④ W0 に「Lock=1 での SRAM 書き込み確認」を入れる。追加の 2 点（⑤ 終了時の Lock=1、⑥ 監視はスレッドを増やさない）も承認。
+
+## 初期値
+| 項目 | 扱い |
+|---|---|
+| Acceleration | **トルク ON の前に毎回書く**（値を保持・省略しない）。既定 50（`acceleration`）。読み戻して不一致か 0 なら**トルクを ON にしない**。電源投入時は 0 で、0 の意味は未確認（「0 = 制限なし」の可能性を排除できない）。Maximum_Acceleration 以下であることも確認 |
+| Torque_Limit | 腕 1000（`torque_limit`。W1〜W2 の初回だけ 500）、gripper は min(値, 500)。現在値と違うときだけ書き、読み戻す。EEPROM／SRAM のどちらでも成り立つ |
+| Goal_Velocity | 書かない。0 でなければトルクを ON にせず中止 |
+| Maximum_Acceleration | 書かない |
+| Operating_Mode | 書かない。0 以外なら中止 |
+
+## 起動の手順（どの状態から始めても同じ。`on_activate`）
+1. 読む: Operating_Mode=0、Goal_Velocity=0、Torque_Enable（1 なら WARN。前回が異常終了した可能性）。違えば中止（まだ何も書いていない）。
+2. Lock=0（読み戻し）。
+3. `apply_servo_config:=true` で差があるときだけ: Torque_Enable=0 を確認 → EEPROM の項目を書く（P/I/D、Return_Delay_Time、gripper の 3 項目。Operating_Mode は書かない）→ 読み戻し。トルク ON のままなら中止。
+4. Acceleration を書く（読み戻し。0 や不一致は中止）。Torque_Limit は違うときだけ書く（読み戻し）。
+5. 現在位置を読み、Goal_Position=現在位置を書く（読み戻し）。
+6. Torque_Enable=1（読み戻し）。
+7. Lock=1（読み戻し）。
+8. 全項目を読み直して検証。`probe_lock_sram:=true` のときだけ確認 1: Acceleration を 1 だけずらして書き、読み戻し、元に戻して読み戻す（腕は動かず、EEPROM に触れない）。
+途中で失敗したら、書き込みを始めていれば下の「終了」の手順を実行する。トルクは ON にならない（6 より前）か、OFF に戻る。
+
+## 終了（⑤）
+`on_deactivate`、`on_cleanup`、デストラクタ、起動の失敗時（書き込みを始めていたとき）のすべてで、同じ手順:
+1. 全関節の Torque_Enable=0（読み戻し、3 回まで再試行）。
+2. その後、全関節の **Lock=1 に戻す（読み戻し、3 回まで再試行）**。LeRobot は Lock=0 のまま残していた。EEPROM を保護するため。
+3. 結果を INFO（成功）／ERROR（失敗した関節）で出す。2 度目以降の呼び出しは何もしない。
+異常で終了する場合も、書き込みが通るなら同じ手順。通信が切れていれば出来ない（ケース A のとおり、ERROR に明記）。
+
+## 1 Hz 監視（③⑥）
+- 内容: Torque_Enable(40) と Acceleration(41) の 2 バイトを全関節に 1 回の SYNC_READ（`monitor_period_s`、既定 1.0）。期待は Torque_Enable=1 と、起動時に書いた Acceleration。
+- 違えば**フォルト**にして送信を停止（ERROR「サーボの電源断または再起動。自動では復帰しない」）。ERR バイトを読んだ場合も同じ（ケース D）。監視の読み取りが 3 回連続で失敗してもフォルト。
+- **スレッド・タイマー・非同期は使わない**。監視は `read()` の中で、位置の読み取りが終わった後に同じ周期処理の一部として行う。ドライバのコードに `std::thread`／`std::async`／`pthread`／`create_wall_timer` を使わない。
+- シリアルポートの同時使用を防ぐ二重の仕組み: ① `SerialPort` に再入可能な mutex を持たせ、バスの 1 往復（要求の送信と応答の受信）を `Transaction` として mutex で守る。② ドライバの `read`／`write`／`on_*`／デストラクタを 1 本の mutex で守る（ros2_control の周期処理と lifecycle の呼び出しが別スレッドになりうるため）。
+- 試験: ソースに禁止語が無いこと（ソース走査）、2 スレッドが同時にバスを叩いても応答が壊れず（mutex が無ければ壊れる）、`Transaction` の競合回数が数えられること、監視付きで長く動かしても競合が 0 であること。
+
+## 変えないもの
+URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.yaml`・`controllers.yaml`。`read_only` の既定は true。`read_only:=true` では書き込み用のクラスを生成せず、書き込み命令は 0 件。終了時はトルク OFF。変化量の制限（6.0 rad/s × 0.08 s）、異常の分類 A〜D。
+
+## 試験の方針
+偽サーボ（pty）で次を自動試験にする: 書き込み順（起動／終了）、Acceleration=0 または読み戻し不一致でのトルク ON 拒否、Goal_Velocity≠0 での中止、サーボのリセット（SRAM が既定値に戻る）の検出と送信停止、`read_only:=true` で書き込み 0 件、終了時の Lock=1、異常終了時の後始末、バイト列の照合（SYNC_WRITE／WRITE）。
