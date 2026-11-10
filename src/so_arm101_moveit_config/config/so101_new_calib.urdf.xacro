@@ -7,7 +7,12 @@
     <xacro:arg name="hardware" default="lerobot" />          <!-- lerobot | feetech -->
     <xacro:arg name="serial_port" default="/dev/ttyACM0" />  <!-- feetech のみ -->
     <xacro:arg name="calibration_file" default="" />         <!-- feetech のみ -->
-    <xacro:arg name="read_only" default="true" />            <!-- feetech のみ。2b-2 は true のみ -->
+    <xacro:arg name="read_only" default="true" />            <!-- feetech のみ。false で書き込みモード（段階2b-3b） -->
+    <!-- 段階2b-3b: 書き込みモード（read_only=false）のパラメータ。feetech のみ -->
+    <xacro:arg name="acceleration" default="50" />           <!-- 1..254。0 は拒否 -->
+    <xacro:arg name="torque_limit" default="1000" />         <!-- pan と roll だけに効く（lift/elbow/wrist_flex は常に 1000）。gripper は min(値, 500) -->
+    <xacro:arg name="apply_servo_config" default="false" />  <!-- true のときだけ EEPROM の差を書く -->
+    <xacro:arg name="probe_lock_sram" default="false" />     <!-- true で Lock=1 での SRAM 書き込み確認（W0） -->
     
     <!-- Import so101_new_calib urdf file -->
     <xacro:include filename="$(find so_arm101_description)/urdf/so101_new_calib.urdf" />
@@ -24,5 +29,9 @@
         serial_port="$(arg serial_port)"
         calibration_file="$(arg calibration_file)"
         read_only="$(arg read_only)"
+        acceleration="$(arg acceleration)"
+        torque_limit="$(arg torque_limit)"
+        apply_servo_config="$(arg apply_servo_config)"
+        probe_lock_sram="$(arg probe_lock_sram)"
     />
 </robot>

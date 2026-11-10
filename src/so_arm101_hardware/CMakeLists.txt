@@ -26,6 +26,7 @@ ament_target_dependencies(so101_hardware_bridge rclcpp hardware_interface
 add_library(so_arm101_sts3215 SHARED
   src/serial_port.cpp
   src/sts3215_bus.cpp
+  src/sts3215_write_bus.cpp
   src/calibration.cpp
   src/servo_config.cpp
   src/sts3215_system.cpp)
@@ -63,6 +64,18 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_sts3215_bus test/test_sts3215_bus.cpp)
   target_link_libraries(test_sts3215_bus so_arm101_sts3215 util)
+
+  # 段階2b-3b: 書き込みバス、書き込みモードのドライバ（偽サーボ pty）、ソース走査
+  ament_add_gtest(test_write_bus test/test_write_bus.cpp)
+  target_link_libraries(test_write_bus so_arm101_sts3215 util)
+  target_compile_definitions(test_write_bus PRIVATE PACKAGE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+
+  ament_add_gtest(test_sts3215_system test/test_sts3215_system.cpp)
+  target_link_libraries(test_sts3215_system so_arm101_sts3215 util)
+  target_compile_definitions(test_sts3215_system PRIVATE
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/follower_calibration.yaml"
+    JOINT_LIMITS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_moveit_config/config/joint_limits.yaml"
+    CONTROLLERS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_controller/config/controllers.yaml")
 endif()
 
 ament_package()

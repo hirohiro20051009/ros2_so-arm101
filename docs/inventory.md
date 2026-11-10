@@ -798,3 +798,63 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 
 ## 試験の方針
 偽サーボ（pty）で次を自動試験にする: 書き込み順（起動／終了）、Acceleration=0 または読み戻し不一致でのトルク ON 拒否、Goal_Velocity≠0 での中止、サーボのリセット（SRAM が既定値に戻る）の検出と送信停止、`read_only:=true` で書き込み 0 件、終了時の Lock=1、異常終了時の後始末、バイト列の照合（SYNC_WRITE／WRITE）。
+
+---
+
+# 段階2b-3b: 書き込みモードの実装（2026-11-10）
+
+実機（サーボ）は動かしていない。実ポート（`/dev/ttyACM0`）も開いていない。確認は pty 上の偽サーボ（C++ の試験用と `tools/fake_sts3215.py`）。
+計画は「段階2b-3b の計画 v4」。**書き込みを行うのは `read_only:=false` のときだけ**（既定は true）。
+
+## 追加・変更したファイル
+| ファイル | 内容 |
+|---|---|
+| `include/so_arm101_hardware/sts3215_write_bus.hpp`、`src/sts3215_write_bus.cpp`（新規） | `Sts3215WriteBus`（`Sts3215Bus` を継承）。WRITE(0x03)／SYNC_WRITE(0x83)。公開するのは用途別の関数だけ（`write_torque_enable`、`write_lock`、`write_acceleration`（0〜254）、`write_torque_limit`（0〜1000）、`write_goal_position`、`sync_write_goal_position`、`write_servo_setting`）。`write_servo_setting` は allow-list（P/I/D、Return_Delay_Time、Max_Torque_Limit、Protection_Current、Overload_Torque）。**Operating_Mode は型として書けない**。任意アドレスの汎用 write は無い |
+| `sts3215_bus.{hpp,cpp}` | 読み取り専用のまま（`Instruction` は Read／SyncRead）。派生が使う `build_packet`／`receive_status`／`fail` を protected に。ERR バイトを保持し、`describe_servo_error()` で内容を表示。仮想デストラクタ。`encode_sign_magnitude()` |
+| `serial_port.{hpp,cpp}` | `SerialPort::Transaction`（再入可能 mutex）。バスの 1 往復をポート単位で排他にする。待たされた回数を `contention_count()` で数える |
+| `sts3215_system.{hpp,cpp}` | 書き込みモード。起動（手順 1〜8）、`write()`（NaN 破棄 → rad→raw → 校正範囲でクランプ → 1 周期の変化量の制限 → SYNC_WRITE）、1 Hz 監視、フォルト（A〜D）、終了の手順。`read_only` のときは `Sts3215Bus` だけを生成（書き込み用クラスは存在しない）。read／write／on_*／デストラクタを 1 本の mutex で守る |
+| `servo_config.{hpp,cpp}` | `ConfigAction::Apply`、`config_action(diffs, read_only, apply_servo_config)` |
+| `so_arm101_moveit_config/config/so101_new_calib.{urdf,ros2_control}.xacro` | `acceleration`、`torque_limit`、`apply_servo_config`、`probe_lock_sram` の 4 引数を追加し、feetech の `<param>` に渡すだけ。関節・リンク・limit は不変。mock のとき無視（展開結果で確認） |
+| `so_arm101_bringup/launch/bringup.launch.py` | `read_only` に `false` を許可。上の 4 引数を追加。既定は `read_only:=true` |
+| `tools/fake_sts3215.py` | 書き込み対応・状態を持つ。電源投入直後の状態（Acceleration=0、Lock=1、Torque_Enable=0、Goal_Position=0）から始める。EEPROM は Lock=1 のとき書けない。`reset` ファイルでサーボの電源再投入を模擬。`--strict-readonly`。書き込みを `writes.jsonl` に記録 |
+| `tools/send_joint_delta.py` | 1 関節を現在位置からゆっくり動かす補助（実機用。**実行していない**。\|delta\|≤0.5 rad、≤0.1 rad/s を超える指定は拒否） |
+| `test/fake_servo.hpp`、`test_write_bus.cpp`、`test_sts3215_system.cpp`、`test_servo_config.cpp`（追記） | 下の試験 |
+| `docs/feetech_write_check.md` | 2b-3c の実機確認手順（W0〜W4、任意の W5）。各段階に「腕の支え方」「止め方」 |
+| `docs/third_party.md` | 書き込む値と順序の出典、LeRobot との違い（Acceleration=50、終了時 Lock=1） |
+
+## 仕様の確定事項（v4 からの補足）
+- **起動**: v4 の手順 1〜8 のとおり。手順 1（読むだけ）で、Operating_Mode≠0、Goal_Velocity≠0、設定が LeRobot の値と違う（`apply_servo_config` なし）、`acceleration` が Maximum_Acceleration を超える、のいずれでも**何も書かずに中止**。Acceleration は毎回書き、読み戻しが 0 か不一致ならトルクを ON にしない。Torque_Enable がすでに 1 なら WARN（前回の異常終了の可能性）して手順を続ける。
+- **Torque_Limit**: `torque_limit` が効くのは **shoulder_pan と wrist_roll だけ**（v3 の取り決めどおり。lift / elbow / wrist_flex は常に 1000、gripper は min(値, 500)）。現在値と違うときだけ書く。
+- **1 周期の変化量の制限**: 6.0 rad/s × 0.08 s ＝ 0.48 rad（角度関節 312 tick、`tick_in_rad` から算出）。試験が `joint_limits.yaml` と `controllers.yaml` を読み、`max_joint_speed × limit_window_s ≥ 1.2 × max_velocity × 2 / update_rate` を確認（現在の値でちょうど満たす）。WARN は関節ごとに 5 秒に 1 回。
+- **異常の数え方（追加した決め）**: 「異常な指令」は NaN／inf、または校正範囲を **50 tick（≈0.077 rad）より大きく**超えた指令。範囲を少し超えるだけの指令（関節が限界で静止しているとき等）は黙ってクランプし、異常と数えない。50 周期（1 秒）続くとフォルト（送信停止。トルクは保持）。
+- **フォルトの復帰**: 監視／指令／書き込みのフォルトは deactivate → activate で解除できる（起動の手順が電源投入直後と同じ状態から安全に進むため）。**サーボの ERR バイトを読んだときはプロセスの再起動まで解除しない**（`on_activate` が拒否）。
+- **フォルトでも `read()` は OK を返す**（ERROR を返すと controller_manager が hardware を deactivate してトルクが OFF になるため。ケース C は「トルク保持」）。通信断（連続 10 回の読み失敗）だけが ERROR で、`COMMUNICATION LOST` を出す。
+- **終了の手順**: トルク OFF（読み戻し、3 回まで）→ Lock=1（読み戻し、3 回まで）。`on_deactivate`／`on_cleanup`／デストラクタ／起動の失敗時。成功すると 2 度目は何もしない。通信が死んでいるときは終了のたびに待たないよう、失敗は 2 回までで打ち切る。
+- **`read_only` の厳密な解釈（試験中に見つけた穴を塞いだ）**: 初版は「true 以外は false」で、`read_only` の打ち間違い（`ture`、`1` 等）が書き込みモードになりうる状態だった。**`true`／`false`（大文字小文字は問わない）以外は起動を拒否**する（`apply_servo_config`、`probe_lock_sram` も同じ）。
+- **別スレッド・タイマー無し**: 監視は `read()` の中（位置の読み取りの後）。ドライバのソースに `std::thread`／`std::async`／`pthread`／`create_wall_timer` 等が無いことを試験が走査して確認する。
+
+## 検証
+- `colcon build --symlink-install`（7 パッケージ）、`colcon test --packages-select so_arm101_hardware`: **73 件すべて成功**（このうち今回の追加は、書き込みバス `test_write_bus` 10、ドライバ `test_sts3215_system` 24、設定 `test_servo_config` 1）。5 回連続で実行して安定。
+- **書き込み順**（偽サーボの書き込み記録）: 最初が Lock=0 → Acceleration（全関節 50。0 は一度も書かれない）→ Goal_Position（現在位置）→ Torque_Enable=1 → Lock=1。Torque_Limit は既定値と同じなら書かない。Operating_Mode と Goal_Velocity には書かない。
+- **Acceleration=0 の拒否**: Acceleration が書けない偽サーボ（0 のまま）で、起動は ERROR、**Torque_Enable=1 は一度も書かれず**、終了の手順で Lock=1 に戻る。Goal_Position の読み戻し不一致、Goal_Velocity≠0（診断で／診断後に変わった場合）、Operating_Mode≠0（`apply_servo_config` でも）でも同様に拒否（後者 2 つは何も書かない）。
+- **リセット検出**: 動作中にサーボを電源再投入の状態（Acceleration=0、Lock=1、Torque_Enable=0）にすると、`monitor_period_s`+余裕（0.14 s）以内にフォルト（`powered off or reset`）、**以後 Goal_Position を送らない**。ERR バイトは再起動までの latch。
+- **終了**: deactivate／cleanup／デストラクタのいずれでも「全関節トルク OFF → その後 Lock=1」（書き込み記録で順序を確認）。フォルト後の deactivate でも Lock=1。
+- **`read_only:=true`**: 200 周期、指令あり、deactivate／cleanup まで通して、**書き込み記録が 0 件、受けた命令は 0x02 と 0x82 だけ**、サーボの Torque_Enable=0・Acceleration=0（電源投入時のまま）・Lock=1。
+- **ポートの同時使用**: ① ソース走査で禁止語なし。② 2 スレッドが同じポートを 300 往復ずつ叩いても全成功、要求パケットのチェックサム不良 0。**排他を一時的に無効にして同じ試験を実行したところ失敗した（1724 件）ので、試験は排他を検証できている**（無効化は元に戻した。最終版で 10 件成功）。③ 監視付きで 10 秒ぶん（500 周期）動かして `port_contention=0`、フォルトなし。
+- **launch 全体（pty 上の偽サーボ。ros2_control_node は実際のスレッド構成）**: `mock:=false hardware:=feetech read_only:=false` で、起動 → 保持 → Ctrl-C（SIGINT）で「トルク OFF → Lock=1」を確認。15 秒で `reads=777 goal_writes=777 monitors=15 rate_limited=0 port_contention=0`。`FollowJointTrajectory`（pan +0.3 rad / 2 s）は SUCCEEDED、偽サーボの Goal_Position は 2097 → 2293（＝+196 tick ＝ 0.3 rad）へ 4 tick ずつ増加。動作中にサーボのリセットを模擬するとフォルトが出て送信が止まり、Ctrl-C で終了の手順が通った。`read_only:=true` の launch は書き込み記録 0 バイト・命令は 0x02／0x82 のみ。
+- xacro 展開: `use_fake_hardware:=true` は `mock_components/GenericSystem`（新引数は出ない）。feetech は新しい 4 つの `<param>` を出す。
+
+## 計画 v4 から変えた点・補足
+1. 手順書にあった確認 1（`probe_lock_sram`）は既定 off のパラメータとして実装。結果は INFO（ACCEPTED）／WARN（NOT accepted）。NOT accepted でも起動の手順は Lock=0 で SRAM を書くので影響しない。
+2. Torque_Enable がすでに 1 のときは中止せず WARN（v4 の手順 1 の記述どおり）。EEPROM を書く必要があって Torque_Enable=1 のときだけ中止（トルク OFF が前提のため）。
+3. 監視の読み取りが 3 回連続で失敗してもフォルト（v4 の「監視の読み取りが失敗してもフォルト」を 3 回連続と具体化）。
+4. xacro の変更が 4 引数ぶん増えた（moveit_config の 2 ファイル。2b-1 の G・H と同じ種類の変更で、関節・リンク・limit は不変）。
+
+## 未確認（実機）
+- 書き込み全般（トルク ON の瞬間に動かないこと、Acceleration=50 の効き方と単位、Lock=1 のまま SRAM に書けるか＝確認 1）。手順は `docs/feetech_write_check.md`。
+- Acceleration=0 の意味（このドライバは 0 のままトルクを ON にしない）。
+- 通信断でサーボが最後の目標で保持し続けること（W5、任意）。
+- JTC が実際に 25 Hz で指令を更新していること（`controllers.yaml` の値からの設計）。W4 で `rate_limited=0` なら整合。
+- `SYNC_WRITE` には応答が無いので、Goal_Position が各サーボに届いたかは周期ごとには確認できない。Torque_Enable／Acceleration の 1 Hz 監視と読み取りの失敗でバス異常は検出する。
+- 実機では Lock=1 のとき EEPROM への書き込みが無視される、という想定を偽サーボに入れている（`apply_servo_config` は Lock=0 の間に書き、読み戻して確認する）。実機の挙動は未確認。
+- 偽サーボの限界: サーボ内部の加減速・保護・トルクの物理挙動は再現していない。ここまでの合格は、ドライバの手順・順序・検出ロジックのもの。

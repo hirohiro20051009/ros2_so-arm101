@@ -113,3 +113,15 @@ TEST(ServoConfig, MismatchOnlyWarnsInReadOnlyAndAbortsWhenWriting)
   EXPECT_EQ(config_action({}, true), ConfigAction::Ok);
   EXPECT_EQ(config_action({}, false), ConfigAction::Ok);
 }
+
+// ---- 段階2b-3b: apply_servo_config ----
+TEST(ConfigAction, ApplyOnlyInWriteModeAndNeverForOperatingMode)
+{
+  const std::vector<ConfigDiff> p_only{{"P_Coefficient", 32, 16}};
+  const std::vector<ConfigDiff> with_mode{{"Operating_Mode", 1, 0}, {"P_Coefficient", 32, 16}};
+  EXPECT_EQ(config_action(p_only, /*read_only=*/false, /*apply=*/true), ConfigAction::Apply);
+  EXPECT_EQ(config_action(p_only, false, false), ConfigAction::Abort);          // 既定は拒否
+  EXPECT_EQ(config_action(with_mode, false, true), ConfigAction::Abort);       // Operating_Mode は書かない
+  EXPECT_EQ(config_action(p_only, true, true), ConfigAction::Warn);            // read_only は書かない
+  EXPECT_EQ(config_action({}, false, true), ConfigAction::Ok);
+}

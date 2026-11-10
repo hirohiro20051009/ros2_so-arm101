@@ -4,7 +4,7 @@ SO-ARM101 統合ランチャー（ルート名前空間）。
   mock:=true  (既定) : mock_components/GenericSystem でシミュレーション
   mock:=false        : 実機。hardware で経路を選ぶ（mock:=true のときは hardware は無視される）
     hardware:=lerobot (既定) : So101HardwareBridge + LeRobot bridge (so_arm101_lerobot_bridge)
-    hardware:=feetech        : Sts3215System（STS3215 を直接読む。段階2b-2 は読み取り専用で、
+    hardware:=feetech        : Sts3215System（STS3215 を直接制御。read_only:=true は読み取り専用で、
                                LeRobot を使わず、サーボのレジスタには書き込まない）
 
 どちらのモードも robot_state_publisher / ros2_control_node / move_group は1つずつ、
@@ -31,6 +31,10 @@ def generate_launch_description():
     serial_port = LaunchConfiguration("serial_port")
     calibration_file = LaunchConfiguration("calibration_file")
     read_only = LaunchConfiguration("read_only")
+    acceleration = LaunchConfiguration("acceleration")
+    torque_limit = LaunchConfiguration("torque_limit")
+    apply_servo_config = LaunchConfiguration("apply_servo_config")
+    probe_lock_sram = LaunchConfiguration("probe_lock_sram")
 
     # robot_description は全ノード（rsp / ros2_control_node）で同一。
     # mock と hardware で ros2_control のプラグインだけが切り替わる（hardware 等は mock のとき無視される）。
@@ -43,6 +47,10 @@ def generate_launch_description():
                 "serial_port": serial_port,
                 "calibration_file": calibration_file,
                 "read_only": read_only,
+                "acceleration": acceleration,
+                "torque_limit": torque_limit,
+                "apply_servo_config": apply_servo_config,
+                "probe_lock_sram": probe_lock_sram,
             }
         )
         .to_moveit_configs()
@@ -83,8 +91,34 @@ def generate_launch_description():
     )
     ld.add_action(
         DeclareLaunchArgument(
-            "read_only", default_value="true", choices=["true"],
-            description="hardware:=feetech は段階2b-2 では読み取り専用のみ",
+            "read_only", default_value="true", choices=["true", "false"],
+            description="hardware:=feetech のみ。true=読み取り専用（既定）/ false=書き込みモード（トルク ON。腕が動く。"
+            "手順は docs/feetech_write_check.md）",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "acceleration", default_value="50",
+            description="書き込みモードの Acceleration（1..254。0 は拒否。毎回トルク ON の前に書く）",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "torque_limit", default_value="1000",
+            description="書き込みモードの Torque_Limit。shoulder_pan と wrist_roll だけに効く（lift / elbow / wrist_flex は常に 1000、"
+            "gripper は min(値, 500)）。W1〜W2 の初回は 500",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "apply_servo_config", default_value="false", choices=["true", "false"],
+            description="true のときだけ、LeRobot の値と違う EEPROM（P/I/D 等）を起動時に書く。Operating_Mode は書かない",
+        )
+    )
+    ld.add_action(
+        DeclareLaunchArgument(
+            "probe_lock_sram", default_value="false", choices=["true", "false"],
+            description="true で起動直後に Lock=1 のまま SRAM（Acceleration）へ書けるかを確認（W0 用）",
         )
     )
     ld.add_action(DeclareBooleanLaunchArg("use_rviz", default_value=True))

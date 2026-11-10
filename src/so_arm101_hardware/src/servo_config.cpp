@@ -49,10 +49,12 @@ bool has_operating_mode_diff(const std::vector<ConfigDiff> & diffs)
   return false;
 }
 
-ConfigAction config_action(const std::vector<ConfigDiff> & diffs, bool read_only)
+ConfigAction config_action(const std::vector<ConfigDiff> & diffs, bool read_only, bool apply_servo_config)
 {
   if (diffs.empty()) {return ConfigAction::Ok;}
-  return read_only ? ConfigAction::Warn : ConfigAction::Abort;
+  if (read_only) {return ConfigAction::Warn;}
+  if (apply_servo_config && !has_operating_mode_diff(diffs)) {return ConfigAction::Apply;}
+  return ConfigAction::Abort;
 }
 
 }  // namespace so_arm101_hardware

@@ -35,6 +35,25 @@ int decode_sign_magnitude(uint16_t encoded, int sign_bit)
   return direction_bit ? -magnitude : magnitude;
 }
 
+bool encode_sign_magnitude(int v, int sign_bit, uint16_t * encoded)
+{
+  const int mag = v < 0 ? -v : v;
+  if (mag >= (1 << sign_bit)) {return false;}
+  *encoded = static_cast<uint16_t>(mag | (v < 0 ? (1 << sign_bit) : 0));
+  return true;
+}
+
+std::string describe_servo_error(uint8_t err)
+{
+  static const char * names[] = {"voltage", "sensor", "temperature", "current", "angle", "overload"};
+  std::string s;
+  for (int b = 0; b < 6; ++b) {
+    if (err & (1 << b)) {s += std::string(s.empty() ? "" : "+") + names[b];}
+  }
+  if (err & 0xC0) {s += std::string(s.empty() ? "" : "+") + "unknown-bits";}
+  return s.empty() ? "none" : s;
+}
+
 uint8_t Sts3215Bus::checksum(const uint8_t * body, size_t len)
 {
   unsigned sum = 0;
@@ -45,6 +64,12 @@ uint8_t Sts3215Bus::checksum(const uint8_t * body, size_t len)
 std::vector<uint8_t> Sts3215Bus::build_request(
   uint8_t id, Instruction inst, const std::vector<uint8_t> & params)
 {
+  return build_packet(id, static_cast<uint8_t>(inst), params);
+}
+
+std::vector<uint8_t> Sts3215Bus::build_packet(
+  uint8_t id, uint8_t inst, const std::vector<uint8_t> & params)
+{
   // FF FF <ID> <LEN> <INST> <PARAM…> <CHK>、LEN = PARAM 数 + 2
   std::vector<uint8_t> pkt;
   pkt.reserve(params.size() + 6);
@@ -52,7 +77,7 @@ std::vector<uint8_t> Sts3215Bus::build_request(
   pkt.push_back(0xFF);
   pkt.push_back(id);
   pkt.push_back(static_cast<uint8_t>(params.size() + 2));
-  pkt.push_back(static_cast<uint8_t>(inst));
+  pkt.push_back(inst);
   pkt.insert(pkt.end(), params.begin(), params.end());
   pkt.push_back(checksum(pkt.data() + 2, pkt.size() - 2));
   return pkt;
@@ -61,6 +86,7 @@ std::vector<uint8_t> Sts3215Bus::build_request(
 Status Sts3215Bus::fail(Status s, const std::string & msg)
 {
   last_error_ = msg;
+  last_servo_error_ = 0;
   port_.flush_input();  // 次の要求で再同期できるように
   return s;
 }
@@ -111,9 +137,14 @@ Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vecto
   }
   const uint8_t err = rest[0];
   if (err != 0) {
+    last_error_.clear();
     char hex[8];
     std::snprintf(hex, sizeof(hex), "0x%02X", err);
-    return fail(Status::ServoError, "servo " + std::to_string(id) + " reported error " + hex);
+    const Status st = fail(
+      Status::ServoError, "servo " + std::to_string(id) + " reported error " + hex + " (" +
+      describe_servo_error(err) + ")");
+    last_servo_error_ = err;
+    return st;
   }
   if (static_cast<size_t>(len) != data_len + 2) {
     return fail(
@@ -126,6 +157,7 @@ Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vecto
 
 Status Sts3215Bus::read(uint8_t id, Register r, std::vector<uint8_t> * data)
 {
+  SerialPort::Transaction tx(port_);
   if (!port_.is_open()) {return fail(Status::PortError, "port not open");}
   if (id > kMaxId) {return fail(Status::BadFrame, "invalid id");}
   const auto req = build_request(id, Instruction::Read, {r.address, r.length});
@@ -149,6 +181,7 @@ Status Sts3215Bus::sync_read(
   uint8_t * failed_id)
 {
   if (failed_id) {*failed_id = 0;}
+  SerialPort::Transaction tx(port_);
   if (!port_.is_open()) {return fail(Status::PortError, "port not open");}
   if (ids.empty() || ids.size() > 32) {return fail(Status::BadFrame, "invalid id list");}
   std::vector<uint8_t> params{r.address, r.length};

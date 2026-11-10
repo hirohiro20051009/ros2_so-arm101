@@ -4,7 +4,8 @@
 //
 // 書き込み系の命令（WRITE / REG_WRITE / ACTION / SYNC_WRITE）は意図的に実装していない。
 // Instruction 型に存在しないので、このクラスからレジスタに書き込むことはコンパイル時にできない
-// （トルクにも触れない）。書き込みは段階2b-3 で別途追加する。
+// （トルクにも触れない）。書き込みは別クラス Sts3215WriteBus（sts3215_write_bus.hpp）。
+// read_only:=true のドライバはこのクラスだけを生成する。
 //
 // パケット形式・命令コード・レジスタ表は LeRobot 0.4.2 (Apache-2.0, Copyright 2024 The
 // HuggingFace Inc. team) が使う Feetech の仕様に基づく。出典は docs/third_party.md。
@@ -54,6 +55,8 @@ constexpr Register kProtectionCurrent{28, 2};    // EEPROM（最大 500）
 constexpr Register kOperatingMode{33, 1};        // EEPROM（0 = 位置制御）
 constexpr Register kOverloadTorque{36, 1};       // EEPROM
 constexpr Register kTorqueEnable{40, 1};         // SRAM
+constexpr Register kTorqueEnableAcceleration{40, 2};  // 40 と 41 を 1 回で読む（1 Hz 監視用）
+constexpr Register kGoalPosition{42, 2};         // SRAM, 符号付き: sign-magnitude, bit15
 constexpr Register kAcceleration{41, 1};         // SRAM
 constexpr Register kGoalVelocity{46, 2};         // SRAM, 符号付き: sign-magnitude, bit15
 constexpr Register kTorqueLimit{48, 2};          // SRAM
@@ -82,6 +85,8 @@ const char * to_string(Status s);
 
 /// sign-magnitude を int に。bit が立っていれば負（encoding_utils.py decode_sign_magnitude）。
 int decode_sign_magnitude(uint16_t encoded, int sign_bit);
+/// decode の逆。|v| が sign_bit ビットに入らなければ false。
+bool encode_sign_magnitude(int v, int sign_bit, uint16_t * encoded);
 
 class Sts3215Bus
 {
@@ -89,6 +94,7 @@ public:
   /// timeout は 1 つのステータスパケットを待つ時間。
   explicit Sts3215Bus(SerialPort & port, std::chrono::microseconds timeout = std::chrono::milliseconds(10))
   : port_(port), timeout_(timeout) {}
+  virtual ~Sts3215Bus() = default;
 
   /// 1 台から読む。data に length バイト（リトルエンディアンの生バイト）。
   Status read(uint8_t id, Register r, std::vector<uint8_t> * data);
@@ -104,13 +110,18 @@ public:
 
   /// 直近の失敗の説明（ログ用）。
   const std::string & last_error() const {return last_error_;}
+  /// 直近の ServoError で受け取った ERR バイト（それ以外では 0）。
+  uint8_t last_servo_error() const {return last_servo_error_;}
 
   // --- テスト用に公開 ---
   static uint8_t checksum(const uint8_t * body, size_t len);  // ~sum(ID..PARAM) & 0xFF
   static std::vector<uint8_t> build_request(
     uint8_t id, Instruction inst, const std::vector<uint8_t> & params);
 
-private:
+protected:
+  /// 任意の命令コードのパケット組立（書き込み用の派生クラスが使う）。
+  static std::vector<uint8_t> build_packet(
+    uint8_t id, uint8_t inst, const std::vector<uint8_t> & params);
   Status receive_status(uint8_t expect_id, size_t data_len, std::vector<uint8_t> * data);
   Status fail(Status s, const std::string & msg);
 
@@ -118,6 +129,10 @@ private:
   std::chrono::microseconds timeout_;
   std::string last_error_;
   int last_rx_id_{-1};  // 直近に受信したパケットの ID（IdMismatch の分類用）
+  uint8_t last_servo_error_{0};
 };
+
+/// ERR バイトのビットの説明（STS3215 の保護: bit0 電圧、1 センサ、2 温度、3 電流、4 角度、5 過負荷）。
+std::string describe_servo_error(uint8_t err);
 
 }  // namespace so_arm101_hardware

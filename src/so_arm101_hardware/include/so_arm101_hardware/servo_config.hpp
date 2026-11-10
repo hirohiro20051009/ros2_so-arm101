@@ -64,10 +64,12 @@ enum class ConfigAction
   Ok,     // 一致
   Warn,   // 不一致だが続ける（read_only）
   Abort,  // 不一致なので起動を中止する（書き込みモード）
+  Apply,  // 不一致だが apply_servo_config:=true なので、起動時に書き直す（書き込みモード。Operating_Mode 以外）
 };
 
 /// 不一致の扱い。書き込みモードでは、Operating_Mode を含むどの差でも Abort（トルクを ON にしない）。
-ConfigAction config_action(const std::vector<ConfigDiff> & diffs, bool read_only);
+/// apply_servo_config が true で、差に Operating_Mode が無ければ Apply（書き込みモードのみ）。
+ConfigAction config_action(const std::vector<ConfigDiff> & diffs, bool read_only, bool apply_servo_config = false);
 
 /// Operating_Mode の差が含まれるか。
 bool has_operating_mode_diff(const std::vector<ConfigDiff> & diffs);

@@ -5,7 +5,9 @@
 
 #include <chrono>
 #include <cstddef>
+#include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 namespace so_arm101_hardware
@@ -34,8 +36,36 @@ public:
   /// 受信バッファを捨てる（再同期用）。
   void flush_input();
 
+  /// バスの「1 往復」（要求の送信から応答の受信まで）をポート単位で排他にする RAII。
+  /// ポートを使う処理は必ずこれを持つ。別スレッドが同時にポートを使おうとしても、後から来た方は
+  /// 先の往復が終わるまで待つので、要求や応答のバイトが混ざらない。同じスレッドからの入れ子は可
+  /// （再入可能）。待たされた回数は contention_count() に数える（ドライバは 0 のはず）。
+  class Transaction
+  {
+public:
+    explicit Transaction(SerialPort & p)
+    : p_(p)
+    {
+      if (!p_.mu_.try_lock()) {
+        p_.contention_.fetch_add(1);
+        p_.mu_.lock();
+      }
+    }
+    ~Transaction() {p_.mu_.unlock();}
+    Transaction(const Transaction &) = delete;
+    Transaction & operator=(const Transaction &) = delete;
+
+private:
+    SerialPort & p_;
+  };
+
+  /// 別の往復の最中にポートを使おうとして待たされた回数。
+  unsigned long contention_count() const {return contention_.load();}
+
 private:
   int fd_{-1};
+  std::recursive_mutex mu_;
+  std::atomic<unsigned long> contention_{0};
 };
 
 }  // namespace so_arm101_hardware
