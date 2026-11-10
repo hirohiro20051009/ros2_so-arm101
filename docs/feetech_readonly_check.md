@@ -47,8 +47,9 @@ LeRobot 側の基準は、**姿勢によって使うものが違う**。
 ターミナル1（LeRobot 用の環境変数を設定して起動）:
 ```bash
 export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false 2>&1 | tee ~/so_arm101_check/lerobot_launch.log
 ```
+（ログは必ず保存する。起動に失敗したときの原因調査に要る。3.5 節）
 `joint_state_broadcaster` が active になり、`Failed to send commands` が出ていないことを確認する。bridge は接続時にトルクを ON にする（腕が保持される）。
 
 ターミナル2（約 5 秒、動かさずに記録）:
@@ -68,7 +69,7 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 
 ## 2. feetech で同じ姿勢を記録して比較する
 
-**新しいターミナルを使う（conda を activate していない）。** 手順 6 の確認もここで行う。
+**新しいターミナルを使う（conda を activate していない）。** 手順 2.5 の確認もここで行う（launch を止める前に）。
 
 ```bash
 echo "CONDA_PREFIX=[$CONDA_PREFIX] LECONDA_SITE_PACKAGES=[$LECONDA_SITE_PACKAGES]"   # どちらも空であること
@@ -90,61 +91,9 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 - `std A / std B` は各記録中の標準偏差 [tick]。1 を超えると「静止していない可能性」と注意が出る（腕が動いている・脱力でずれている）。その場合は取り直す。
 - NaN を含む関節は FAIL（ドライバが読み取りに失敗した）。
 
-## 3. 起動時診断のログの見方
+## 2.5 hardware:=feetech が LeRobot を使っていないことの確認（手順 2 の launch 中に行う）
 
-`ros2 launch` の出力（`feetech_launch.log`）に、`[Sts3215System]` の行が出る。
-
-```
-[INFO] [Sts3215System]: initialized: port=/dev/ttyACM0 calibration=...follower_calibration.yaml [converted_from_lerobot_json, ... file_date=2026-09-07] ...
-[INFO] [Sts3215System]: [diag] shoulder_pan id=1 model=777 return_delay=0 homing_offset=135 (yaml 135) min_limit=743 (yaml 743) max_limit=3452 (yaml 3452): MATCH
- ... （6 関節ぶん）
-[INFO] [Sts3215System]: [diag] EEPROM vs yaml: 6/6 joints match
-[WARN] [Sts3215System]: READ-ONLY mode: servo registers (including torque) are never written; commands are DISCARDED. The arm will not move.
-```
-
-| ログ | 意味 | 対応 |
-|---|---|---|
-| `[diag] ...: MATCH` | サーボの EEPROM（Homing_Offset、Min/Max_Position_Limit）が yaml と一致。変換は json 作成時と同じ前提 | 問題なし |
-| `[diag] ...: MISMATCH homing_offset(servo A, yaml B)` | サーボの値が yaml と違う。**変換値が実機とずれる可能性が高い**（衝撃で offset がリセットされた、別のキャリブレーションが書かれた、など）。ドライバは止まらず読み続ける | 比較結果を信用しない。どの関節か控えて報告する。`test/readme.txt` の `lerobot-calibrate` 手順（または段階2c）でキャリブレーションし直す |
-| `model=777` 以外 / `cannot read servo (...)` | 機種違い・応答なし（電源、ケーブル、ID） | 配線・電源を確認。ドライバは起動を中止する |
-| `cannot open serial port: ... (port in use?)` | 他のプロセス（LeRobot の bridge など）が同じポートを開いている | 他を止める |
-| `READ-ONLY mode ... DISCARDED` | 起動時に 1 回。読み取り専用で腕は動かないという警告 | 想定どおり |
-| `read failed (...); consecutive=n/10; holding previous values` | 読み取りに失敗（タイムアウト、チェックサム不良、ID 違い等）。最初の 1 回と 10 回ごとに警告。1 回は自動で再試行している | 頻発するならケーブル・電源・ボーレートを確認 |
-| `read recovered after n consecutive failures` | 失敗から復帰 | 回数が多ければ通信品質を疑う |
-| `read failed 10 times in a row ... giving up` | 連続 10 回失敗。ハードウェアが `unconfigured` になり、`/joint_states` は **NaN** になる（古い値は流れない） | launch をやり直す。原因（切断・電源断）を確認 |
-| `READ-ONLY: command for '...' differs ... and is discarded` | 軌道などの指令が来たが破棄した（1 回だけ表示） | Plan & Execute をしていないか確認 |
-
-`return_delay` は参考表示（LeRobot が過去に書いた EEPROM の値。0 なら最短応答）。
-
-## 4. 重力の影響を受けない関節での比較（shoulder_pan、wrist_roll、gripper）
-
-折りたたみ姿勢だけだと、可動域の中央付近の値しか確認できない。pan・roll・gripper は重力で姿勢が変わらない（摩擦で保持される）ので、手で動かした姿勢で、LeRobot と feetech を順に読んで比較できる。
-
-P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツール `tools/lerobot_readonly_state.py` を使う**（理由とトルクの扱いは 0.5 節）。launch は接続時にトルクを ON にして腕を保持してしまい、手で姿勢を作れない。ツールは `bus.connect()` の ping とレジスタ読み出しと `sync_read` だけを行い、configure もトルク操作も書き込みもしない（バイト列検査で強制）。終了時もトルクに触れない。
-
-1. 手順 1〜2 の後、いずれの launch も止まっていること。腕は脱力しているので、折りたたみ姿勢で支える。
-2. 手で動かす: shoulder_pan を片側へ約 30°、wrist_roll を約 60°、gripper を半開き。**他の関節（lift、elbow、wrist_flex）は折りたたみのまま動かさない**。手を離しても pan・roll・gripper が動かないことを確認する。
-3. LeRobot 側を記録（conda の Python を使う。ROS は不要）:
-   ```bash
-   ~/miniforge3/envs/ros2_lerobot/bin/python ~/ros2_so-arm101/tools/lerobot_readonly_state.py --seconds 5 --out ~/so_arm101_check/lerobot_P2.csv
-   ```
-4. 腕に触れずに、手順 2 の feetech を起動して記録・比較する（出力ファイル名を `feetech_P2.csv` にする）:
-   ```bash
-   python3 ~/ros2_so-arm101/tools/record_joint_states.py --seconds 5 --out ~/so_arm101_check/feetech_P2.csv
-   python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot_P2.csv ~/so_arm101_check/feetech_P2.csv
-   ```
-5. 判定は **shoulder_pan、wrist_roll、gripper の 3 行**を見る（他の 3 関節は脱力で数 tick 動くことがあるので参考）。
-6. 逆向きの姿勢（pan を反対側へ約 30°、roll を反対側へ約 60°、gripper を閉じる）でも 2〜5 を繰り返す。符号が逆なら差が大きく出る。
-
-## 5. hardware:=feetech では RViz の Plan & Execute を実行しない
-
-- 読み取り専用なので、**指令は破棄され腕は動かない**。軌道は（open_loop のため）「成功」と表示されることがあるが、実機は動かない。実行しても意味がなく、混乱のもとになる。
-- 確認は `use_rviz:=false` で行う（`/joint_states` の記録だけ）。RViz を開く場合も、表示を見るだけにする。
-- 書き込みモード（トルク ON、Goal_Position）は段階2b-3 で別途承認してから実装する。
-
-## 6. hardware:=feetech が LeRobot を使っていないことの確認
-
-手順 2 の launch を起動したまま、別ターミナルで（**conda を activate していないこと**）:
+**手順 2 の launch を起動したまま**（止めると (3)〜(7) が確認できない）、別ターミナルで（**conda を activate していないこと**）:
 
 ```bash
 # (1) 環境: どちらも空、python3 は /usr/bin/python3
@@ -172,8 +121,81 @@ ls -l /proc/$P/fd | grep ttyACM
 
 注意: `ps` に `python3 .../ros2 launch ...` は出る（ros2 launch 自体が Python）。見るのは **`lerobot` / `miniforge3` / `follower_ros2_node` を含むか**であって、python の有無ではない。
 
-## 7. 報告してほしいもの
-- `compare_joint_states.py` の出力（P1、ツール自体の確認 `lerobot_P1` vs `lerobot_P1_tool`、P2 の3つ）
+## 3. 起動時診断のログの見方
+
+`ros2 launch` の出力（`feetech_launch.log`）に、`[Sts3215System]` の行が出る。
+
+```
+[INFO] [Sts3215System]: initialized: port=/dev/ttyACM0 calibration=...follower_calibration.yaml [converted_from_lerobot_json, ... file_date=2026-09-07] ...
+[INFO] [Sts3215System]: [diag] shoulder_pan id=1 model=777 return_delay=0 homing_offset=135 (yaml 135) min_limit=743 (yaml 743) max_limit=3452 (yaml 3452): MATCH
+ ... （6 関節ぶん）
+[INFO] [Sts3215System]: [diag] EEPROM vs yaml: 6/6 joints match
+[WARN] [Sts3215System]: READ-ONLY mode: servo registers (including torque) are never written; commands are DISCARDED. The arm will not move.
+```
+
+| ログ | 意味 | 対応 |
+|---|---|---|
+| `[diag] ...: MATCH` | サーボの EEPROM（Homing_Offset、Min/Max_Position_Limit）が yaml と一致。変換は json 作成時と同じ前提 | 問題なし |
+| `[diag] ...: MISMATCH homing_offset(servo A, yaml B)` | サーボの値が yaml と違う。**変換値が実機とずれる可能性が高い**（衝撃で offset がリセットされた、別のキャリブレーションが書かれた、など）。ドライバは止まらず読み続ける | 比較結果を信用しない。どの関節か控えて報告する。`test/readme.txt` の `lerobot-calibrate` 手順（または段階2c）でキャリブレーションし直す |
+| `model=777` 以外 / `cannot read servo (...)` | 機種違い・応答なし（電源、ケーブル、ID） | 配線・電源を確認。ドライバは起動を中止する |
+| `cannot open serial port: ... (port in use?)` | 他のプロセス（LeRobot の bridge など）が同じポートを開いている | 他を止める |
+| `READ-ONLY mode ... DISCARDED` | 起動時に 1 回。読み取り専用で腕は動かないという警告 | 想定どおり |
+| `read failed (...); consecutive=n/10; holding previous values` | 読み取りに失敗（タイムアウト、チェックサム不良、ID 違い等）。最初の 1 回と 10 回ごとに警告。1 回は自動で再試行している | 頻発するならケーブル・電源・ボーレートを確認 |
+| `read recovered after n consecutive failures` | 失敗から復帰 | 回数が多ければ通信品質を疑う |
+| `read failed 10 times in a row ... giving up` | 連続 10 回失敗。ハードウェアが `unconfigured` になり、`/joint_states` は **NaN** になる（古い値は流れない） | launch をやり直す。原因（切断・電源断）を確認 |
+| `READ-ONLY: command for '...' differs ... and is discarded` | 軌道などの指令が来たが破棄した（1 回だけ表示） | Plan & Execute をしていないか確認 |
+
+`return_delay` は参考表示（LeRobot が過去に書いた EEPROM の値。0 なら最短応答）。
+
+## 3.5 `hardware:=lerobot` で `/joint_states` が NaN、または腕が固定されない
+
+2026-11-10 に 1 回起きた（ログは残っていない。再起動で正常に戻った）。原因は未特定。コードから考えられる順:
+
+1. **bridge（Python）が接続に失敗して落ちた**（最有力）。`bridge.py` の `robot.connect()` が例外で終了すると `joint_states_raw` が来ず、`so101_hardware_bridge.cpp` が NaN で初期化した位置が更新されないので `/joint_states` が NaN になる。`configure()` はトルク ON を最後に行うので、途中で落ちれば腕も固定されない。2 つの症状を 1 つで説明できる。接続失敗の原因候補: USB の切断・再列挙（落下の衝撃や電源の揺れ）、前のプロセスがポートを掴んでいる、サーボの無応答、`LECONDA_SITE_PACKAGES` 未設定による import 失敗。
+2. `publish_joint_states` の例外（`Failed to publish joint states`）。
+3. ウォッチドッグ `_alive` が「ROS 時間が進まない」と判断して終了（`ROS time not updating`）。
+4. 起動順の競合。bridge が出れば回復するので、「再起動まで NaN」とは合いにくい。
+
+再発したら、**launch を止める前に**（実機を動かさない、読み取りだけ）:
+```bash
+ros2 node list | grep -iE 'follower|bridge'       # 無ければ bridge が落ちている
+ros2 topic hz /joint_states_raw                    # 30 Hz 来ているか
+ros2 topic echo --once /joint_states               # NaN か
+grep -nE 'Failed to connect|Failed to publish|ROS time not updating|Traceback|ImportError|Port is in use|Permission' ~/so_arm101_check/lerobot_launch.log
+ls -l /dev/ttyACM*; fuser -v /dev/ttyACM0          # ポートを誰が掴んでいるか
+dmesg | tail -30                                   # USB の切断・再列挙
+```
+結果と `lerobot_launch.log` を報告する。
+
+## 4. 重力の影響を受けない関節での比較（shoulder_pan、wrist_roll、gripper）
+
+折りたたみ姿勢だけだと、可動域の中央付近の値しか確認できない。pan・roll・gripper は重力で姿勢が変わらない（摩擦で保持される）ので、手で動かした姿勢で、LeRobot と feetech を順に読んで比較できる。
+
+P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツール `tools/lerobot_readonly_state.py` を使う**（理由とトルクの扱いは 0.5 節）。launch は接続時にトルクを ON にして腕を保持してしまい、手で姿勢を作れない。ツールは `bus.connect()` の ping とレジスタ読み出しと `sync_read` だけを行い、configure もトルク操作も書き込みもしない（バイト列検査で強制）。終了時もトルクに触れない。
+
+1. 手順 1〜2 の後、いずれの launch も止まっていること。腕は脱力しているので、折りたたみ姿勢で支える。
+2. 手で動かす: shoulder_pan を片側へ約 30°、wrist_roll を約 60°、gripper を半開き（これを P2a とする）。**他の関節（lift、elbow、wrist_flex）は折りたたみのまま動かさない**。手を離しても pan・roll・gripper が動かないことを確認する。
+3. LeRobot 側を記録（conda の Python を使う。ROS は不要）:
+   ```bash
+   ~/miniforge3/envs/ros2_lerobot/bin/python ~/ros2_so-arm101/tools/lerobot_readonly_state.py --seconds 5 --out ~/so_arm101_check/lerobot_P2a.csv
+   ```
+4. 腕に触れずに、手順 2 の feetech を起動して記録・比較する（出力名は `feetech_P2a.csv`。launch のログも `tee ~/so_arm101_check/feetech_launch_P2a.log` で保存する）:
+   ```bash
+   python3 ~/ros2_so-arm101/tools/record_joint_states.py --seconds 5 --out ~/so_arm101_check/feetech_P2a.csv
+   python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot_P2a.csv ~/so_arm101_check/feetech_P2a.csv
+   ```
+5. 判定は **shoulder_pan、wrist_roll、gripper の 3 行**を見る（他の 3 関節は脱力で数 tick 動くことがあるので参考）。
+6. 逆向きの姿勢 P2b（pan を反対側へ約 30°、roll を反対側へ約 60°、gripper を**大きく開く**）でも 2〜5 を繰り返す（`*_P2b.*`）。符号が逆なら差が大きく出る。gripper の閉じた状態は P1 で確認済みなので、P2b では開く側を見る。
+7. ツールと feetech は**別の時刻**に読むので、1 tick 程度の差は手でひねった直後の揺らぎの可能性がある。`std A` も見る（2026-11-10 の P2a の wrist_roll は平均差 0.97 tick、LeRobot 側 std 0.18 で、P2b では 0.00 だった）。
+
+## 5. hardware:=feetech では RViz の Plan & Execute を実行しない
+
+- 読み取り専用なので、**指令は破棄され腕は動かない**。軌道は（open_loop のため）「成功」と表示されることがあるが、実機は動かない。実行しても意味がなく、混乱のもとになる。
+- 確認は `use_rviz:=false` で行う（`/joint_states` の記録だけ）。RViz を開く場合も、表示を見るだけにする。
+- 書き込みモード（トルク ON、Goal_Position）は段階2b-3 で別途承認してから実装する。
+
+## 6. 報告してほしいもの
+- `compare_joint_states.py` の出力（P1、ツール自体の確認 `lerobot_P1` vs `lerobot_P1_tool`、P2a・P2b）
 - `feetech_launch.log` の `[diag]` 行（MATCH / MISMATCH）
-- 手順 6 の出力
+- 手順 2.5 の出力
 - 想定と違う挙動（例: `read failed` が頻発する、FAIL の関節がある）

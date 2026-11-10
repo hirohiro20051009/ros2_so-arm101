@@ -535,3 +535,66 @@ LeRobot 0.4.2 `MotorsBus._normalize()` を**接続せずに**直接呼んで正�
 
 ## 未確認
 実機でこのツールを実行していない。実機の `connect()` 中に、LeRobot が読み取り以外の命令を送らないことは、ソース確認（`motors_bus.py:414-444`、`feetech.py:156-168` は ping と読み取りのみ）と偽サーボでの確認、およびバイト列検査で担保している。
+
+
+---
+
+# 段階2b-2 実機確認（2026-11-10）
+
+実機の記録は `~/so_arm101_check/`（リポジトリ外）。私（Claude）は CSV とログを読み、`tools/compare_joint_states.py` を再実行して判定した。実機・シリアルポートは操作していない。実機の操作と手順6のコマンド実行はユーザー。
+
+## 結果: 合格（MISMATCH なし、`read failed` なし）
+
+| 比較 | 結果 | 備考 |
+|---|---|---|
+| P1: `lerobot_P1`（launch）vs `feetech_P1` | PASS、全関節 0.00 tick | std 0 |
+| ツール確認: `lerobot_P1` vs `lerobot_P1_tool` | PASS、全関節 0.00 tick | ツールの値 ＝ bridge 経路の値。P2 の基準に使える |
+| P2a: `lerobot_P2a`（ツール）vs `feetech_P2a` | PASS | wrist_roll のみ 平均差 0.97 / 最大差 1.00 tick（基準 1.0 / 2.0 の内側）、他は 0.00 |
+| P2b: `lerobot_P2b`（ツール）vs `feetech_P2b` | PASS、全関節 0.00 tick | pan 0.588 rad、roll 1.000 rad、gripper 1.588 rad |
+| 起動時診断（3 つの launch ログ） | 6/6 MATCH | 衝撃（腕の落下）のあとでも EEPROM は yaml と一致 |
+| 手順6（LeRobot 不使用） | 7 項目すべて想定どおり（**ユーザー報告**。出力ファイルは未確認） | conda 変数は空、プロセス・ノード・トピックなし、maps の該当 0、ldd の該当なし、ttyACM0 を開いているのは ros2_control_node |
+
+姿勢は 3 つ（折りたたみ、pan と roll をマイナス側＋gripper 半開き、pan と roll をプラス側＋gripper 大開き）。`feetech_launch*.log` に `read failed` は 0 件。
+
+## wrist_roll の 0.97 tick
+差は raw で 1 tick（-1.034872 vs -1.033388 rad、1 tick = 0.001534 rad）。LeRobot 側 150 サンプルの一部が 1 tick 隣を読んだ（std 0.18 tick）。feetech 側は std 0.00。変換式の誤差なら静止中の全サンプルが同じ向きにずれて std も 0 になるはずなので、**手でひねった直後の摩擦・バックラッシュによる揺らぎ**という説明と矛盾しない。P2b の roll は 0.00 tick で、系統差の証拠は無い。
+ただし、ツールと feetech は別の時刻に読んだので、揺らぎと小さな系統差はこのデータだけでは区別できない。判定は PASS のまま。**段階2b-3 以降で再現するなら再検討する。**
+
+## 記録の補足
+- 手順書の「P2」を P2a / P2b に分けた。P2b は gripper を「閉じる」でなく「大きく開く」に変更（閉じた状態は P1 で確認済み）。
+- feetech の launch ログは P1 / P2a / P2b で別ファイル。LeRobot の launch ログ `lerobot_launch.log` は 2 回目（正常）のもの。
+
+## 未確認
+- 書き込み系（トルク ON、Goal_Position）は未実装・未検証（段階2b-3）。
+- gripper の変換は 3 点（閉、半開、大開）のみ。pan / roll の端付近（リミット近く）は未確認。
+- MoveIt / RViz 経由の実行は対象外（読み取り専用なので指令は破棄される）。
+- この結果は `angle_ticks: 4095` を含む LeRobot 等価の変換と一致したことを示す。物理的に 4096 が正しいかは別問題（段階2c）。
+- 上の「残課題」にある「実機での比較は未実施」「EEPROM が json と一致しているか不明」は、**この節で解消**（比較は合格、EEPROM は 6/6 MATCH）。
+
+## 1 回目の `hardware:=lerobot` で `/joint_states` が NaN、腕が固定されなかった件
+ユーザー報告: 1 回目の起動では腕が固定されず `/joint_states` が NaN。再起動で正常（`/joint_states_raw` 30 Hz）。1 回目のログは残っていない。**原因は未特定**。
+候補（確からしい順）:
+1. **bridge（Python）が接続に失敗して落ちた**。`bridge.py:103-105` の `robot.connect()` が例外でノード終了 → `joint_states_raw` が来ず、`so101_hardware_bridge.cpp:45-47` で NaN 初期化した位置が更新されない → NaN。`configure()` はトルク ON を最後に行うので、途中で落ちれば腕も固定されない。2 症状を 1 つで説明できる。接続失敗の原因は、USB の切断・再列挙（直前の落下の衝撃）、ポートを掴んだままの前のプロセス、サーボの無応答、`LECONDA_SITE_PACKAGES` 未設定、のいずれか。
+2. `publish_joint_states` の例外。NaN の経路としては弱い。
+3. ウォッチドッグ `_alive` が時間停止と判断して終了。
+4. 起動順の競合。bridge が出れば回復するので、「再起動まで NaN」とは合いにくい。
+再発時の確認と、launch ログを `tee` で保存する手順は `docs/feetech_readonly_check.md` の 1 と 3.5 に追記した。
+
+## 手順書の修正（`docs/feetech_readonly_check.md`）
+- 手順6を **2.5** に移動（手順2の launch 中に行う必要があるため）。「報告してほしいもの」は 6 に繰り上げ。
+- 手順1の launch を `tee` で保存、3.5（NaN／固定されない場合の確認）を追加。
+- 手順4を P2a / P2b に合わせて修正（P2b の gripper は大きく開く、別時刻の読み取りによる 1 tick の揺らぎの注意）。
+
+---
+
+# 段階2b-3 の計画（書き込みモード: トルク ON、Goal_Position）— 未承認・未実装
+
+目的: `read_only:=false` で MoveIt / ros2_control の指令をサーボに送る。LeRobot 非依存。URDF・関節リミット・planning_frame・IK solver・SRDF・ros2_controllers.yaml は変えない。安全を最優先（落ちない・急に動かない・限界を超えない）。`read_only` の既定は true のまま。
+
+1. **書く範囲**: RAM のみ（`Torque_Enable`(40)、`Goal_Position`(42)、必要なら `Acceleration`(41)、`Goal_Speed`(46)、`Torque_Limit`(48)）。EEPROM（Homing_Offset、Min/Max_Position_Limit、Operating_Mode、Lock）は書かない（段階2c）。LeRobot の `configure()`（`so101_follower.py:149-171`）が書く項目のうち、電源再投入で戻る RAM がどれかを、起動時診断に読み取り表示（Acceleration、P/I/D、Operating_Mode、Torque_Limit）を足して確認する。アドレスは `tables.py` と突き合わせ、出典を `docs/third_party.md` に追記。
+2. **型で閉じ込める**: `Sts3215Bus` は読み取り専用のまま。別クラス `Sts3215WriteBus`（`Write` 0x03、`SyncWrite` 0x83）を追加し、`read_only` の時は生成しない。書けるのは `set_torque()` と `write_goal_positions()` に限り、任意アドレスの汎用 write は公開しない。`read_only:=true` は将来のリーダーアーム（`/leader`、トルク OFF）にそのまま使える。
+3. **指令の処理**: NaN / inf は破棄。rad → raw の逆変換を `calibration.cpp` に追加（符号付きエンコード、gripper の range を含む）。yaml の `min_limit` / `max_limit` でクランプ（MoveIt のリミットは変えない、ドライバ側の最終防衛線）。1 周期あたりの最大変化量を制限。全関節を 1 回の `SYNC_WRITE` で送る。
+4. **トルク**: 開始は ①現在位置を読む → ②`Goal_Position = 現在位置` → ③`Torque_Enable = 1`（読み取り失敗なら ON にしない）。初期は `Torque_Limit` と加速度を控えめに。終了は既定でトルク OFF（LeRobot と同じ。腕が落ちる）。読み取りが連続失敗したら指令の送信を止めて NaN を流す。
+5. **テスト（実機なし）**: WRITE / SYNC_WRITE のバイト列を scservo_sdk の固定ベクタと照合、チェックサム、符号付きエンコード、逆変換の往復、クランプ、レート制限。`tools/fake_sts3215.py` に WRITE / SYNC_WRITE とレジスタメモリを足し、起動順序（Goal → Torque ON）、指令の反映、クランプ、NaN 破棄、`read_only:=true` で書き込み命令が 0 件、を確認。mock と read-only の回帰。段階ごとに `colcon build` → commit。
+6. **実機確認（`docs/feetech_write_check.md`、実行はユーザー）**: W0 トルク ON のまま指令なしで 10 秒保持（動かない）→ W1 wrist_roll、gripper を数度 → W2 shoulder_pan を数度 → W3 lift / elbow / wrist_flex を腕を支えて小さく → W4 MoveIt の Plan & Execute（速度小、近い目標）。全段階で手を添え、電源をすぐ切れる状態で。
+7. **実装前に決めること**: 終了時の扱い（トルク OFF / 現在位置で保持 / 折りたたみへ）、異常時にトルクを保つか切るか、初期の `Torque_Limit`・`Acceleration`・1 周期の最大変化量、LeRobot が書いている RAM 設定（P/I/D、加速度）を自前で書くかサーボの現在値のままにするか。
