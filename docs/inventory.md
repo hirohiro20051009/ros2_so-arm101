@@ -709,3 +709,45 @@ EEPROM／SRAM の区分（2b-3a で確認）、電源投入時の Torque_Limit�
 
 ## 次
 実機確認の結果（A と B の診断行）を受けて、2b-3b の初期値（Acceleration、Torque_Limit、Goal_Velocity の扱い）を確定する。2b-3b の実装は、その結果を見てから。
+
+---
+
+# 段階2b-3a 実機確認（2026-11-10）
+
+実機の記録は `~/so_arm101_check/`（リポジトリ外）。私（Claude）はログを読んで判定した。実機・シリアルポート・launch は操作していない。実機の操作はユーザー。
+ログ: `servo_config_A.log`（LeRobot 設定直後）、`servo_config_B.log`（サーボ電源の入れ直し直後）、LeRobot 起動ログは **`servo_config_lerobot_la`**（ファイル名が途中で切れている。手順書の名前は `servo_config_lerobot_launch.log`）。
+
+## 結果: 合格
+- A・B とも **6/6 MATCH (LeRobot)**。`status=0x0`、電圧 11.8〜11.9 V、温度 28〜34 ℃。
+- A・B とも `read failed` は 0 件。コントローラ 3 つが active（A・B・LeRobot 起動ログとも `Configured and activated` が 3 件）。診断の読み取り追加による副作用は見られない。
+- 診断の所要時間: 1 関節あたり約 8.5 ms、6 関節で約 44 ms（`on_configure` のみ。事前の見積り「1 ms 前後」より長いが問題ない）。
+
+## A と B の比較
+| 項目 | A（LeRobot 直後） | B（電源投入直後） | 判定 |
+|---|---|---|---|
+| P / I / D | 16 / 0 / 32 | 同じ | **EEPROM と確定**（P は既定 32 から変更した値が残った） |
+| gripper の Max_Torque_Limit / Protection_Current / Overload_Torque | 500 / 250 / 25 | 同じ | **EEPROM と確定**（腕の 1000 / 310 / 80 と違う値が残った） |
+| Operating_Mode、Return_Delay_Time | 0、0 | 同じ | EEPROM と矛盾しない。ただし 0 は既定値の可能性があり、**これだけでは区別できない** |
+| Maximum_Acceleration | 254 | 254 | 電源を切っても残った（EEPROM 相当）。工場出荷値も 254 の可能性があり区別できない。書かない |
+| **Acceleration** | **254** | **0** | **SRAM と確定。電源投入時の既定値は 0** |
+| **Lock** | **0** | **1** | **SRAM と確定。電源投入時の既定値は 1**。LeRobot の停止後は Torque_Enable=0・Lock=0 のまま残る |
+| Torque_Limit | 1000（gripper 500） | 同じ | **区別できない**。電源投入時の値は Max_Torque_Limit と同じ（1000 / gripper 500）で、「腕は 1000 のまま」の前提と一致 |
+| Goal_Velocity | 0 | 0 | 区別できない。LeRobot は書かないので、0 が電源投入時の値 |
+| Torque_Enable | 0 | 0 | 区別できない（LeRobot の停止で 0 になるため） |
+
+## Acceleration=0 の意味（確度つき）
+- **この環境で確認できた出典**: `tables.py:100` のコメント `Acceleration_Multiplier: Acceleration multiplier in effect when acceleration is 0`（レジスタ 86）。`feetech.py:227` のコメント `Set Maximum_Acceleration to 254 to speedup acceleration and deceleration`。**どちらも「0 = 制限なし」とは書いていない**。0 のときに別の係数（86）が効く、という読み方もでき、「加速度制御なし」と「別の加速度で動く」を区別できない。
+- 記憶による情報（Feetech の SCServo SDK／資料で ACC は 0〜254、0 は特別扱い、単位は 100 step/s²）は**原本を見ていないので確度は低い**。
+- 実機で見えた事実: B の 0 は電源投入時の値。**0 のときの動き方は観測していない**（254 は LeRobot で動作済み）。
+- 結論: **0 の意味は未確認**。「0 = 制限なし（目標へ最大の勢いで動く）」の可能性を排除できないので、**0 のままトルクを ON にしてはいけない**として設計する。
+- 参考（実機で観測済み）: Goal_Velocity=0 のまま LeRobot で腕が目標へ動いている（段階2a）ので、Goal_Velocity=0 は速度停止ではない。速度の上限が無いなら、動きの滑らかさは Acceleration と指令側の制限だけで決まる。
+
+## 判明した設計上の影響
+1. サーボの電源が一時的に落ちて復帰すると、Acceleration=0・Lock=1・Torque_Enable=0 に戻る（腕は脱力）。ドライバが動き続けていても、トルクは勝手には戻らない。これは**検出して止める**必要がある（下の 2b-3b 計画）。
+2. 停止後の Lock=0 と、電源投入後の Lock=1 の両方から始まりうる。起動は、どちらの状態でも同じ手順で安全に進める必要がある。
+
+## 未確認として残るもの
+- Acceleration=0 の動作、Acceleration の単位。
+- Torque_Limit(48) / Goal_Velocity(46) が SRAM か（このデータでは不明。設計は区分に依存しない）。
+- Lock=1 のまま SRAM（Acceleration など）へ書けるか。
+- 通信断でサーボが最後の目標を保持し続けること、JTC が 25 Hz で指令を更新していること（2b-3b）。
