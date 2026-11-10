@@ -122,6 +122,24 @@ double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw)
   return value * kDegToRad;  // bridge.py: math.radians(値)（gripper の 0..100 も度として扱う）
 }
 
+double rad_to_raw_continuous(const JointCalibration & j, int angle_ticks, double rad)
+{
+  const double value = rad * (180.0 / kPi);  // math.degrees(rad)（bridge.py radians_to_normalized）
+  if (j.kind == JointKind::Angle) {
+    // DEGREES: val * max_res / 360 + mid（motors_bus.py _unnormalize）。direction は自己逆（±1）
+    return (j.direction * value) * static_cast<double>(angle_ticks) / 360.0 + j.center;
+  }
+  // RANGE_0_100: bounded = clamp(val, 0, 100); bounded / 100 * (max − min) + min
+  const double v = (j.direction == -1) ? 100.0 - value : value;
+  const double bounded = std::min(100.0, std::max(0.0, v));
+  return (bounded / 100.0) * static_cast<double>(j.raw_max - j.raw_min) + j.raw_min;
+}
+
+int rad_to_raw(const JointCalibration & j, int angle_ticks, double rad)
+{
+  return static_cast<int>(std::lround(rad_to_raw_continuous(j, angle_ticks, rad)));
+}
+
 double tick_in_rad(const JointCalibration & j, int angle_ticks)
 {
   if (j.kind == JointKind::Angle) {return 2.0 * kPi / static_cast<double>(angle_ticks);}

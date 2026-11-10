@@ -6,6 +6,7 @@
 
 <dir>/positions.json  {"1": 2097, ...}  各 ID の Present_Position（毎回読み直す。無ければ中心/中点）
 <dir>/mode            ok | silent | corrupt   応答の挙動（毎回読み直す）
+--reg ID:ADDR:LEN=値 : 任意のレジスタを上書き（診断の設定比較の確認用。例: --reg 2:21:1=32 は ID 2 の P_Coefficient を 32 に）
 --homing-offset ID=値 : その ID の EEPROM Homing_Offset を yaml と違う値にする（診断の MISMATCH 確認用）
 対応する命令は PING(0x01)・READ(0x02)・SYNC_READ(0x82) のみ。受けた命令の回数は <dir>/instructions.json に書く。それ以外が来たら "UNEXPECTED INSTRUCTION" と標準エラーに出す
 （ドライバが書き込み命令を送っていないことの確認）。
@@ -34,10 +35,16 @@ def main():
     ap.add_argument('--calibration', required=True)
     ap.add_argument('--state-dir', required=True)
     ap.add_argument('--homing-offset', action='append', default=[])
+    ap.add_argument('--reg', action='append', default=[])
     args = ap.parse_args()
     cal = yaml.safe_load(open(args.calibration))
     joints = {j['id']: j for j in cal['joints'].values()}
     override = {int(k): int(v) for k, v in (s.split('=') for s in args.homing_offset)}
+    reg_override = {}
+    for spec in args.reg:
+        key, val = spec.split('=')
+        id_, addr, length = (int(x) for x in key.split(':'))
+        reg_override[(id_, addr)] = (int(val), length)
     os.makedirs(args.state_dir, exist_ok=True)
     pos_file = os.path.join(args.state_dir, 'positions.json')
     mode_file = os.path.join(args.state_dir, 'mode')
@@ -72,6 +79,27 @@ def main():
         put(11, e['max_limit'], 2)
         put(31, sign_mag(override.get(id_, e['homing_offset']), 11), 2)
         put(56, sign_mag(pos, 15), 2)
+        # LeRobot の configure() 後の設定（段階2b-3a の診断用）。gripper だけトルク系を絞る
+        is_gripper = j['kind'] == 'linear_percent'
+        put(16, 500 if is_gripper else 1000, 2)   # Max_Torque_Limit
+        put(21, 16, 1)                            # P
+        put(22, 32, 1)                            # D
+        put(23, 0, 1)                             # I
+        put(28, 250 if is_gripper else 500, 2)    # Protection_Current
+        put(33, 0, 1)                             # Operating_Mode
+        put(36, 25 if is_gripper else 80, 1)      # Overload_Torque
+        put(40, 0, 1)                             # Torque_Enable（偽サーボはトルク OFF の状態）
+        put(41, 254, 1)                           # Acceleration
+        put(46, 0, 2)                             # Goal_Velocity
+        put(48, 1000, 2)                          # Torque_Limit
+        put(55, 1, 1)                             # Lock
+        put(62, 75, 1)                            # 7.5 V
+        put(63, 30, 1)                            # 30 C
+        put(65, 0, 1)                             # Status
+        put(85, 254, 1)                           # Maximum_Acceleration
+        for (rid, addr), (val, length) in reg_override.items():
+            if rid == id_:
+                put(addr, val, length)
         return mem
 
     def respond(id_, addr, n):

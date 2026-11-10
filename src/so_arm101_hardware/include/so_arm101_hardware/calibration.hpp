@@ -63,6 +63,16 @@ Calibration load_calibration(const std::string & path);
 /// 演算の順序は LeRobot の _normalize と math.radians に合わせている（浮動小数まで一致させるため）。
 double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw);
 
+/// rad → raw（Goal_Position 用。段階2b-3a で追加。まだ書き込みには使っていない）。
+/// raw_to_rad の逆。LeRobot の MotorsBus._unnormalize() と同じ式（angle: val·ticks/360 + center、
+/// gripper: 0..100 に clamp して min..max へ）だが、**最後の丸めだけ四捨五入**にしている
+/// （LeRobot は int() で切り捨て。差は常に 0 か +1 tick。raw→rad→raw が恒等になり、
+/// 保持指令が 1 tick ずれるのを避けるため）。Angle は clamp しない（限界の clamp は呼び出し側）。
+int rad_to_raw(const JointCalibration & j, int angle_ticks, double rad);
+
+/// rad_to_raw の途中値（丸める前の連続値）。LeRobot の切り捨てとの比較試験用。
+double rad_to_raw_continuous(const JointCalibration & j, int angle_ticks, double rad);
+
 /// 1 tick に相当する rad（診断・比較用）。Angle: 2π/angle_ticks、LinearPercent: radians(100/(max−min))。
 double tick_in_rad(const JointCalibration & j, int angle_ticks);
 

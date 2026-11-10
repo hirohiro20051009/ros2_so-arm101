@@ -38,7 +38,8 @@ hardware_interface::CallbackReturn Sts3215System::on_init(const hardware_interfa
     RCLCPP_ERROR(logger(), "hardware params 'serial_port' and 'calibration_file' are required");
     return hardware_interface::CallbackReturn::ERROR;
   }
-  if (!is_true(param(info_, "read_only", "true"))) {
+  read_only_ = is_true(param(info_, "read_only", "true"));
+  if (!read_only_) {
     RCLCPP_ERROR(
       logger(), "read_only:=false is not implemented (write mode is stage 2b-3). Refusing to start.");
     return hardware_interface::CallbackReturn::ERROR;
@@ -177,6 +178,83 @@ bool Sts3215System::run_diagnostics()
   return !fatal;
 }
 
+bool Sts3215System::run_servo_config_diagnostics()
+{
+  int matched = 0;
+  bool fatal = false;
+  for (size_t i = 0; i < cal_.size(); ++i) {
+    const JointCalibration & c = *cal_[i];
+    // 読み取りだけ。値は符号なしのまま（Goal_Velocity だけ sign-magnitude をデコード）
+    auto rd1 = [&](Register r, int * v, Status * st) {
+        std::vector<uint8_t> b;
+        if (*st == Status::Ok) {*st = bus_->read(c.id, r, &b);}
+        if (*st == Status::Ok && !b.empty()) {
+          *v = (r.length == 2) ? int(b[0] | (b[1] << 8)) : int(b[0]);
+        }
+      };
+    ServoSettings a;
+    int torque_enable = -1, lock = -1, accel = -1, torque_limit = -1, max_accel = -1, status = -1, volt = -1,
+      temp = -1, goal_vel_raw = 0;
+    Status st = Status::Ok;
+    rd1(reg::kOperatingMode, &a.operating_mode, &st);
+    rd1(reg::kPCoefficient, &a.p, &st);
+    rd1(reg::kICoefficient, &a.i, &st);
+    rd1(reg::kDCoefficient, &a.d, &st);
+    rd1(reg::kReturnDelayTime, &a.return_delay, &st);
+    rd1(reg::kMaxTorqueLimit, &a.max_torque_limit, &st);
+    rd1(reg::kProtectionCurrent, &a.protection_current, &st);
+    rd1(reg::kOverloadTorque, &a.overload_torque, &st);
+    rd1(reg::kTorqueEnable, &torque_enable, &st);
+    rd1(reg::kLock, &lock, &st);
+    rd1(reg::kAcceleration, &accel, &st);
+    rd1(reg::kTorqueLimit, &torque_limit, &st);
+    rd1(reg::kGoalVelocity, &goal_vel_raw, &st);
+    rd1(reg::kMaximumAcceleration, &max_accel, &st);
+    rd1(reg::kStatus, &status, &st);
+    rd1(reg::kPresentVoltage, &volt, &st);
+    rd1(reg::kPresentTemperature, &temp, &st);
+    if (st != Status::Ok) {
+      RCLCPP_ERROR(
+        logger(), "[diag] %s id=%d: cannot read servo settings (%s: %s)", c.name.c_str(), int(c.id), to_string(st),
+        bus_->last_error().c_str());
+      fatal = true;
+      continue;
+    }
+    const int goal_vel = decode_sign_magnitude(static_cast<uint16_t>(goal_vel_raw), kGoalVelocitySignBit);
+    const auto diffs = compare_servo_config(expected_servo_config(c), a);
+    std::ostringstream line;
+    line << "[diag] " << c.name << " id=" << int(c.id) << " EEPROM: operating_mode=" << a.operating_mode
+         << " P=" << a.p << " I=" << a.i << " D=" << a.d << " return_delay=" << a.return_delay
+         << " max_torque_limit=" << a.max_torque_limit << " protection_current=" << a.protection_current
+         << " overload_torque=" << a.overload_torque << " | SRAM: torque_enable=" << torque_enable
+         << " lock=" << lock << " acceleration=" << accel << " torque_limit=" << torque_limit
+         << " goal_velocity=" << goal_vel << " | other: maximum_acceleration=" << max_accel
+         << " status=0x" << std::hex << status << std::dec << " voltage=" << volt / 10.0 << "V temperature="
+         << temp << "C";
+    switch (config_action(diffs, read_only_)) {
+      case ConfigAction::Ok:
+        ++matched;
+        RCLCPP_INFO(logger(), "%s: MATCH (LeRobot)", line.str().c_str());
+        break;
+      case ConfigAction::Warn:
+        RCLCPP_WARN(
+          logger(), "%s: DIFFERS from LeRobot values:%s%s", line.str().c_str(), to_string(diffs).c_str(),
+          has_operating_mode_diff(diffs) ?
+          " -> Operating_Mode is not 0 (position control): write mode would refuse to enable torque" :
+          " -> read-only mode continues; write mode (read_only:=false) would refuse to start");
+        break;
+      case ConfigAction::Abort:
+        RCLCPP_ERROR(
+          logger(), "%s: DIFFERS from LeRobot values:%s -> refusing to start (torque is not enabled)",
+          line.str().c_str(), to_string(diffs).c_str());
+        fatal = true;
+        break;
+    }
+  }
+  RCLCPP_INFO(logger(), "[diag] servo settings vs LeRobot: %d/%zu joints match", matched, cal_.size());
+  return !fatal;
+}
+
 hardware_interface::CallbackReturn Sts3215System::on_configure(const rclcpp_lifecycle::State &)
 {
   std::string err;
@@ -185,7 +263,7 @@ hardware_interface::CallbackReturn Sts3215System::on_configure(const rclcpp_life
     return hardware_interface::CallbackReturn::ERROR;
   }
   bus_ = std::make_unique<Sts3215Bus>(port_, std::chrono::milliseconds(timeout_ms_));
-  if (!run_diagnostics()) {
+  if (!run_diagnostics() || !run_servo_config_diagnostics()) {
     port_.close();
     bus_.reset();
     return hardware_interface::CallbackReturn::ERROR;

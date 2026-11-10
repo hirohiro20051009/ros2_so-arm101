@@ -27,6 +27,7 @@ add_library(so_arm101_sts3215 SHARED
   src/serial_port.cpp
   src/sts3215_bus.cpp
   src/calibration.cpp
+  src/servo_config.cpp
   src/sts3215_system.cpp)
 ament_target_dependencies(so_arm101_sts3215 rclcpp hardware_interface pluginlib)
 target_link_libraries(so_arm101_sts3215 yaml-cpp)
@@ -54,7 +55,11 @@ if(BUILD_TESTING)
   target_link_libraries(test_conversion so_arm101_sts3215)
   target_compile_definitions(test_conversion PRIVATE
     CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/follower_calibration.yaml"
-    GOLDEN_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/data/conversion_golden.csv")
+    GOLDEN_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/data/conversion_golden.csv"
+    UNNORMALIZE_GOLDEN_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/data/unnormalize_golden.csv")
+
+  ament_add_gtest(test_servo_config test/test_servo_config.cpp)
+  target_link_libraries(test_servo_config so_arm101_sts3215)
 
   ament_add_gtest(test_sts3215_bus test/test_sts3215_bus.cpp)
   target_link_libraries(test_sts3215_bus so_arm101_sts3215 util)

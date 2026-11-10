@@ -152,3 +152,87 @@ TEST(SignMagnitude, DecodesLikeLeRobot)
   EXPECT_EQ(decode_sign_magnitude(0x0FFF, 15), 4095);
   EXPECT_EQ(decode_sign_magnitude(0x7FFF, 15), 32767);
 }
+
+// ---- 段階2b-3a: 逆変換 rad → raw（まだ書き込みには使わない） ----
+
+TEST(InverseConversion, MatchesLeRobotUnnormalizeWithinOneTick)
+{
+  // unnormalize_golden.csv は LeRobot 0.4.2 の MotorsBus._unnormalize()（int() で切り捨て）の結果。
+  // こちらは最後の丸めだけ四捨五入なので、差は 0 か +1 tick（切り捨て ≤ 四捨五入）でなければならない。
+  const Calibration cal = load_calibration(CALIBRATION_YAML);
+  std::ifstream f(UNNORMALIZE_GOLDEN_CSV);
+  ASSERT_TRUE(f.is_open()) << UNNORMALIZE_GOLDEN_CSV;
+  std::string line;
+  std::map<std::string, size_t> rows, plus_one;
+  while (std::getline(f, line)) {
+    if (line.empty() || line[0] == '#' || line.rfind("joint,", 0) == 0) {continue;}
+    std::stringstream ss(line);
+    std::string joint, val_s, raw_s;
+    std::getline(ss, joint, ',');
+    std::getline(ss, val_s, ',');
+    std::getline(ss, raw_s, ',');
+    const JointCalibration * j = cal.find(joint);
+    ASSERT_NE(j, nullptr) << joint;
+    const double value = std::stod(val_s);         // 度（angle）または 0..100（gripper）
+    const int lerobot_raw = std::stoi(raw_s);
+    const double rad = value * (kPi / 180.0);     // bridge.py: math.radians(値)
+    const int got = rad_to_raw(*j, cal.angle_ticks, rad);
+    const int diff = got - lerobot_raw;
+    const double x = rad_to_raw_continuous(*j, cal.angle_ticks, rad);
+    if (x >= 0.0) {
+      // 切り捨て ≤ 四捨五入: 差は 0 か +1。連続値は [lerobot_raw, lerobot_raw + 1)
+      EXPECT_TRUE(diff == 0 || diff == 1) << joint << " value=" << value << " got=" << got << " lerobot=" << lerobot_raw;
+      EXPECT_GE(x, lerobot_raw - 1e-6) << joint << " value=" << value;
+      EXPECT_LT(x, lerobot_raw + 1.0 + 1e-6) << joint << " value=" << value;
+    } else {
+      // raw が負になる範囲外（実機では出ない。Goal_Position は呼び出し側で clamp する）。
+      // int() は 0 へ向けて切り捨てるので向きが逆。差は 0 か −1
+      EXPECT_TRUE(diff == 0 || diff == -1) << joint << " value=" << value << " got=" << got << " lerobot=" << lerobot_raw;
+    }
+    ++rows[joint];
+    if (diff == 1) {++plus_one[joint];}
+  }
+  EXPECT_EQ(rows.size(), 6u);
+  for (const auto & kv : rows) {
+    std::printf("[inverse] %-14s rows=%zu (+1 tick vs LeRobot truncation: %zu)\n", kv.first.c_str(), kv.second,
+      plus_one[kv.first]);
+  }
+}
+
+TEST(InverseConversion, RoundTripIsIdentityInsideTheRange)
+{
+  // raw → rad → raw が恒等（保持指令が 1 tick ずれない）。gripper は clamp 範囲 [min, max] の中だけ。
+  const Calibration cal = load_calibration(CALIBRATION_YAML);
+  for (const auto & j : cal.joints) {
+    int lo = 0, hi = 4095;
+    if (j.kind == JointKind::LinearPercent) {lo = j.raw_min; hi = j.raw_max;}
+    for (int raw = lo; raw <= hi; ++raw) {
+      ASSERT_EQ(rad_to_raw(j, cal.angle_ticks, raw_to_rad(j, cal.angle_ticks, raw)), raw)
+        << j.name << " raw=" << raw;
+    }
+  }
+}
+
+TEST(InverseConversion, GripperIsClampedAndAngleIsNot)
+{
+  const Calibration cal = load_calibration(CALIBRATION_YAML);
+  const JointCalibration * g = cal.find("gripper");
+  ASSERT_NE(g, nullptr);
+  EXPECT_EQ(rad_to_raw(*g, cal.angle_ticks, -1.0), g->raw_min);   // 0% 未満は min
+  EXPECT_EQ(rad_to_raw(*g, cal.angle_ticks, 5.0), g->raw_max);    // 100% 超は max
+  const JointCalibration * p = cal.find("shoulder_pan");
+  ASSERT_NE(p, nullptr);
+  // 角度は clamp しない（限界でのクランプは呼び出し側＝2b-3b の責任）
+  EXPECT_LT(rad_to_raw(*p, cal.angle_ticks, -3.5), 0);
+  EXPECT_GT(rad_to_raw(*p, cal.angle_ticks, 3.5), 4095);
+}
+
+TEST(InverseConversion, HardwareLimitsAreInsideTheLimitsOfTheYaml)
+{
+  // 参考: yaml の min/max（= EEPROM のリミット）を rad に直してから raw に戻すと、元の値になる。
+  const Calibration cal = load_calibration(CALIBRATION_YAML);
+  for (const auto & j : cal.joints) {
+    EXPECT_EQ(rad_to_raw(j, cal.angle_ticks, raw_to_rad(j, cal.angle_ticks, j.raw_min)), j.raw_min) << j.name;
+    EXPECT_EQ(rad_to_raw(j, cal.angle_ticks, raw_to_rad(j, cal.angle_ticks, j.raw_max)), j.raw_max) << j.name;
+  }
+}

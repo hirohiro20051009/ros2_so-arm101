@@ -17,6 +17,7 @@
 #include "rclcpp_lifecycle/state.hpp"
 #include "so_arm101_hardware/calibration.hpp"
 #include "so_arm101_hardware/serial_port.hpp"
+#include "so_arm101_hardware/servo_config.hpp"
 #include "so_arm101_hardware/sts3215_bus.hpp"
 
 namespace so_arm101_hardware
@@ -44,6 +45,9 @@ private:
   bool read_raw_positions(std::vector<int> * raw, std::string * why);
   /// 起動時診断（EEPROM と yaml の比較）。致命的な失敗なら false。
   bool run_diagnostics();
+  /// 段階2b-3a: 設定レジスタを読んで LeRobot の値と比較し、結果を [diag] で表示する（読み取りだけ）。
+  /// 読み取りに失敗、または read_only:=false で不一致なら false（起動を中止）。read_only:=true の不一致は WARN のみ。
+  bool run_servo_config_diagnostics();
   /// state / command を NaN にする（古い値が有効値として流れ続けないように）。
   void invalidate_state();
   rclcpp::Logger logger() const {return rclcpp::get_logger("Sts3215System");}
@@ -69,6 +73,7 @@ private:
   int consecutive_failures_{0};
   unsigned long reads_{0}, retried_{0}, failed_cycles_{0};
   bool warned_discard_{false};
+  bool read_only_{true};
 };
 
 }  // namespace so_arm101_hardware

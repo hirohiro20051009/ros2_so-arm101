@@ -676,3 +676,36 @@ EEPROM／SRAM の区分（2b-3a で確認）、電源投入時の Torque_Limit�
 
 ## 将来の課題
 ゆっくり折りたたみ姿勢へ動かして終了する機能。1 Hz のサーボ状態監視。
+
+---
+
+# 段階2b-3a: 読み取りだけの準備（2026-11-10）
+
+書き込みは入れていない。サーボ・実ポートは操作していない（確認は pty 上の偽サーボとユニットテスト）。
+
+## 追加・変更したファイル
+- `include/so_arm101_hardware/sts3215_bus.hpp`: 読むだけのレジスタ定数を追加（Operating_Mode、P/I/D、Max_Torque_Limit、Protection_Current、Overload_Torque、Torque_Enable、Acceleration、Goal_Velocity、Torque_Limit、Lock、電圧、温度、Status、Maximum_Acceleration）。`Instruction` は Read / SyncRead のまま（書き込み命令は型に存在しない）。
+- `servo_config.hpp` / `servo_config.cpp`（新規）: LeRobot の値との比較（`expected_servo_config`、`compare_servo_config`）と、不一致の扱い `config_action(diffs, read_only)`。
+- `sts3215_system.cpp`: `run_servo_config_diagnostics()` を `on_configure` の診断に追加。各関節について `[diag] <joint> id=N EEPROM: ... | SRAM: ... | other: ...: MATCH (LeRobot)` または `DIFFERS from LeRobot values: ...`、最後に `servo settings vs LeRobot: n/6 joints match`。**`read_only:=true` では不一致は WARN のみで起動を続ける。`read_only:=false` では ERROR で起動を中止する**（この分岐は 2b-3b で使う。今は `read_only:=false` 自体を拒否している）。
+- `calibration.cpp`: `rad_to_raw()`、`rad_to_raw_continuous()`（Goal_Position 用の逆変換。まだ書き込みには使っていない）。
+- `tools/gen_conversion_golden.py`: `MotorsBus._unnormalize()` の正解表 `test/data/unnormalize_golden.csv`（6 関節 × 約 1070 行）を作る。`conversion_golden.csv` は変更なし。
+- `tools/fake_sts3215.py`: LeRobot の `configure()` 後の設定を返し、`--reg ID:ADDR:LEN=値` で上書きできる。
+- `test/test_servo_config.cpp`（新規 7 件）、`test/test_conversion.cpp`（逆変換 4 件を追加）。
+- `docs/feetech_servo_config_check.md`（実機確認の手順）、`docs/third_party.md`（出典の追記）。
+
+## 逆変換の仕様（LeRobot との差）
+式は LeRobot の `_unnormalize` と同じ（angle: `val·ticks/360 + center`、gripper: 0..100 に clamp して min..max）。**最後の丸めだけ四捨五入**（LeRobot は `int()` の切り捨て）。理由: raw→rad→raw が恒等になり、保持指令が 1 tick ずれない。切り捨てとの差は 0 か +1 tick（正の範囲）。angle は clamp しない（限界のクランプは 2b-3b の write()）。
+
+## 検証
+- `colcon build`（7 パッケージ）、`colcon test --packages-select so_arm101_hardware`: 36 件すべて成功。
+- 既存の変換（raw→rad）の正解表との一致は変わらず（最大誤差 0）。
+- 逆変換: 6 関節 × 約 1070 値で LeRobot の `_unnormalize` と比べ、差は 0 か +1 tick（負の raw になる範囲外は 0 か −1）。丸める前の連続値は LeRobot の式と一致。範囲内の全 raw で raw→rad→raw が恒等（gripper は min..max）。
+- pty の偽サーボに `hardware:=feetech` を起動: 設定が LeRobot と同じ 4 関節は `MATCH (LeRobot)`、ID 2 の P を 32、gripper の Max_Torque_Limit を 1000 にした 2 関節は `DIFFERS from LeRobot values: P_Coefficient(servo 32, expected 16)` などの WARN を出して**起動を続けた**（`4/6 joints match`）。偽サーボが受けた命令は READ（0x02）と SYNC_READ（0x82）だけ（`UNEXPECTED INSTRUCTION` なし）。
+
+## 未確認（実機）
+- EEPROM／SRAM の区分、電源投入時の `Torque_Limit`・`Acceleration`・`Goal_Velocity`・`Lock` の値、`Acceleration` の単位。手順は `docs/feetech_servo_config_check.md`（LeRobot 設定直後 A と電源再投入直後 B を読んで比べる）。
+- 実機の診断で、全 17 レジスタの読み取りが 1 ms 前後で完了し、`on_configure` が長引かないこと（偽サーボでは 6 関節で約 8 ms）。
+- 診断に使う読み取りの追加でサーボが応答しなくなる、などの副作用が無いこと（読み取りのみ。LeRobot の `read` と同じ命令）。
+
+## 次
+実機確認の結果（A と B の診断行）を受けて、2b-3b の初期値（Acceleration、Torque_Limit、Goal_Velocity の扱い）を確定する。2b-3b の実装は、その結果を見てから。

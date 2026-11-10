@@ -22,9 +22,15 @@ so_arm101 のドライバ（`so_arm101_hardware` の `Sts3215System`）は **LeR
 | `Present_Position = Actual_Position − Homing_Offset`（homing_offset は EEPROM 側の値） | `lerobot/motors/feetech/feetech.py` `_get_half_turn_homings()` の docstring（283-292 行） | `docs/inventory.md`（設計メモ）、yaml の `eeprom.*`（診断専用） |
 | 変換の正解表の生成 | `MotorsBus._normalize()` を実際に呼ぶ（接続せず、シリアルは開かない） | `tools/gen_conversion_golden.py` → `src/so_arm101_hardware/test/data/conversion_golden.csv` |
 | 比較用の読み取り専用 bus | `FeetechMotorsBus.connect()` と `sync_read("Present_Position")` のみ | `tools/lerobot_readonly_state.py`（比較専用。ドライバは依存しない） |
+| 逆変換 rad → raw（Goal_Position 用。段階2b-3a で追加、まだ書き込みには使わない） | `lerobot/motors/motors_bus.py` `MotorsBus._unnormalize()`（angle: `val·max_res/360 + mid`、gripper: 0..100 に clamp して min..max）と、bridge の `radians_to_normalized`（`math.degrees`）。**最後の丸めだけ四捨五入**（LeRobot は `int()` の切り捨て。差は 0 か +1 tick） | `src/so_arm101_hardware/src/calibration.cpp` `rad_to_raw()` |
+| サーボ設定の期待値（段階2b-3a。**比較して表示するだけ**で、書かない） | `so101_follower.py` `SO101Follower.configure()`（149-171 行: Operating_Mode=0、P=16、I=0、D=32。gripper のみ Max_Torque_Limit=500、Protection_Current=250、Overload_Torque=25）、`feetech.py` `configure_motors()`（222-230 行: Return_Delay_Time=0、Maximum_Acceleration=254、Acceleration=254） | `src/so_arm101_hardware/src/servo_config.cpp` `expected_servo_config()`（Maximum_Acceleration と Acceleration は表示のみで比べない） |
+| 追加で読むレジスタのアドレス（Operating_Mode 33、P/I/D 21/23/22、Max_Torque_Limit 16、Protection_Current 28、Overload_Torque 36、Torque_Enable 40、Acceleration 41、Goal_Velocity 46、Torque_Limit 48、Lock 55、電圧 62、温度 63、Status 65、Maximum_Acceleration 85）と EEPROM／SRAM の区分 | `lerobot/motors/feetech/tables.py` `STS_SMS_SERIES_CONTROL_TABLE`（`# EPROM`／`# SRAM`／`# Factory` の見出し） | `include/so_arm101_hardware/sts3215_bus.hpp` `reg::`（読み取りに使う） |
+| 逆変換の正解表の生成 | `MotorsBus._unnormalize()` を実際に呼ぶ（接続せず、シリアルは開かない） | `tools/gen_conversion_golden.py` → `src/so_arm101_hardware/test/data/unnormalize_golden.csv` |
 
 `tools/gen_conversion_golden.py` と `tools/lerobot_readonly_state.py` は開発・比較用で、`lerobot` を import する。ビルドにも実行時のドライバにも含まれない。
-`conversion_golden.csv` は LeRobot の `_normalize()` の出力（数値）であり、LeRobot のコードを含まない。
+`conversion_golden.csv` と `unnormalize_golden.csv` は LeRobot の `_normalize()` / `_unnormalize()` の出力（数値）であり、LeRobot のコードを含まない。
+
+**STS3215 の仕様書**（`doc.feetech.cn`）は参照元だが、原本は確認していない。レジスタの意味・単位（例: Acceleration の単位）は LeRobot の `tables.py` とコメントからの引用で、実機での確認は未了（`docs/feetech_servo_config_check.md`）。
 
 ## Feetech SDK / プロトコル仕様
 

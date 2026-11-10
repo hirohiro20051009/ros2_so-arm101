@@ -43,9 +43,29 @@ constexpr Register kMinPositionLimit{9, 2};
 constexpr Register kMaxPositionLimit{11, 2};
 constexpr Register kHomingOffset{31, 2};     // 符号付き: sign-magnitude, bit11
 constexpr Register kPresentPosition{56, 2};  // 符号付き: sign-magnitude, bit15
+
+// 段階2b-3a: 起動時診断で「読む」だけのレジスタ（tables.py:41-101）。書き込みは 2b-3b で別クラスに追加する。
+// アドレス 39 以下は EEPROM、40 以降は SRAM（tables.py の "# EPROM" / "# SRAM" の区分。推定。実機で未確認）。
+constexpr Register kMaxTorqueLimit{16, 2};       // EEPROM（最大 1000）
+constexpr Register kPCoefficient{21, 1};         // EEPROM
+constexpr Register kDCoefficient{22, 1};         // EEPROM
+constexpr Register kICoefficient{23, 1};         // EEPROM
+constexpr Register kProtectionCurrent{28, 2};    // EEPROM（最大 500）
+constexpr Register kOperatingMode{33, 1};        // EEPROM（0 = 位置制御）
+constexpr Register kOverloadTorque{36, 1};       // EEPROM
+constexpr Register kTorqueEnable{40, 1};         // SRAM
+constexpr Register kAcceleration{41, 1};         // SRAM
+constexpr Register kGoalVelocity{46, 2};         // SRAM, 符号付き: sign-magnitude, bit15
+constexpr Register kTorqueLimit{48, 2};          // SRAM
+constexpr Register kLock{55, 1};                 // SRAM
+constexpr Register kPresentVoltage{62, 1};       // 0.1 V
+constexpr Register kPresentTemperature{63, 1};   // ℃
+constexpr Register kStatus{65, 1};
+constexpr Register kMaximumAcceleration{85, 1};  // Factory 表（区分は不明）
 }  // namespace reg
 constexpr int kHomingOffsetSignBit = 11;
 constexpr int kPositionSignBit = 15;
+constexpr int kGoalVelocitySignBit = 15;
 constexpr uint16_t kModelNumberSts3215 = 777;  // tables.py MODEL_NUMBER_TABLE["sts3215"]
 
 enum class Status
