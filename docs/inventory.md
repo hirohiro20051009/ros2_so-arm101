@@ -587,14 +587,92 @@ LeRobot 0.4.2 `MotorsBus._normalize()` を**接続せずに**直接呼んで正�
 
 ---
 
-# 段階2b-3 の計画（書き込みモード: トルク ON、Goal_Position）— 未承認・未実装
+# 段階2b-3 の計画 v3（書き込みモード: トルク ON、Goal_Position）— 承認済み（2026-11-10）、2b-3a から実装
 
-目的: `read_only:=false` で MoveIt / ros2_control の指令をサーボに送る。LeRobot 非依存。URDF・関節リミット・planning_frame・IK solver・SRDF・ros2_controllers.yaml は変えない。安全を最優先（落ちない・急に動かない・限界を超えない）。`read_only` の既定は true のまま。
+2b-3 は 3 つに分けて、それぞれ `colcon build`（と `colcon test`）が通ってから commit する。2b-3a は読み取りだけ。2b-3b で初めて書き込みを入れる。
+目的: `read_only:=false` で MoveIt / ros2_control の指令をサーボに送る。LeRobot 非依存。URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.yaml`・`controllers.yaml` は変えない。`read_only` の既定は true。安全を最優先（落ちない・急に動かない・限界を超えない）。
 
-1. **書く範囲**: RAM のみ（`Torque_Enable`(40)、`Goal_Position`(42)、必要なら `Acceleration`(41)、`Goal_Speed`(46)、`Torque_Limit`(48)）。EEPROM（Homing_Offset、Min/Max_Position_Limit、Operating_Mode、Lock）は書かない（段階2c）。LeRobot の `configure()`（`so101_follower.py:149-171`）が書く項目のうち、電源再投入で戻る RAM がどれかを、起動時診断に読み取り表示（Acceleration、P/I/D、Operating_Mode、Torque_Limit）を足して確認する。アドレスは `tables.py` と突き合わせ、出典を `docs/third_party.md` に追記。
-2. **型で閉じ込める**: `Sts3215Bus` は読み取り専用のまま。別クラス `Sts3215WriteBus`（`Write` 0x03、`SyncWrite` 0x83）を追加し、`read_only` の時は生成しない。書けるのは `set_torque()` と `write_goal_positions()` に限り、任意アドレスの汎用 write は公開しない。`read_only:=true` は将来のリーダーアーム（`/leader`、トルク OFF）にそのまま使える。
-3. **指令の処理**: NaN / inf は破棄。rad → raw の逆変換を `calibration.cpp` に追加（符号付きエンコード、gripper の range を含む）。yaml の `min_limit` / `max_limit` でクランプ（MoveIt のリミットは変えない、ドライバ側の最終防衛線）。1 周期あたりの最大変化量を制限。全関節を 1 回の `SYNC_WRITE` で送る。
-4. **トルク**: 開始は ①現在位置を読む → ②`Goal_Position = 現在位置` → ③`Torque_Enable = 1`（読み取り失敗なら ON にしない）。初期は `Torque_Limit` と加速度を控えめに。終了は既定でトルク OFF（LeRobot と同じ。腕が落ちる）。読み取りが連続失敗したら指令の送信を止めて NaN を流す。
-5. **テスト（実機なし）**: WRITE / SYNC_WRITE のバイト列を scservo_sdk の固定ベクタと照合、チェックサム、符号付きエンコード、逆変換の往復、クランプ、レート制限。`tools/fake_sts3215.py` に WRITE / SYNC_WRITE とレジスタメモリを足し、起動順序（Goal → Torque ON）、指令の反映、クランプ、NaN 破棄、`read_only:=true` で書き込み命令が 0 件、を確認。mock と read-only の回帰。段階ごとに `colcon build` → commit。
-6. **実機確認（`docs/feetech_write_check.md`、実行はユーザー）**: W0 トルク ON のまま指令なしで 10 秒保持（動かない）→ W1 wrist_roll、gripper を数度 → W2 shoulder_pan を数度 → W3 lift / elbow / wrist_flex を腕を支えて小さく → W4 MoveIt の Plan & Execute（速度小、近い目標）。全段階で手を添え、電源をすぐ切れる状態で。
-7. **実装前に決めること**: 終了時の扱い（トルク OFF / 現在位置で保持 / 折りたたみへ）、異常時にトルクを保つか切るか、初期の `Torque_Limit`・`Acceleration`・1 周期の最大変化量、LeRobot が書いている RAM 設定（P/I/D、加速度）を自前で書くかサーボの現在値のままにするか。
+## 承認された決定
+1. 終了時は LeRobot と同じ**トルク OFF**。トルク ON のままの終了は作らない。手順書に「**止める前に折りたたみ姿勢へ動かし、腕を支えて Ctrl-C**」を明記する。「ゆっくり折りたたむ」機能は 2b-3 では作らない（将来の課題）。
+2. 異常時: 通信が切れたら**トルク OFF も送れない。サーボは最後の目標で保持し続ける**（この前提は実機で未確認）。ドライバは指令の送信を止めて NaN を流し、ログで明示する。書き込みが通る異常（指令値の異常）では、送信を止めてトルクは保持する。
+3. 数値は LeRobot の `configure()` の値を出発点にする（下の表）。
+4. 自前で書く。ただし `apply_servo_config` は**既定で拒否**（`true` を明示したときだけ EEPROM レジスタを書く）。Operating_Mode は**検証のみ**で書かない。0 以外ならトルクを ON にせず起動を中止する。
+5. 2b-3a（読み取りだけの実機確認）を先に行う。
+
+## 訂正: EEPROM と SRAM（LeRobot `tables.py` の区分、推定）
+アドレス 39 以下は EEPROM（電源を切っても残る）。P/I/D、Operating_Mode、Return_Delay_Time、gripper の Max_Torque_Limit / Protection_Current / Overload_Torque は EEPROM。電源再投入で既定値に戻るのは SRAM（`Acceleration` 41、`Torque_Limit` 48 など）。ソースの区分からの推定で、**サーボの電源を入れ直して読むまで未確認**（2b-3a で確かめる）。
+
+## LeRobot が書く値（`so101_follower.py` `configure()` 149-171 行、`feetech.py` `configure_motors()` 222-230 行、`enable/disable_torque` 296-310 行）
+トルク OFF・Lock=0 の間に書き、終了時にトルク ON・Lock=1。
+
+| レジスタ（アドレス） | 区分 | 値 | 対象 |
+|---|---|---|---|
+| Return_Delay_Time (7) | EEPROM | 0 | 全関節 |
+| Maximum_Acceleration (85) | Factory 表（区分不明） | 254 | 全関節 |
+| Acceleration (41) | SRAM | 254 | 全関節 |
+| Operating_Mode (33) | EEPROM | 0（位置制御） | 全関節 |
+| P / I / D (21 / 23 / 22) | EEPROM | 16 / 0 / 32（既定の P は 32） | 全関節 |
+| Max_Torque_Limit (16) | EEPROM | 500（最大 1000 の 50%） | gripper のみ |
+| Protection_Current (28) | EEPROM | 250（最大 500 の 50%） | gripper のみ |
+| Overload_Torque (36) | EEPROM | 25 | gripper のみ |
+| Torque_Limit (48)、Goal_Velocity (46) | SRAM | **書かない** | 腕は電源投入時の値のまま |
+
+## 初期値の提案
+| 項目 | 値 | 理由 |
+|---|---|---|
+| Operating_Mode | 0 を要求（書かない） | 0 以外ではトルク ON しない |
+| P / I / D、Return_Delay_Time、gripper の 3 項目 | LeRobot と同じ（検証し、`apply_servo_config:=true` のときだけ書く） | 実績のある値 |
+| Acceleration（RAM） | 50（パラメータ。実績の 254 へは動作確認後） | 単位は未確認（STS の資料では 100 step/s²） |
+| Torque_Limit（RAM） | lift / elbow / wrist_flex: **1000（下げない。下げるとトルク ON でも沈む）**。pan / roll: 1000、W1〜W2 の初回だけパラメータで 500。gripper: 500 | 安全は速度・加速度・変化量の制限と腕を支えることで取る |
+| Goal_Velocity | 書かない | 既定値の意味が未確認。2b-3a の読み取りで決める |
+| Lock | 起動完了時に 1。0 は設定書き込みの間だけ | LeRobot と同じ |
+
+## 1 周期あたりの最大変化量（v3 で訂正）
+`controllers.yaml` の確認で分かったこと: `arm_controller` は **`update_rate: 25`**（controller_manager は 50 Hz）、`open_loop_control: true`（43 行）、許容誤差の設定なし。JTC は 25 Hz でしか指令を更新しないので、**ハードウェアの 50 Hz の周期では、2 周期に 1 回、40 ms ぶんの動きが一度に来る**。v2 の「19 tick/周期」はこれを無視していて、スケーリング 0.3 を超えると正当な軌道を削る値だった。open_loop のため、削られても追従誤差で気づけない。
+前提: 1 tick = 2π/4095 = 0.001534 rad（角度関節 651.7 tick/rad）。gripper は 100% = 1485 tick、1 rad = 57.30% なので 850.8 tick/rad。`joint_limits.yaml` の `max_velocity` は全関節 5.0 rad/s、スケーリング 1.0。
+
+| 場合 | 窓 [s] | 角度関節 [rad / tick] | gripper [tick] |
+|---|---|---|---|
+| MoveIt の既定（スケーリング 0.1 → 0.5 rad/s）、JTC 1 更新 | 0.04 | 0.02 / 13.0 | 17.0 |
+| **スケーリング 1.0（5.0 rad/s）、JTC 1 更新** | 0.04 | 0.20 / 130.3 | 170.2 |
+| **スケーリング 1.0、JTC の更新が 1 回遅れた（2 更新ぶん）** | 0.08 | 0.40 / 260.7 | 340.3 |
+| **提案の制限: 6.0 rad/s × 0.08 s** | 0.08 | **0.48 / 312.8** | **408.4** |
+
+制限は最悪の場合（2 更新ぶん）の 1.2 倍、通常の 1 更新ぶんの 2.4 倍。`max_joint_speed`（6.0 rad/s）と `limit_window_s`（0.08 s）はパラメータ。試験で `joint_limits.yaml` の `max_velocity` と `controllers.yaml` の `update_rate` を読み、`max_joint_speed × limit_window_s ≥ 1.2 × max_velocity × 2 / update_rate` を確認する（どちらかを変えたら試験が落ちる）。
+この制限は**飛び（NaN の誤変換、軌道の異常）を止めるためのもの**で、通常の速度の安全は MoveIt の速度スケーリング（既定 0.1）、サーボの Acceleration、腕を支えることで取る。
+制限が実際に効いたら **WARN**（関節名、要求した変化量、制限、効いた回数。同じ関節は 5 秒に 1 回に間引く）。deactivate 時に効いた回数の合計も出す。**gripper の GripperActionController は目標へ一気に飛ぶ指令を出すので、gripper の WARN は動作のたびに出る想定**（ランプ状に追従させるのが意図。メッセージに `ramping` と書く）。
+基準は直前に送った目標。起動時は `hw_commands_` を現在位置にして始める（JTC が最初の指令を現在位置から出せる）。
+
+## 異常時の分類
+| ケース | 動作 | 腕 | 復帰 |
+|---|---|---|---|
+| A. バスが死んだ | 連続 10 回の読み失敗で送信停止、NaN。ERROR: 「通信断。サーボは最後の目標でトルク ON のまま。ドライバから OFF にできない。電源を切るか再接続」 | ON のまま（制御不能） | launch をやり直す。起動時は 現在位置を読む → Goal=現在位置 → トルク ON |
+| B. 読みだけ失敗／間欠 | 1 回再試行、失敗した周期は前回値を保持。連続 10 回で A | ON | 読めたら通常に戻る |
+| C. 書き込みは通るが指令が異常 | NaN／inf は破棄して直前の目標を保持。限界外はクランプ、飛びは変化量を制限（WARN）。異常が 50 周期（1 秒）続いたらフォルトにして送信停止。ERROR: 「送信停止。トルクは保持」 | ON のまま保持 | フォルトは自動解除しない。deactivate するとトルク OFF |
+| **D. サーボ側の保護（ERR バイト）** | **ERR を読んだら送信を止める。再開は起動し直したときだけ**（deactivate→activate では解除しない。保護が解けた瞬間に溜まった指令で急に動かないため）。ERROR にビットの内容。 | サーボが自分でトルクを切ることがある | launch のやり直し（プロセスの再起動）だけ。起動時は現在位置から始める |
+任意（必須にしない）: 1 Hz で `Torque_Enable`・温度・負荷を読む監視。
+
+## 設定不一致の扱い（v3 で確定）
+サーボの EEPROM が LeRobot の値（上の表）と違うとき:
+- **`read_only:=false`**: **起動を中止**する（ログに差を表示）。`apply_servo_config:=true` のときだけ、トルク OFF → `Lock=0` → 書く → `Lock=1` → 読み戻し、の順で書く（同じ値なら書かない）。Operating_Mode は書かない。0 以外ならどちらの場合も起動中止。
+- **`read_only:=true`**: **WARN のみ**で起動を続ける（2b-3a の確認と、将来のリーダーアームのため）。Operating_Mode が 0 以外でも WARN のみ（トルクは ON にしない）。
+
+## 実装の構成
+### 2b-3a: 読み取りだけの準備（書き込みなし）
+- 起動時診断に読み取りを追加: Operating_Mode、P/I/D、Return_Delay_Time、Max_Torque_Limit、Protection_Current、Overload_Torque、Acceleration、Torque_Limit、Goal_Velocity、Maximum_Acceleration、Torque_Enable、Lock、Status、電圧、温度。LeRobot の値との比較（MATCH／MISMATCH、`read_only` なら WARN）。
+- rad → raw の逆変換 `rad_to_raw()`（`calibration.cpp`）。LeRobot の `_unnormalize` と一致する正解表（`tools/gen_conversion_golden.py` を拡張）と試験。
+- 実機確認の手順を `docs/feetech_servo_config_check.md` に書く（サーボの電源を入れ直してから読み取り専用で起動し、診断を報告する）。
+### 2b-3b: 書き込み
+- `Sts3215WriteBus`（別クラス・別ヘッダ）に `Write`(0x03)、`SyncWrite`(0x83)。`Sts3215Bus` は読み取り専用のまま。`read_only` の時は生成しない。公開する書き込みは用途別の関数だけ（任意アドレスの汎用 write は出さない）。
+- 起動: 診断（Operating_Mode≠0 なら中止）→ 設定の検証（不一致なら中止）→ RAM の Acceleration／Torque_Limit → 現在位置を読む → Goal=現在位置 → Torque_Enable=1、Lock=1（読み戻し）。失敗したらトルクを ON にしない。
+- write(): NaN／inf 破棄 → rad→raw → yaml の `min`/`max` でクランプ → 変化量の制限（WARN）→ 1 回の `SYNC_WRITE`。ERR を読んだら送信停止（D）。
+- 終了: `on_deactivate` / `on_cleanup` / デストラクタからトルク OFF（読み戻して確認、3 回再試行、失敗は ERROR）。
+- 試験: バイト列を scservo_sdk と照合、符号付きエンコード、クランプ、変化量の制限（合成した 25 Hz のステップ指令が削られないこと）、設定ファイルの整合試験、異常ケース A〜D、`read_only:=true` で書き込み命令が 0 件。`tools/fake_sts3215.py` を WRITE 対応にする。
+### 2b-3c: ドキュメント
+- `docs/feetech_write_check.md`（W0 保持のみ 10 秒 → W1 wrist_roll・gripper → W2 pan → W3 lift/elbow/wrist_flex（腕を支える）→ W4 MoveIt（スケーリング 0.1）。通信断の確認は最後に 1 回。各段階の終わりに「折りたたみ姿勢へ動かし、腕を支えて Ctrl-C」。強制終了したら電源を切る）、`docs/third_party.md`（LeRobot の出典と書いた値、STS3215 の仕様書は原本未確認と明記）。
+
+## 未確認として残るもの
+EEPROM／SRAM の区分（2b-3a で確認）、電源投入時の Torque_Limit・Acceleration・Goal_Velocity の既定値と Acceleration の単位、通信断でサーボが最後の目標を保持し続けること、JTC が実際に 25 Hz で指令を更新していること（2b-3b の確認項目）、Maximum_Acceleration(85) の区分（書かない）。
+
+## 将来の課題
+ゆっくり折りたたみ姿勢へ動かして終了する機能。1 Hz のサーボ状態監視。
