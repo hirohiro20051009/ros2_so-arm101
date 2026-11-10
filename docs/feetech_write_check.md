@@ -116,17 +116,31 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **止め方**: 元の折りたたみ姿勢に戻っている → 前腕の下を支える → **Ctrl-C**（脱力で腕が沈む）。
 - 合格: 沈まない／指令の向きに動く／`FAULT` なし／`rate_limited` が 0。
 
-## W4. MoveIt（RViz）から。速度スケーリング 0.1
+## W3.5. W4 の前に: 折りたたみ姿勢から少し開いた姿勢にする
 
-- **腕の支え方**: W3 と同じ（前腕の下を支える）。最初の動作は**必ず折りたたみ姿勢から少し開いた姿勢**（home の折りたたみ姿勢は衝突判定で中止される既知の問題。`inventory.md` の問題2）。
-- 起動（RViz あり）:
+理由: home の折りたたみ姿勢は衝突判定で Plan & Execute が中止される既知の問題がある（`inventory.md` の問題2）。RViz を使う前に、腕を少し開いておく。
+**W3 に合格してから行う。**
+
+- **どの関節をどの向きにどれだけ動かすかは、W3 で確かめた向き（開く／閉じる）の結果を見てから決める。** ここでは決め打ちしない。目安は、W3 で「開く向き」と確認できた関節（例: `elbow_flex`）を 0.1 rad ずつ、1 回ごとに止まってから、数回まで。
+- **腕の支え方**: W3 と同じ（前腕の下を支える）。
+- 起動は W4 と同じ（RViz あり。ここでは RViz を操作しない）。**W3.5 と W4 は同じ起動のまま続けて行う**（開いた姿勢で Ctrl-C しないため）。ログは `write_W4.log`:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
     2>&1 | tee ~/so_arm101_check/write_W4.log
   ```
+- 別の端末で（W3 と同じ `send_joint_delta.py`。向きは W3 の結果に合わせる）:
+  ```bash
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.1 --seconds 4    # 向きは W3 の結果で決める
+  ```
+- 開いた姿勢で動きが止まっていること、`FAULT` が無いことを確認してから W4 へ。
+
+## W4. MoveIt（RViz）から。速度スケーリング 0.1
+
+- **腕の支え方**: W3 と同じ（前腕の下を支える）。最初の動作は**必ず W3.5 で作った少し開いた姿勢から**。
+- 起動: W3.5 の起動のまま（RViz あり）。
 - RViz の MotionPlanning で、**Velocity Scaling と Acceleration Scaling を 0.1**（既定）のまま、小さな目標（現在位置から 0.1〜0.2 rad 程度）を Plan & Execute。1 回ごとに動きが止まってから次へ。
 - 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。
-- **止め方**: 動きが止まっていることを確認 → 折りたたみ姿勢（または開いた姿勢から手で支えて）→ 前腕を支える → RViz の操作を止め、**launch の端末で Ctrl-C**。
+- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 動きが止まっていることを確認 → `send_joint_delta.py`（W3.5 と逆向き、0.1 rad ずつ）で**折りたたみ姿勢に戻してから止める**。戻せないときは手で前腕を支えてから止める → RViz の操作を止め、**launch の端末で Ctrl-C**。
 - 合格: W3 と同じ基準＋ログ末尾 `rate_limited=0`（arm）。
 
 ## W5（任意・最後に 1 回）. 通信断
@@ -149,9 +163,16 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `[deactivate] ... could NOT confirm ...` | 終了でトルク OFF／Lock=1 を確認できなかった | 腕を支えてサーボの電源を切る |
 
 ## 報告してほしいもの（段階ごと）
-- ログのパス（`~/so_arm101_check/write_W*.log`）
-- 次の抜き出しの出力:
+- ログのパス（`~/so_arm101_check/write_<段階>.log`）
+- 段階ごとの抜き出しの出力（W3.5 は W4 のログに含まれる）:
   ```bash
-  grep -a "WRITE mode\|write mode active\|\[probe\]\|FAULT\|COMMUNICATION\|step limit\|activation failed\|\[deactivate\]\|deactivated\|ERROR" ~/so_arm101_check/write_W0.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+  P='WRITE mode\|write mode active\|\[probe\]\|FAULT\|COMMUNICATION\|step limit\|activation failed\|\[deactivate\]\|deactivated\|ERROR'
+  grep -a "$P" ~/so_arm101_check/write_W0.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+  grep -a "\[diag\]\|ERROR" ~/so_arm101_check/write_W0_after.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300   # 停止後の読み取り専用
+  grep -a "$P" ~/so_arm101_check/write_W1.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+  grep -a "$P" ~/so_arm101_check/write_W2.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+  grep -a "$P" ~/so_arm101_check/write_W3.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+  grep -a "$P" ~/so_arm101_check/write_W4.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
   ```
+  （該当する段階の行だけ実行する。W5 は W0 と同じ形式で `write_W5.log`）
 - 想定と違う挙動（トルクが入った瞬間に動いた、沈んだ、異音、止まらなかった、など）

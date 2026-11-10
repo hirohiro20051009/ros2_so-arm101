@@ -858,3 +858,12 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - `SYNC_WRITE` には応答が無いので、Goal_Position が各サーボに届いたかは周期ごとには確認できない。Torque_Enable／Acceleration の 1 Hz 監視と読み取りの失敗でバス異常は検出する。
 - 実機では Lock=1 のとき EEPROM への書き込みが無視される、という想定を偽サーボに入れている（`apply_servo_config` は Lock=0 の間に書き、読み戻して確認する）。実機の挙動は未確認。
 - 偽サーボの限界: サーボ内部の加減速・保護・トルクの物理挙動は再現していない。ここまでの合格は、ドライバの手順・順序・検出ロジックのもの。
+
+## 事後承認（2026-11-11）
+- 対象: 2b-3b（ff91fd6）で変更した moveit_config の xacro 2 ファイル（2b-1 の G・H と同じファイル）。
+  - `src/so_arm101_moveit_config/config/so101_new_calib.urdf.xacro`
+  - `src/so_arm101_moveit_config/config/so101_new_calib.ros2_control.xacro`
+- 変更内容: 引数 4 つ（`acceleration`、`torque_limit`、`apply_servo_config`、`probe_lock_sram`）を追加。`<param>` に渡すだけで、関節・リンク・limit は不変。mock への影響なし。
+- 承認: ユーザーが 2026-11-11 に事後承認した。
+- 今後のルール: MoveIt の設定（URDF・SRDF・関節リミット・planning_frame・IK solver・コントローラ設定・xacro）は、**実装前に**変更箇所と理由を示して承認を得てから変える。
+- 2b-3 関連のコミット（確認済み、6 つ）: 438c4c9（計画 v3）、8151336（2b-3a）、e7b2194（2b-3a 実機記録）、b12b384（計画 v4）、ff91fd6（2b-3b）、43748b7（2b-3c 手順書）。
