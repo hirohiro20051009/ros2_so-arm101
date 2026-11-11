@@ -92,9 +92,6 @@ std::pair<int, int> yaml_range_around(int yaml_actual_min, int yaml_actual_max, 
 std::string format_gap(int remaining);
 /// 見出し + 関節ごとの行（ANSI なし。端末の表示とログで共通）。
 std::vector<std::string> format_live_table(const std::vector<LiveJoint> & joints);
-/// ログの 1 秒ごとの行（同じ表記）。
-std::string format_log_line(int elapsed_s, const LiveJoint & j);
-
 /// 記録の統計（読み取りの回数と間隔、表示にかかった時間）。表示を足しても読み取りが遅れないことの確認用。
 struct RecordStats
 {
@@ -102,7 +99,7 @@ struct RecordStats
   long read_failures{0};    // 再試行しても読めなかった回数
   double mean_interval_ms{0.0}, max_interval_ms{0.0};  // 読み取りの開始から次の開始まで
   long live_frames{0};      // on_live を呼んだ回数
-  double live_total_ms{0.0}, live_max_ms{0.0};  // 表示（整形・on_live・ログ行）にかかった時間
+  double live_total_ms{0.0}, live_max_ms{0.0};  // 表示（整形・on_live）にかかった時間
 };
 
 /// 対話の部品。試験ではこれを差し替える。
@@ -113,14 +110,14 @@ struct MeasureIO
   std::function<void()> on_recording_start;             // 中央の測定が終わり、記録を始める直前（端末では溜まった入力を捨てる）
   std::function<void()> on_tick;                        // 記録の 1 周期ごと（試験で姿勢を動かす）
   std::function<void(int)> on_center_sample;            // 中央の k 回目の読み取りの前（試験で姿勢を動かす）
-  std::function<void(const std::vector<LiveJoint> &)> on_live;  // live_every_ticks ごと。端末の表示（遅れさせないこと）
+  std::function<void(const std::vector<LiveJoint> &)> on_live;  // live_every_ticks ごと。端末の表示（遅れさせないこと）。記録中は標準出力に何も出さない
+  std::function<void()> on_live_end;                    // 記録が終わったとき（端末の表を消す。最後の表は標準出力に 1 回だけ出る）
   std::vector<std::pair<int, int>> yaml_ref;            // 関節ごとの yaml の生の範囲（actual 座標）。空なら差を出さない
   int tick_ms{20};
   int center_samples{11};
   int center_tolerance_ticks{4};
   int live_every_ticks{10};   // 約 0.2 秒
-  int log_every_ticks{50};    // 約 1 秒（ログの行）
-  int recent_ticks{50};       // 端を更新してから * を付ける長さ
+  int recent_ticks{50};       // 端を更新してから * を付ける長さ（端末の表だけ。最後の表には付けない）
   RecordStats stats;          // 出力: 記録の統計
 };
 

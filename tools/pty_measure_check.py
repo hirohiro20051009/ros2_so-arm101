@@ -106,6 +106,7 @@ else:
     send_enter()                              # 記録開始の Enter
 t_rec = time.time()
 n0 = reads()
+pipe_len_at_rec = len(pipe_buf)
 # 記録中: 動かす。pan は前回の端（yaml）を超えるまで押す。他は範囲いっぱい
 steps = int(secs * 2)
 for k in range(steps):
@@ -120,6 +121,7 @@ for k in range(steps):
         pump(0.05)
 t_end = time.time()
 n1 = reads()
+pipe_len_at_end = len(pipe_buf)
 send_enter()                                  # 終了の Enter
 end = time.time() + 5
 while time.time() < end:
@@ -148,13 +150,18 @@ print(f'mode={mode}  exit={os.WEXITSTATUS(status) if done else "running"}')
 print(f'記録の実時間 {dur:.2f} s、SYNC_READ {n1 - n0} 回、{(n1 - n0) / dur:.1f} 回/秒（間隔 {1000 * dur / max(n1 - n0, 1):.1f} ms）')
 print('stdout（ログ）に ESC が含まれる:', '\x1b' in log)
 print('端末（/dev/tty）に出た表示の長さ:', len(tty), 'bytes、カーソル上移動（ESC[7A）の回数:', tty.count('\x1b[7A'))
+print('記録中に標準出力（ログ）へ出たバイト数:', pipe_len_at_end - pipe_len_at_rec, '（0 なら記録中は何も出ていない）')
 print('ログの 1 秒ごとの行（[N s]）の数:', len(re.findall(r'\[\d+ s\] ', log)))
+print('最後の表（記録を終えた時点）の数:', log.count('記録を終えた時点'), '/ 表の見出し（min 端まで）の数:', log.count('min 端まで'))
+i1, i2, i3 = log.find('記録を終えた時点'), log.find('記録: 読み取り'), log.find('== 測定結果')
+print('順序（最後の表 → 記録: → 測定結果）:', 0 <= i1 < i2 < i3)
+print('端末: 終了時に表を消した（ESC[7A + CR + ESC[J）:', '\x1b[7A\r\x1b[J' in tty)
 m = re.search(r'記録: .*', log)
 print('統計:', m.group(0) if m else '(なし。改善前)')
 # 最初の記録が即終了していないか（記録の統計の読み取り回数が実時間に見合うか）
 print('--- ログの抜粋 ---')
 for ln in log.splitlines():
-    if re.search(r'\[\d+ s\] shoulder_pan|記録中|記録:|\| ?\d+|exit|ERROR|OK', ln):
+    if re.search(r'記録中|記録:|記録を終えた|min 端まで|^(shoulder|elbow|wrist|gripper)|exit|ERROR|注意', ln):
         print(ln)
 if mode == 'new':
     last = tty.split('\x1b[7A')[-1]

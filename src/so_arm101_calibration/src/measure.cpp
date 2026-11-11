@@ -316,24 +316,18 @@ std::string gap_cell(const LiveJoint & j, bool min_side)
 
 std::vector<std::string> format_live_table(const std::vector<LiveJoint> & joints)
 {
+  // 幅は 70 桁（80 桁の端末で折り返さない。折り返すと、書き換えの行数がずれて表が崩れる）
   std::vector<std::string> rows;
   rows.push_back(
     pad("joint", 14, false) + pad("今", 6, true) + pad("min", 7, true) + pad("max", 7, true) + pad("幅", 6, true) + "  " +
-    pad("min 側: 前回の端まで", 21, false) + pad("max 側: 前回の端まで", 21, false));
+    pad("min 端まで", 14, false) + pad("max 端まで", 14, false));
   for (const auto & j : joints) {
     rows.push_back(
       pad(j.name, 14, false) + pad(std::to_string(j.now), 6, true) + pad(std::to_string(j.min), 7, true) +
       pad(std::to_string(j.max), 7, true) + pad(std::to_string(j.max - j.min), 6, true) + "  " +
-      pad(gap_cell(j, true), 21, false) + pad(gap_cell(j, false), 21, false));
+      pad(gap_cell(j, true), 14, false) + pad(gap_cell(j, false), 14, false));
   }
   return rows;
-}
-
-std::string format_log_line(int elapsed_s, const LiveJoint & j)
-{
-  return "[" + std::to_string(elapsed_s) + " s] " + pad(j.name, 14, false) + " 今 " + std::to_string(j.now) + " / min " +
-         std::to_string(j.min) + " / max " + std::to_string(j.max) + " / 幅 " + std::to_string(j.max - j.min) +
-         " / min 側 " + gap_cell(j, true) + " / max 側 " + gap_cell(j, false);
 }
 
 int run_measure(
@@ -445,7 +439,7 @@ int run_measure(
   // 4. MIN/MAX の記録（Enter 2 回目で終える）。中央の測定中に押した Enter が残っていると、記録がすぐ終わるので捨てる
   if (io.on_recording_start) {io.on_recording_start();}
   out << "\n中央の測定 OK、記録中。動かし始めてよい。全関節を端から端まで押し切り、終わったら Enter\n"
-      << "（値は中央からの差。前回の端まで あと N tick。「届いた」になれば前回の端と同じ位置まで届いている。* は直近 1 秒に更新）\n"
+      << "（記録中は、端末の表だけが書き換わる。値は中央からの差。「端まで」= 前回の端まで あと N tick。「届いた」になれば前回の端と同じ位置まで届いている。* は直近 1 秒に更新）\n"
       << std::flush;
   std::vector<int> dmin(n, 0), dmax(n, 0), count(n, 0), now(n, 0);
   std::vector<long> min_tick(n, 0), max_tick(n, 0);
@@ -475,7 +469,6 @@ int run_measure(
       return v;
     };
   RecordStats st;
-  const auto t_begin = Clock::now();
   Clock::time_point prev_start{};
   double interval_sum = 0.0;
   int consecutive_fail = 0;
@@ -507,18 +500,11 @@ int run_measure(
       }
     }
     ++ticks;
-    // 表示（読み取りの後。かかった時間を測り、統計に出す）
-    if ((io.on_live && ticks % io.live_every_ticks == 0) || ticks % io.log_every_ticks == 0) {
+    // 端末の表示（読み取りの後。かかった時間を測り、統計に出す）。記録中は標準出力に何も出さない
+    if (io.on_live && ticks % io.live_every_ticks == 0) {
       const auto d0 = Clock::now();
-      const std::vector<LiveJoint> lj = live_joints(ticks);
-      if (io.on_live && ticks % io.live_every_ticks == 0) {
-        io.on_live(lj);
-        ++st.live_frames;
-      }
-      if (ticks % io.log_every_ticks == 0) {
-        const int sec = static_cast<int>(ms_between(t_begin, Clock::now()) / 1000.0);
-        for (const auto & j : lj) {out << format_log_line(sec, j) << "\n";}
-      }
+      io.on_live(live_joints(ticks));
+      ++st.live_frames;
       const double dt = ms_between(d0, Clock::now());
       st.live_total_ms += dt;
       st.live_max_ms = std::max(st.live_max_ms, dt);
@@ -529,6 +515,12 @@ int run_measure(
   st.ticks = ticks;
   st.mean_interval_ms = ticks > 1 ? interval_sum / static_cast<double>(ticks - 1) : 0.0;
   io.stats = st;
+  if (io.on_live_end) {io.on_live_end();}  // 端末の表を消す（同じ表をこの後、標準出力に 1 回だけ出す）
+  // 最後の時点の表（端末の表と同じ列。* は付けない）。ログに残るのは、これと、下の統計と、測定結果
+  out << "\n== 記録を終えた時点（値は中央からの差。前回の端まで あと N tick）\n";
+  std::vector<LiveJoint> last = live_joints(ticks);
+  for (auto & j : last) {j.min_recent = j.max_recent = false;}
+  for (const auto & row : format_live_table(last)) {out << row << "\n";}
   out << std::fixed << std::setprecision(1) << "\n記録: 読み取り " << st.ticks << " 回（失敗 " << st.read_failures
       << " 回）、間隔 平均 " << st.mean_interval_ms << " ms / 最大 " << st.max_interval_ms << " ms、表示 " << st.live_frames
       << " 回（合計 " << st.live_total_ms << " ms、最大 " << st.live_max_ms << " ms）\n";

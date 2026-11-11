@@ -375,33 +375,41 @@ TEST(LiveDisplay, GapIsReadInTheSameDirectionOnBothSides)
   j.has_ref = true;
   j.ref_min = -1300;
   j.ref_max = 1300;
+  auto row = [&]() {return format_live_table({j})[1];};
   // min 側は「記録した min − yaml の min」、max 側は「yaml の max − 記録した max」。どちらも「あと」が正
   j.min = -1288;  // 前回の端（−1300）まで 12 tick 足りない
   j.max = 1288;   // 前回の端（+1300）まで 12 tick 足りない
-  std::string l = format_log_line(3, j);
-  EXPECT_NE(l.find("min 側 あと 12"), std::string::npos) << l;
-  EXPECT_NE(l.find("max 側 あと 12"), std::string::npos) << l;
+  std::string l = row();
+  EXPECT_NE(l.find("あと 12"), l.rfind("あと 12")) << "min 側と max 側の両方に「あと 12」がある: " << l;
   j.min = -1300;
   j.max = 1300;
-  l = format_log_line(3, j);
-  EXPECT_NE(l.find("min 側 届いた /"), std::string::npos) << l;
-  EXPECT_NE(l.find("max 側 届いた"), std::string::npos) << l;
+  l = row();
+  EXPECT_NE(l.find("届いた"), l.rfind("届いた")) << l;
   j.min = -1330;  // 30 tick 超えて押した（今回の pan のように）
   j.max = 1305;
   j.min_recent = true;
-  l = format_log_line(3, j);
-  EXPECT_NE(l.find("min 側 届いた(+30)*"), std::string::npos) << l;
-  EXPECT_NE(l.find("max 側 届いた(+5)"), std::string::npos) << l;
-  EXPECT_EQ(l.find("max 側 届いた(+5)*"), std::string::npos) << l;  // max 側は直近に更新されていない
-  // 端末の表と同じ表記
-  const auto rows = format_live_table({j});
-  ASSERT_EQ(rows.size(), 2u);
-  EXPECT_NE(rows[1].find("届いた(+30)*"), std::string::npos) << rows[1];
-  EXPECT_NE(rows[1].find("届いた(+5)"), std::string::npos) << rows[1];
-  EXPECT_EQ(rows[1].find("\033"), std::string::npos);  // ANSI を含まない
+  l = row();
+  EXPECT_NE(l.find("届いた(+30)*"), std::string::npos) << l;
+  EXPECT_NE(l.find("届いた(+5)"), std::string::npos) << l;
+  EXPECT_EQ(l.find("届いた(+5)*"), std::string::npos) << l;  // max 側は直近に更新されていない
+  EXPECT_LT(l.find("届いた(+30)"), l.find("届いた(+5)"));      // min 側が左、max 側が右
+  EXPECT_EQ(l.find("\033"), std::string::npos);               // ANSI を含まない
+  // 見出しは 1 行で、幅は 70 桁以内（80 桁の端末で折り返さない）
+  const auto rows = format_live_table({j, j});
+  ASSERT_EQ(rows.size(), 3u);
+  for (const auto & r : rows) {
+    int w = 0;
+    for (size_t i = 0; i < r.size();) {
+      const unsigned char c = static_cast<unsigned char>(r[i]);
+      const int len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+      w += len >= 3 ? 2 : 1;
+      i += static_cast<size_t>(len);
+    }
+    EXPECT_LE(w, 72) << r;
+  }
   // yaml の範囲が無いとき
   j.has_ref = false;
-  EXPECT_NE(format_log_line(0, j).find("min 側 - "), std::string::npos);
+  EXPECT_NE(row().find(" -"), std::string::npos);
 }
 
 TEST(LiveDisplay, YamlRangeCrossing4095IsUnwrappedMod4096)
@@ -428,7 +436,6 @@ TEST(LiveDisplay, WristRollGapIsCorrectWhenTheYamlRangeCrossesTheWrap)
   Rig r;
   Measure ms(r);
   ms.io.live_every_ticks = 1;
-  ms.io.log_every_ticks = 1;
   // roll の中央は 3228。yaml の生の範囲は 1328..5129（4095 をまたぐ）。他の関節は yaml の範囲 = 測る範囲
   ms.io.yaml_ref.clear();
   for (int i = 0; i < 6; ++i) {ms.io.yaml_ref.push_back({kCenter[i] + kLo[i], kCenter[i] + kHi[i]});}
@@ -458,43 +465,82 @@ TEST(LiveDisplay, WristRollGapIsCorrectWhenTheYamlRangeCrossesTheWrap)
   EXPECT_EQ(roll.max, 1905);
   EXPECT_EQ(roll.ref_min, -1900);
   EXPECT_EQ(roll.ref_max, 1901);
-  const auto line = text.find("wrist_roll");
+  // 最後の表（標準出力に 1 回だけ出る）の wrist_roll の行。端末の表と同じ表記
+  const auto fin = text.find("記録を終えた時点");
+  ASSERT_NE(fin, std::string::npos) << text;
+  const auto line = text.find("wrist_roll", fin);
   ASSERT_NE(line, std::string::npos);
-  EXPECT_NE(text.find("min 側 あと 5"), std::string::npos) << text;
-  EXPECT_NE(text.find("max 側 届いた(+4)"), std::string::npos) << text;
+  const std::string roll_row = text.substr(line, text.find('\n', line) - line);
+  EXPECT_NE(roll_row.find("あと 5"), std::string::npos) << roll_row;
+  EXPECT_NE(roll_row.find("届いた(+4)"), std::string::npos) << roll_row;
+  EXPECT_LT(roll_row.find("あと 5"), roll_row.find("届いた(+4)")) << roll_row;  // min 側が左、max 側が右
   // 他の関節は前回の端と同じ位置まで来ている
   EXPECT_NE(text.find("shoulder_pan"), std::string::npos);
   EXPECT_EQ(frames.back()[0].min - frames.back()[0].ref_min, 0);
 }
 
-TEST(LiveDisplay, FramesAndLogLinesAreEmittedAtTheirOwnCadence)
+TEST(LiveDisplay, NothingIsPrintedToStdoutWhileRecordingAndTheFinalTableIsPrintedOnce)
 {
   Rig r;
   Measure ms(r);
   ms.io.live_every_ticks = 2;
-  ms.io.log_every_ticks = 4;
   ms.io.recent_ticks = 2;
   ms.io.should_stop = [&]() {return ms.tick >= 8;};
-  int frames = 0;
+  int frames = 0, ends = 0;
   std::vector<bool> recent;
-  ms.io.on_live = [&](const std::vector<LiveJoint> & v) {++frames; recent.push_back(v[0].min_recent);};
+  std::string out_at_first_frame;
+  std::ostringstream o;
+  ms.io.on_live = [&](const std::vector<LiveJoint> & v) {
+      ++frames;
+      recent.push_back(v[0].min_recent);
+      if (frames == 1) {out_at_first_frame = o.str();}
+    };
+  ms.io.on_live_end = [&]() {++ends; EXPECT_EQ(frames, 4);};
   MeasureFile m;
-  std::string text;
-  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  std::vector<std::string> kinds(6, "angle");
+  kinds[5] = "linear_percent";
+  ASSERT_EQ(run_measure(*r.bus, r.all, kinds, Options(), ms.io, o, &m), kExitOk) << o.str();
+  const std::string text = o.str();
   EXPECT_EQ(frames, 4);  // 8 tick / 2
+  EXPECT_EQ(ends, 1);
   EXPECT_EQ(ms.io.stats.live_frames, 4);
-  // ログの行: 4 tick ごと（8 tick で 2 回）× 6 関節
-  size_t joint_lines = 0;
-  for (const char * n : {"shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"}) {
-    for (size_t pos = text.find(std::string(" s] ") + n); pos != std::string::npos; pos = text.find(std::string(" s] ") + n, pos + 1)) {
-      ++joint_lines;
-    }
-  }
-  EXPECT_EQ(joint_lines, 12u) << text;
-  // min は tick 1 で更新（kLo）。recent_ticks=2 なので、tick 2 の枠では * が付き、tick 8 の枠では消えている
+  // 記録中（最初のフレームの時点）に、標準出力へ 1 秒ごとの行などは出ていない。出ているのは記録の前の案内だけ
+  EXPECT_EQ(out_at_first_frame.find("[0 s]"), std::string::npos);
+  EXPECT_EQ(out_at_first_frame.find("記録を終えた時点"), std::string::npos);
+  EXPECT_EQ(text.find(" s] "), std::string::npos);
+  // 終わったときに、最後の表が 1 回だけ（見出しも 1 回）、その後に「記録: 読み取り」、測定結果の順
+  auto count = [&](const std::string & k) {
+      size_t n = 0;
+      for (size_t pos = text.find(k); pos != std::string::npos; pos = text.find(k, pos + 1)) {++n;}
+      return n;
+    };
+  EXPECT_EQ(count("記録を終えた時点"), 1u);
+  EXPECT_EQ(count("min 端まで"), 1u) << text;
+  EXPECT_EQ(count("記録: 読み取り"), 1u);
+  const auto p_table = text.find("記録を終えた時点"), p_stats = text.find("記録: 読み取り"), p_result = text.find("== 測定結果");
+  ASSERT_NE(p_result, std::string::npos);
+  EXPECT_LT(p_table, p_stats);
+  EXPECT_LT(p_stats, p_result);
+  // 最後の表の行は 6 関節ぶんで、* は付かない
+  const std::string final_part = text.substr(p_table, p_stats - p_table);
+  EXPECT_EQ(final_part.find('*'), std::string::npos) << final_part;
+  // min は tick 1 で更新（kLo）。recent_ticks=2 なので、最初の枠（tick 2）では * が付き、最後の枠（tick 8）では消えている
   ASSERT_EQ(recent.size(), 4u);
   EXPECT_TRUE(recent.front());
   EXPECT_FALSE(recent.back());
+}
+
+TEST(LiveDisplay, WithoutADisplayTheRecordingStillWorksAndTheFinalTableIsPrinted)
+{
+  // /dev/tty が開けないとき（on_live が無い）: 表示なしで記録だけ続け、最後の表と結果は出る
+  Rig r;
+  Measure ms(r);
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  EXPECT_NE(text.find("記録を終えた時点"), std::string::npos);
+  EXPECT_NE(text.find("== 測定結果"), std::string::npos);
+  EXPECT_EQ(ms.io.stats.live_frames, 0);
 }
 
 TEST(LiveDisplay, DisplayDoesNotChangeTheReadCadence)
@@ -513,9 +559,6 @@ TEST(LiveDisplay, DisplayDoesNotChangeTheReadCadence)
         for (int i = 0; i < 6; ++i) {ms.io.yaml_ref.push_back({kCenter[i] + kLo[i], kCenter[i] + kHi[i]});}
         ms.io.on_live = [&](const std::vector<LiveJoint> & v) {for (const auto & row : format_live_table(v)) {sink += row + "\n";}};
         ms.io.live_every_ticks = 10;
-        ms.io.log_every_ticks = 50;
-      } else {
-        ms.io.log_every_ticks = 1000000;
       }
       const auto before = r.servos.instruction_counts();
       MeasureFile m;

@@ -121,6 +121,14 @@ public:
     if (n == static_cast<ssize_t>(buf.size())) {lines_ = static_cast<int>(rows.size());}
   }
 
+  /// 最後のフレームを消す（カーソルを表の先頭へ戻し、そこから下を消す）。
+  void clear()
+  {
+    if (fd_ < 0 || lines_ == 0) {return;}
+    const std::string buf = "\033[" + std::to_string(lines_) + "A\r\033[J";
+    if (::write(fd_, buf.data(), buf.size()) == static_cast<ssize_t>(buf.size())) {lines_ = 0;}
+  }
+
 private:
   int fd_{-1};
   int lines_{0};
@@ -311,10 +319,16 @@ int main(int argc, char ** argv)
     for (const auto & j : cal.joints) {
       io.yaml_ref.push_back({j.raw_min + j.eeprom.homing_offset, j.raw_max + j.eeprom.homing_offset});
     }
-    // 記録中の表示。ログ（stdout は tee につながるので ANSI は出さない）には 1 秒ごとの行が run_measure から出る。
-    // 端末には /dev/tty を直接開いて、7 行を書き換える。O_NONBLOCK なので端末が詰まっても読み取りを止めない（そのフレームは捨てる）。
+    // 記録中の表示は端末（/dev/tty）だけに出す。標準出力（tee につながり、画面にも流れる）には、記録中は何も出さない。
+    // /dev/tty を直接開き（O_NONBLOCK。詰まったらそのフレームは捨てる）、7 行を書き換える。終わったら表を消し、
+    // 最後の時点の表を標準出力に 1 回だけ出す（run_measure）。/dev/tty が開けなければ、表示なしで記録だけ続ける。
     TtyLive tty;
-    if (tty.open()) {io.on_live = [&tty](const std::vector<LiveJoint> & v) {tty.draw(format_live_table(v));};}
+    if (tty.open()) {
+      io.on_live = [&tty](const std::vector<LiveJoint> & v) {tty.draw(format_live_table(v));};
+      io.on_live_end = [&tty]() {tty.clear();};
+    } else {
+      std::cout << "注意: 端末（/dev/tty）を開けないので、記録中の表示は出さない（記録は続ける。終わったら Enter。最後の表は出る）\n";
+    }
     std::cout << "measure: EEPROM には書かない。書くのはトルクが入っている関節の Torque_Enable=0 だけ。ポート " << path << "\n";
     MeasureFile result;
     const int rc = run_measure(bus, all, kinds, opt, io, std::cout, &result);
