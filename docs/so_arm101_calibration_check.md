@@ -99,22 +99,24 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 ```bash
 ros2 run so_arm101_calibration so_arm101_calib measure --port /dev/ttyACM0 \
   --backup ~/so_arm101_check/eeprom_backup_<日時>.json --out ~/so_arm101_check/measure_C1_1.json \
-  2>&1 | tee -i ~/so_arm101_check/calib_C1_1.log
+  2>&1 | tee -i ~/so_arm101_check/calib_C1_1.log; echo "exit=${PIPESTATUS[0]}"
 ```
-画面の指示に従う（Enter は 3 回。トルクが入っていなければ 2 回）:
+`<日時>` は `20261111-163729`。C0.5 のあとはトルクは OFF のはずで、その場合は何も書かずに進む（`Torque_Enable=0` の書き込みは起きない）。
+画面の指示に従う（**Enter はトルクが OFF なら 3 回（中央・記録開始・記録終了）、トルクが入っていれば 4 回**。余計な Enter は押さない。記録中の Enter は、どれも「記録を終える」になる）:
 1. （トルクが入っているとき）腕を支えて Enter → 脱力。
-2. **中央の姿勢**（各関節の可動範囲のほぼ中央。LeRobot のキャリブと同じ「真ん中」）にして、動かさずに Enter。約 0.2 秒、読み取りが安定していること（動いたら `ERROR: … 中央の測定中に動いた` で止まる。何も書かれていない。やり直す）。
-3. Enter を押すと記録が始まる（`.` が出る）。**全関節（gripper と wrist_roll を含む）を端から端まで**、順に動かす。wrist_roll は約 3801 tick（ほぼ 1 周）。**中央の姿勢から ±約 180° を超えて回さない**（超えると範囲が判定できず、検査で NG になる）。終わったら Enter。
+2. **中央の姿勢**（各関節の可動範囲のほぼ中央。LeRobot のキャリブと同じ「真ん中」）にして、動かさずに Enter。Enter の後、約 0.2〜0.3 秒（20 ms 間隔で 11 回）読み、各関節の揺れが 4 tick（約 0.35°）以内であること（超えると `ERROR: … 中央の測定中に動いた` で止まる。何も書かれていない。やり直す）。**Enter を押す手で姿勢を崩さない**。腕を支えているときは、Enter の後に 1〜2 秒は動かさない（片手で支えたまま押すか、自重で崩れないなら手を離す）。この Enter を押した後に、次の「記録開始」の指示が出るまでは動かしてよい。
+3. 「記録開始」の指示で Enter を押すと記録が始まる（`.` が出る。1 秒に約 2 個）。**全関節（gripper と wrist_roll を含む）を端から端まで**、順に動かす。wrist_roll は約 3801 tick（ほぼ 1 周）。**中央の姿勢から ±約 180° を超えて回さない**（超えると範囲が判定できず、検査で NG になる）。終わったら Enter。**途中で Enter や Ctrl-C を押すと、そこで記録が終わる／中止する**（Ctrl-C では何も保存されない）。各関節は、機械的に止まる端で止める（無理に押し込まない）。脱力しているので、動かしていない関節は自重で垂れる（動かし終わった関節も、垂れて範囲が増えることはあるが、それは実際の可動の範囲内）。
 - 表（center / measured / new_h / min / max / span / samples / 検査）が出る。**検査がすべて OK**で、測定ファイルが保存される。NG の関節があるときは、保存はされるが `apply` は受け付けない（理由が出る。やり直す）。
-- 同じ手順で 2 回目: `--out ~/so_arm101_check/measure_C1_2.json`、ログ `calib_C1_2.log`。**中央の姿勢はできるだけ同じ**にする。
+- 同じ手順で 2 回目: `--out ~/so_arm101_check/measure_C1_2.json`、ログ `calib_C1_2.log`（コマンドの末尾の `echo "exit=…"` も同じ）。**中央の姿勢はできるだけ同じ**にする。
 - 比較（ポートは開かない）:
   ```bash
   ros2 run so_arm101_calibration so_arm101_calib compare \
     --a ~/so_arm101_check/measure_C1_1.json --b ~/so_arm101_check/measure_C1_2.json \
-    2>&1 | tee -i ~/so_arm101_check/calib_C1_compare.log
+    2>&1 | tee -i ~/so_arm101_check/calib_C1_compare.log; echo "exit=${PIPESTATUS[0]}"
   ```
   - 「再現性」: 関節ごとの 2 回の差（tick）と、最大の差。
   - 「今の yaml との差」（A と B のそれぞれ）: min / max / center の差（tick と rad）、Homing_Offset の差、**`zero_shift`（0 rad の物理位置の移動量。tick と rad）**。`zero_shift` が 0 に近いほど、今の URDF・出発点の姿勢・SRDF の数値の意味が変わらない。
+- 検査に落ちる関節があると、測定ファイルは保存されるが終了コードは 4 になる。やり直すときは `--out` を変える（上書きしない）。
 - 合格基準（C1 自体）: 2 回とも終了コード 0、全関節の検査が OK、トルク以外に書いていない（腕が脱力する以外に変化がない）。再現性と yaml との差には**合否の基準を置かない**（次の判断で人が見る）。
 - 報告してほしいもの: `calib_C1_1.log`、`calib_C1_2.log`、`calib_C1_compare.log`、2 つの測定ファイル。
 
