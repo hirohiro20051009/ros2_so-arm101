@@ -431,25 +431,47 @@ void compare_measures(
   int angle_ticks, std::ostream & out)
 {
   const double rad_per_tick = 2.0 * M_PI / angle_ticks;  // 360/angle_ticks 度 = 2π/angle_ticks rad
-  out << "== 再現性（A と B の差。tick）\n";
-  out << std::left << std::setw(15) << "joint" << std::right << std::setw(8) << "d_cent" << std::setw(8) << "d_min"
-      << std::setw(8) << "d_max" << std::setw(11) << "d_center" << std::setw(10) << "d_homing" << "\n";
-  int worst = 0;
+  // 再現性は、生のエンコーダ値（actual。Homing_Offset に依存しない）で比べる。新しい座標（new_min など）は中央の姿勢で
+  // 決まる Homing_Offset を含むので、中央の姿勢の違いが差として出てしまい、比べる量として不適切。
+  //   d_amin / d_amax : 範囲の両端の差（mod 4096 で折り返して ±2048 に収める。wrist_roll のように 0/4095 をまたぐ関節も同じ）
+  //   d_zero          : 0 rad の物理位置（angle のみ。= 範囲の中点 (actual_min + actual_max) / 2）の差
+  //   d_span          : 幅の差
+  //   d_cent          : 中央の姿勢の差（参考。結果には効かない。最大の差にも入れない）
+  // gripper（linear_percent）は端がそのまま 0%・100% になるので d_amin / d_amax / d_span だけ。center は使わない。
+  auto fold = [](double d) {
+      d = std::fmod(d, 4096.0);
+      if (d >= 2048.0) {d -= 4096.0;}
+      if (d < -2048.0) {d += 4096.0;}
+      return d;
+    };
+  out << "== 再現性（A と B の差。生のエンコーダ値 actual。tick。Homing_Offset に依存しない）\n";
+  out << std::left << std::setw(15) << "joint" << std::right << std::setw(8) << "d_amin" << std::setw(8) << "d_amax"
+      << std::setw(8) << "d_span" << std::setw(9) << "d_zero" << std::setw(13) << "d_zero[rad]" << std::setw(8) << "d_cent"
+      << "  (d_cent は中央の姿勢の差。参考で、結果には効かない)\n";
+  double worst = 0.0;
   for (const auto & ja : a.joints) {
     const MeasuredJoint * jb = b.find(ja.id);
     if (!jb) {
       out << ja.name << ": B に無い\n";
       continue;
     }
+    const double damin = fold(jb->actual_min - ja.actual_min), damax = fold(jb->actual_max - ja.actual_max);
+    const double dspan = (jb->actual_max - jb->actual_min) - (ja.actual_max - ja.actual_min);
     const int dc = unwrap_delta(jb->actual_center, ja.actual_center);
-    const int dmin = jb->new_min - ja.new_min, dmax = jb->new_max - ja.new_max;
-    const double dcen = jb->new_center - ja.new_center;
-    const int dh = jb->new_homing_offset - ja.new_homing_offset;
-    worst = std::max({worst, std::abs(dc), std::abs(dmin), std::abs(dmax)});
-    out << std::left << std::setw(15) << ja.name << std::right << std::setw(8) << dc << std::setw(8) << dmin
-        << std::setw(8) << dmax << std::setw(11) << std::fixed << std::setprecision(1) << dcen << std::setw(10) << dh << "\n";
+    worst = std::max({worst, std::fabs(damin), std::fabs(damax)});
+    out << std::left << std::setw(15) << ja.name << std::right << std::fixed << std::setprecision(0) << std::setw(8) << damin
+        << std::setw(8) << damax << std::setw(8) << dspan;
+    if (ja.kind == "angle") {
+      const double dz = fold(((jb->actual_min + jb->actual_max) - (ja.actual_min + ja.actual_max)) / 2.0);
+      worst = std::max(worst, std::fabs(dz));
+      out << std::setw(9) << std::setprecision(1) << dz << std::setw(13) << std::setprecision(4) << dz * rad_per_tick
+          << std::setw(8) << std::setprecision(0) << dc << "\n";
+    } else {
+      out << std::setw(9) << "-" << std::setw(13) << "-" << std::setw(8) << std::setprecision(0) << dc
+          << "  （gripper は center と 0 rad を使わない。端 min / max だけが効く）\n";
+    }
   }
-  out << "最大の差（actual_center / min / max）: " << worst << " tick\n";
+  out << "最大の差（d_amin / d_amax / d_zero。d_cent は含めない）: " << std::fixed << std::setprecision(1) << worst << " tick\n";
   for (int which = 0; which < 2; ++which) {
     const MeasureFile & m = which == 0 ? a : b;
     out << "\n== 今の yaml との差（" << (which == 0 ? "A" : "B") << " − yaml。tick と rad。rad は angle_ticks=" << angle_ticks << "）\n";

@@ -329,17 +329,10 @@ TEST(MeasureFileIo, RoundTripAndCorruptionAreDetected)
   EXPECT_FALSE(parse_measure(replace("\"schema_version\": 1", "\"schema_version\": 3"), &out, &err));
 }
 
-TEST(Compare, ShowsReproducibilityAndTheDifferenceFromTheYaml)
+namespace
 {
-  Rig r;
-  Measure ms(r);
-  MeasureFile a, b;
-  ASSERT_EQ(ms.run(&a), kExitOk);
-  Measure ms2(r);
-  ASSERT_EQ(ms2.run(&b), kExitOk);
-  b.joints[0].new_min += 3;
-  b.joints[0].new_center = (b.joints[0].new_min + b.joints[0].new_max) / 2.0;
-  b.joints[2].actual_center += 2;
+std::vector<std::pair<std::string, YamlJoint>> yaml_joints(Rig & r)
+{
   std::vector<std::pair<std::string, YamlJoint>> yj;
   for (const auto & j : r.cal.joints) {
     YamlJoint y;
@@ -350,13 +343,120 @@ TEST(Compare, ShowsReproducibilityAndTheDifferenceFromTheYaml)
     y.homing_offset = j.eeprom.homing_offset;
     yj.push_back({j.name, y});
   }
+  return yj;
+}
+/// 範囲 [amin, amax]（actual）を、中央の姿勢 center で測った結果にする。
+void set_range(MeasuredJoint * j, int center, int amin, int amax)
+{
+  j->actual_center = center;
+  j->new_homing_offset = center - kHalfTurn;
+  j->actual_min = amin;
+  j->actual_max = amax;
+  j->new_min = kHalfTurn + (amin - center);
+  j->new_max = kHalfTurn + (amax - center);
+  j->new_center = (j->new_min + j->new_max) / 2.0;
+}
+std::string compare_text(Rig & r, const MeasureFile & a, const MeasureFile & b)
+{
   std::ostringstream o;
-  compare_measures(a, b, yj, 4095, o);
-  const std::string t = o.str();
-  EXPECT_NE(t.find("最大の差（actual_center / min / max）: 3 tick"), std::string::npos) << t;
+  compare_measures(a, b, yaml_joints(r), 4095, o);
+  return o.str();
+}
+}  // namespace
+
+TEST(Compare, ShowsReproducibilityAndTheDifferenceFromTheYaml)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile a, b;
+  ASSERT_EQ(ms.run(&a), kExitOk);
+  Measure ms2(r);
+  ASSERT_EQ(ms2.run(&b), kExitOk);
+  b.joints[0].actual_min += 3;  // pan: 端の押し切りが 3 tick 違う → 範囲の中点（0 rad の位置）は 1.5 tick 動く
+  b.joints[2].actual_center += 2;
+  const std::string t = compare_text(r, a, b);
+  EXPECT_NE(t.find("最大の差（d_amin / d_amax / d_zero。d_cent は含めない）: 3.0 tick"), std::string::npos) << t;
+  EXPECT_NE(t.find("d_zero[rad]"), std::string::npos);
   EXPECT_NE(t.find("zero_shift"), std::string::npos);
   EXPECT_NE(t.find("d_cent[rad]"), std::string::npos);
-  EXPECT_NE(t.find("gripper は center を使わない"), std::string::npos);
+  EXPECT_NE(t.find("gripper は center と 0 rad を使わない"), std::string::npos);
+}
+
+TEST(Compare, ADifferentCenterPostureIsNotReportedAsADifferenceInTheRange)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile a, b;
+  ASSERT_EQ(ms.run(&a), kExitOk);
+  b = a;
+  // 同じ物理範囲を、中央の姿勢だけ 70 tick ずらして測った（新座標の min/max と Homing_Offset は変わる）
+  for (auto & j : b.joints) {
+    set_range(&j, j.actual_center + 70, j.actual_min, j.actual_max);
+  }
+  const std::string t = compare_text(r, a, b);
+  EXPECT_NE(t.find("最大の差（d_amin / d_amax / d_zero。d_cent は含めない）: 0.0 tick"), std::string::npos) << t;
+  EXPECT_NE(t.find("      70"), std::string::npos) << t;  // d_cent は 70 と表示される（参考）
+}
+
+/// 再現性の表の、その関節の行を数値に分ける（d_amin, d_amax, d_span, d_zero, d_zero[rad], d_cent）。
+std::vector<double> repro_row(const std::string & text, const std::string & joint)
+{
+  const auto start = text.find(joint);
+  const auto end = text.find("\n== ", start);  // 再現性の表の行は、次の見出しより前
+  std::istringstream in(text.substr(start, std::min(end, text.find('\n', start)) - start));
+  std::string name;
+  in >> name;
+  std::vector<double> v;
+  std::string tok;
+  while (in >> tok && v.size() < 6) {
+    if (tok == "-") {v.push_back(std::nan(""));} else {v.push_back(std::stod(tok));}
+  }
+  return v;
+}
+
+TEST(Compare, ZeroPositionIsTheMidpointOfTheRangeAndFoldsAcrossTheWrap)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile a, b;
+  ASSERT_EQ(ms.run(&a), kExitOk);
+  b = a;
+  // wrist_roll（id 5）: 範囲が 4095 をまたぐ（展開した actual は 4096 以上）。B は A より 4 tick 先
+  set_range(&a.joints[4], 2200, 300, 4100);
+  set_range(&b.joints[4], 2204, 304, 4104);
+  auto v = repro_row(compare_text(r, a, b), "wrist_roll");
+  ASSERT_EQ(v.size(), 6u);
+  EXPECT_DOUBLE_EQ(v[0], 4.0);  // d_amin
+  EXPECT_DOUBLE_EQ(v[1], 4.0);  // d_amax
+  EXPECT_DOUBLE_EQ(v[3], 4.0);  // d_zero
+  EXPECT_NEAR(v[4], 4 * 2 * M_PI / 4095, 1e-4);
+  // 同じ物理位置を 4096 ずらして持っていても（B の max を折り返した値 8）、差は同じ 4 tick（mod 4096 で折り返す）
+  b.joints[4].actual_max = 4104 - 4096;
+  v = repro_row(compare_text(r, a, b), "wrist_roll");
+  EXPECT_DOUBLE_EQ(v[1], 4.0);
+  // 反対向き（B が 4 tick 手前）なら −4
+  set_range(&b.joints[4], 2196, 296, 4096);
+  v = repro_row(compare_text(r, a, b), "wrist_roll");
+  EXPECT_DOUBLE_EQ(v[0], -4.0);
+  EXPECT_DOUBLE_EQ(v[1], -4.0);
+  EXPECT_DOUBLE_EQ(v[3], -4.0);
+}
+
+TEST(Compare, GripperShowsOnlyTheEndsAndNoZeroPosition)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile a, b;
+  ASSERT_EQ(ms.run(&a), kExitOk);
+  b = a;
+  b.joints[5].actual_max += 10;
+  const std::string t = compare_text(r, a, b);
+  const auto pos = t.find("gripper");
+  ASSERT_NE(pos, std::string::npos);
+  const std::string line = t.substr(pos, t.find('\n', pos) - pos);
+  EXPECT_NE(line.find("-"), std::string::npos) << line;
+  EXPECT_NE(line.find("10"), std::string::npos) << line;
+  EXPECT_NE(t.find("最大の差（d_amin / d_amax / d_zero。d_cent は含めない）: 10.0 tick"), std::string::npos) << t;
 }
 
 // ---------------------------------------------------------------- apply

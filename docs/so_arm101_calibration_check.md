@@ -114,7 +114,7 @@ ros2 run so_arm101_calibration so_arm101_calib measure --port /dev/ttyACM0 \
     --a ~/so_arm101_check/measure_C1_1.json --b ~/so_arm101_check/measure_C1_2.json \
     2>&1 | tee -i ~/so_arm101_check/calib_C1_compare.log; echo "exit=${PIPESTATUS[0]}"
   ```
-  - 「再現性」: 関節ごとの 2 回の差（tick）と、最大の差。
+  - 「再現性」: **生のエンコーダ値（actual。Homing_Offset に依存しない）で比べる**。関節ごとに `d_amin`・`d_amax`（範囲の両端の差。tick）、`d_span`（幅の差）、`d_zero`（0 rad の物理位置＝範囲の中点の差。tick と rad。angle 関節だけ）。`d_cent` は中央の姿勢の差で、**参考であって結果には効かない**（最大の差にも入れない）。「最大の差」は `d_amin`・`d_amax`・`d_zero` から出す。**gripper** は端がそのまま 0%・100% になるので、`d_amin`・`d_amax`・`d_span` だけを見る（`d_zero` は「-」）。0 と 4095 をまたぐ関節（wrist_roll）も mod 4096 で折り返して比べる。（旧版は新しい座標で比べていたため、中央の姿勢の違いが「最大の差 70 tick」のように出ていた。誤解を招くので直した。）
   - 「今の yaml との差」（A と B のそれぞれ）: min / max / center の差（tick と rad）、Homing_Offset の差、**`zero_shift`（0 rad の物理位置の移動量。tick と rad）**。`zero_shift` が 0 に近いほど、今の URDF・出発点の姿勢・SRDF の数値の意味が変わらない。
 - 検査に落ちる関節があると、測定ファイルは保存されるが終了コードは 4 になる。やり直すときは `--out` を変える（上書きしない）。
 - 合格基準（C1 自体）: 2 回とも終了コード 0、全関節の検査が OK、トルク以外に書いていない（腕が脱力する以外に変化がない）。再現性と yaml との差には**合否の基準を置かない**（次の判断で人が見る）。
