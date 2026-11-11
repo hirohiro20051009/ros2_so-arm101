@@ -1402,3 +1402,47 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - **リポジトリ内の複製**: C3 の合格後に、測定ファイル・バックアップ・C3 の後の `backup` を `calibration_records/2026-11-11/` に複製し、更新した yaml と同じコミットに入れる（ユーザーの判断）。
 - **yaml の出所にリポジトリ内のパスを書く方法（コードの変更なし）**: `apply` は `--measure`・`--backup` に渡した文字列を、そのまま yaml の `source.measure_file`・`backup_file` に書く（`main.cpp`、`apply.cpp` の `render_calibration_yaml`。偽サーボの通し確認で、渡した絶対パスがそのまま入ることを確認）。そこで、**C3 の前に**、原本の複製を `calibration_records/2026-11-11/`（`measure_C1c_1.json`、`eeprom_backup_20261111-163729.json`。sha256 が原本と一致。未コミット）に置き、C3 の `apply` を**リポジトリの直下で、相対パス**（`calibration_records/2026-11-11/…`）で実行する。コミットは合格後（上の判断どおり）。複製を先に置くのは、yaml をツールが書いたまま（手で書き換えない）にするため。測定ファイルの中の `backup_file` は、測定時のパスのまま（チェックサム付きなので書き換えない）。
 - **elbow_flex の余裕**（見込み 0.008 rad、LOW）: C3 はこのまま進め、手順 6 の実測で判断する（ユーザーの判断）。LOW・OUT が出たら報告し、C4 の前に出発点の姿勢の見直し（elbow を少し開く）を検討する。URDF・SRDF は変えない。
+
+## 出発点の elbow_flex が URDF の上限を 0.0001 rad 超える件（OUT）: 調査と計画（2026-11-11。コード・設定は変えていない）
+きっかけ（ユーザー報告。`calib_C3_pose_margin.log`）: C3 の後の出発点（新しい座標）は pan −0.0982、lift −1.4830、**elbow +1.6901**、wrist_flex +0.5033、roll −0.0483、gripper +0.0152。elbow_flex の URDF の上限（+1.69）までの残りは **−0.0001 rad（OUT）**。事実（ユーザー）: elbow はトルク OFF では自重で折りたたまれるので、開いた姿勢では手を離して止まらない。出発点は、たたみ切った姿勢（機械的な止まり）で決まる。**[事実]** = ファイル・実行で確認、**[推測]** = 未確認。
+
+### 1. 計画パイプラインの設定（事実）
+- `so_arm101_moveit_config/config/` に `*_planning.yaml` は無い（`ompl_planning.yaml` など無し）。`MoveItConfigsBuilder("so101_new_calib", package_name="so_arm101_moveit_config").to_moveit_configs()`（`bringup.launch.py:44-62`、`move_group.launch.py:13-15`。`planning_pipelines()` を指定していない）が、`moveit_configs_utils` の既定の設定を読む（`/opt/ros/humble/lib/python3.10/site-packages/moveit_configs_utils/moveit_configs_builder.py:440-472`）。ビルダーを実際に読み込んで出力した結果（launch が使うのと同じ関数）: パイプラインは `chomp`、`ompl`、`pilz_industrial_motion_planner`、**既定は `ompl`**。
+- **OMPL: `FixStartStateBounds` が入っている**（`request_adapters` に `default_planner_request_adapters/FixStartStateBounds`。`/opt/ros/humble/share/moveit_configs_utils/default_configs/ompl_planning.yaml:8`）。**`start_state_max_bounds_error: 0.1`**（同ファイル:2）。CHOMP も同じ（`chomp_planning.yaml:8, 12`）。
+- **Pilz: `request_adapters: ""`**（`pilz_industrial_motion_planner_planning.yaml:2`）。境界を直すアダプタは無い。
+- 当方の `joint_limits.yaml` は速度・加速度の制限だけで、位置のリミットは URDF（`so101_new_calib.urdf.xacro`）から来る。elbow_flex の URDF の範囲は ±1.6900。`allowed_start_tolerance` は設定していない（MoveIt の既定）。
+
+### 2. この姿勢からそのまま Plan & Execute できるか（mock の move_group での実測。実機は使っていない）
+- 方法: `bringup.launch.py mock:=true use_rviz:=false` を起動し、`/check_state_validity` と `/plan_kinematic_path`（計画だけ。実行しない）に、新しい出発点を `start_state` として渡した（elbow を開く目標 +1.5901、速度・加速度スケール 0.1）。後始末は `ps` と `ros2 node list` の両方で空を確認（`ros2 node list` だけに残ったので `ros2 daemon stop; ros2 daemon start` の後に再確認して空）。
+- **OMPL（既定）: 出発点 elbow +1.6901 は計画に成功**（error_code 1、22 点）。出発点が上限を超えても、**0.0100 超（+1.7000）は成功、shoulder_pan の上限を 0.0001／0.0301／0.0701／0.0901 超えた出発点も成功、0.1301 超で失敗**（FAILURE）。`start_state_max_bounds_error: 0.1` の設定どおり。
+- **Pilz PTP: 上限を超えた出発点は拒否される**: elbow +1.6900（上限ちょうど）は成功、**+1.69005、+1.6901、+1.6950、+1.7000 はすべて `INVALID_ROBOT_STATE`（−17 ではなく名前は INVALID_ROBOT_STATE）**。上限内（+1.6800）は成功。0.00005 rad の超過でも拒否する。
+- `/check_state_validity` は境界を判定しない（elbow +1.7000、pan +2.01 でも `valid=True`）。衝突だけを見る。**新しい出発点は衝突なし（valid）**。同じ姿勢で elbow だけを開く向きとは逆（閉じる向き）に +1.74 まで進めると upper_arm_link と wrist_link が接触する（+1.70 は valid、+1.74 は invalid。接触の始まりは +1.70〜+1.74 の間）。つまり URDF の上限（+1.69）は、衝突の手前の安全側の値になっている。
+- **[推測]** 実行: MoveIt の軌道の最初の点は出発点（+1.6901）のままで、現在の実測と同じなので、`allowed_start_tolerance`（既定 0.01 rad）に収まる。`open_loop_control: true`。実機では未確認（C4 で確認）。
+- **[事実]** 手順書の流れ（`feetech_write_check.md` の W3.5 → W4）は、MoveIt を使う前に elbow_flex を `send_joint_delta.py` で開く（−0.10 を 2 回で約 −0.12。実測で +1.56 付近）。**MoveIt の計画は、elbow が上限内になってから行う**ので、手順書どおりならこの OUT は計画に影響しない。OUT が効くのは、(a) 起動直後に W3.5 を飛ばして計画するとき、(b) Pilz を使うとき、(c) W4 の後に出発点へ戻すとき（`send_joint_delta.py` は URDF の範囲を見ず、ドライバは校正範囲 ±1.7192 でクランプする。+1.6901 は範囲内なので戻せる）。
+- **[推測]** 出発点の読み値は、たたみ切るたびに数 tick ばらつく。旧座標（C3 の前）の +1.66938 と新座標の +1.6901 の差は 0.0207 rad（約 13.5 tick）で、`zero_shift` から計算した見込み（+0.0130）より 0.0077 rad（約 5 tick）大きい（人が姿勢を作る再現性。C3 の合格の目安 0.03 rad 以内には収まっている: pan −0.0138、lift +0.0276、elbow +0.0077、wrist_flex +0.0062、roll +0.0062、gripper −0.0082）。上限を超える量は、今後も 0.01 rad 程度まで変わりうる。OMPL（0.1 まで許容）なら問題ない。
+
+### 3. 対応の計画（承認が要るのは (c) だけ。URDF・SRDF は変えない）
+- **(a) 推奨: 何も変えない。** OMPL（既定）は `FixStartStateBounds`（0.1）で扱える。手順書の W3.5 → W4 は elbow を開いてから計画するので、手順どおりなら問題が出ない。C4 の W4 の再確認で、新しい座標の出発点から実機で確かめる（RViz の MotionPlanning の既定は OMPL のまま。**Pilz を選ばない**）。手順書に「Pilz は、出発点が上限を超えると計画が拒否される（INVALID_ROBOT_STATE）。OMPL を使う」を書く。
+- **(b) 補助（Pilz などを使うとき、または起動直後に計画したいとき）**: 書き込みモードで起動した直後に `send_joint_delta.py elbow_flex -0.10 --seconds 4` で elbow を開く。事実（W3・W3.5 の実測）: 開く向きは目標の約 0.04 rad 手前で止まるので、−0.10 の指令で約 −0.05 動く（+1.6901 → 約 +1.64）。−0.02 のような小さい指令は動かない可能性が高い。開いた姿勢のまま Ctrl-C すると腕が落ちるので、**戻してから止める**（W4 の「止め方」）。
+- **(c) 最後の手段: URDF の elbow の上限を広げる（承認制。今回はしない）。** 校正した物理の範囲は ±1.7192、URDF は ±1.6900。ただし、閉じる向きは約 +1.70〜+1.74 の間で upper_arm_link と wrist_link が接触するので、広げるなら衝突の手前（例: +1.70 まで）にとどめる。広げると MoveIt の設定の変更になる。
+- 採らない案: 校正をやり直して、たたみ切りの読み値を 1.69 未満にする（測定の再現性のぶん、また同じことが起こりうる。C3 を変えるだけで根本の解決にならない）。
+
+### 4. 出発点の姿勢の値を、新しい座標に直す文書の一覧（実施は未。承認の後）
+旧座標（C3 の前）の値: pan −0.08362、lift −1.51134、elbow +1.66938、wrist_flex +0.50941、roll −0.07135、gripper +0.01645。新座標: pan −0.0982、lift −1.4830、elbow +1.6901、wrist_flex +0.5033、roll −0.0483、gripper +0.0152。
+
+| 文書 | 場所 | 直すこと |
+|---|---|---|
+| `docs/feetech_write_check.md` | 130〜139 行（出発点の表と `start_pose.log` への言及） | 新座標の値に直す。出所を `~/so_arm101_check/calib_C3_start_pose.log` に |
+| 同 | 141 行（モックの MoveIt の判定） | 新しい出発点で再判定した結果（出発点は valid。elbow を −0.10／−0.15／−0.20／−0.30 にした姿勢も、モックで確かめ直す） |
+| 同 | 151 行（`+1.66938` との差の計算）、169 行・174〜177 行（戻す先） | `+1.6901` に。「URDF リミット +1.69 まで 0.021 rad の余裕」を「−0.0001 rad（OUT）。OMPL は許容する」に |
+| 同 | 167 行（目標の作り方の注意） | 余裕が 0.021 rad から無い（OUT）に変わったこと。elbow を + に動かさない注意は同じ |
+| `docs/stage2c_plan.md` | 71 行（出発点の姿勢の表の 1 行） | 新座標に直し、「C4 の前に手順書を直す」を済みにする |
+| `docs/so_arm101_calibration_check.md` | C3 の手順 5・6（見込みの表、LOW/OUT の記述） | 見込みの表を、実測の値（新座標）に直す。OUT の判断（上の (a)）を書く |
+| `tools/pose_margin.py` | 5 行（使い方の例の `--pose start=…`） | 新座標の値に直す（動作は変えない） |
+| `docs/inventory.md` | 1005・1030・1045・1056 行（W3・W3.5・W4 の記録）、1392〜1397 行（C3 の見込みの表） | **書き換えない**（記録。旧座標のときの値）。末尾に新座標の記録を足し、旧座標の記録には「旧座標（C3 の前）」と注記する |
+| ユーザーの指示書（リポジトリの外） | 出発点の値、elbow の余裕 0.021 rad、W4 の戻し先 | ユーザーが新座標の値に直す（上の新座標の値） |
+| `~/so_arm101_check/start_pose.log` | （リポジトリの外。ユーザーのファイル） | 旧座標の記録として残す。新座標は `calib_C3_start_pose.log` |
+- 注: `CLAUDE.md`、SRDF の `home` 姿勢（elbow 1.57 など）、URDF は、出発点の値を含まない（変更しない）。
+
+### 5. C3 の状態（事実）
+- `src/so_arm101_hardware/config/follower_calibration.yaml` は C3 で更新済み（作業ツリーの変更。`source` は `calibration_records/2026-11-11/…` の相対パス、`applied_by: so_arm101_calib 0.2.0`）。**まだコミットしていない**（`calibration_records/` も未コミット）。C3 の結果の記録とコミット（手順書の「合格後のコミット」）は、ユーザーの報告と指示を受けて行う。
