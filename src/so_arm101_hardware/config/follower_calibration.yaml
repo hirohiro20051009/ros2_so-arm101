@@ -1,19 +1,20 @@
 # so_arm101 サーボキャリブレーション（フォロワー）。スキーマと意味は docs/inventory.md「段階2b-1」。
-# 段階2c では同じ形式で中身を差し替える。eeprom.* は変換に使わず、起動時診断専用。
+# 段階2c の apply（so_arm101_calib）が生成。eeprom.* は変換に使わず、起動時診断用（書き込みモードは EEPROM と
+# 違うと起動を拒否する）。
 schema_version: 1
 source:
-  kind: converted_from_lerobot_json
-  file: ~/.cache/huggingface/lerobot/calibration/robots/so101_follower/so101_follower.json
-  file_date: 2026-09-07
-  converted_at: 2026-11-06
-  converted_by: tools/convert_lerobot_calibration.py
+  kind: ros_calibrated
+  measure_file: calibration_records/2026-11-11/measure_C1c_1.json
+  backup_file: calibration_records/2026-11-11/eeprom_backup_20261111-163729.json
+  applied_at: 2026-11-11T19:43:04
+  applied_by: so_arm101_calib 0.2.0
 bus: {baudrate: 1000000, protocol: 0}
-# LeRobot 等価（分母 4095）。物理的には 4096 の可能性があり、段階2c で再検討する。
+# LeRobot 等価（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。
 conversion: {angle_ticks: 4095}
 joints:
-  shoulder_pan: {id: 1, kind: angle, direction: 1, center: 2097.5, min: 743, max: 3452, eeprom: {homing_offset: 135, min_limit: 743, max_limit: 3452}}
-  shoulder_lift: {id: 2, kind: angle, direction: 1, center: 2029, min: 842, max: 3216, eeprom: {homing_offset: 112, min_limit: 842, max_limit: 3216}}
-  elbow_flex: {id: 3, kind: angle, direction: 1, center: 1975, min: 862, max: 3088, eeprom: {homing_offset: 122, min_limit: 862, max_limit: 3088}}
-  wrist_flex: {id: 4, kind: angle, direction: 1, center: 2037, min: 889, max: 3185, eeprom: {homing_offset: 89, min_limit: 889, max_limit: 3185}}
-  wrist_roll: {id: 5, kind: angle, direction: 1, center: 2064.5, min: 164, max: 3965, eeprom: {homing_offset: 1164, min_limit: 164, max_limit: 3965}}
-  gripper: {id: 6, kind: linear_percent, direction: 1, min: 1900, max: 3385, eeprom: {homing_offset: 107, min_limit: 1900, max_limit: 3385}}
+  shoulder_pan: {id: 1, kind: angle, direction: 1, center: 2089, min: 724, max: 3454, eeprom: {homing_offset: 144, min_limit: 724, max_limit: 3454}}
+  shoulder_lift: {id: 2, kind: angle, direction: 1, center: 2023.5, min: 836, max: 3211, eeprom: {homing_offset: 117, min_limit: 836, max_limit: 3211}}
+  elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, min: 849, max: 3090, eeprom: {homing_offset: 119, min_limit: 849, max_limit: 3090}}
+  wrist_flex: {id: 4, kind: angle, direction: 1, center: 1991, min: 808, max: 3174, eeprom: {homing_offset: 143, min_limit: 808, max_limit: 3174}}
+  wrist_roll: {id: 5, kind: angle, direction: 1, center: 2021.5, min: 100, max: 3943, eeprom: {homing_offset: 1196, min_limit: 100, max_limit: 3943}}
+  gripper: {id: 6, kind: linear_percent, direction: 1, min: 1454, max: 2944, eeprom: {homing_offset: 547, min_limit: 1454, max_limit: 2944}}

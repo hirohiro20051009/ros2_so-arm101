@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "created": "2026-11-11T18:57:15",
+  "tool": "so_arm101_calib 0.2.0",
+  "port": "/dev/ttyACM0",
+  "backup_file": "/home/hirok/so_arm101_check/eeprom_backup_20261111-163729.json",
+  "checksum": "e7d13a2e91810ed6",
+  "joints": [
+    {"id": 1, "name": "shoulder_pan", "kind": "angle", "actual_center": 2191, "measured_homing_offset": 135, "new_homing_offset": 144, "actual_min": 868, "actual_max": 3598, "new_min": 724, "new_max": 3454, "new_center": 2089, "samples": 3991, "valid": true, "problems": ""},
+    {"id": 2, "name": "shoulder_lift", "kind": "angle", "actual_center": 2164, "measured_homing_offset": 112, "new_homing_offset": 117, "actual_min": 953, "actual_max": 3328, "new_min": 836, "new_max": 3211, "new_center": 2023.5, "samples": 3991, "valid": true, "problems": ""},
+    {"id": 3, "name": "elbow_flex", "kind": "angle", "actual_center": 2166, "measured_homing_offset": 122, "new_homing_offset": 119, "actual_min": 968, "actual_max": 3209, "new_min": 849, "new_max": 3090, "new_center": 1969.5, "samples": 3991, "valid": true, "problems": ""},
+    {"id": 4, "name": "wrist_flex", "kind": "angle", "actual_center": 2190, "measured_homing_offset": 89, "new_homing_offset": 143, "actual_min": 951, "actual_max": 3317, "new_min": 808, "new_max": 3174, "new_center": 1991, "samples": 3991, "valid": true, "problems": ""},
+    {"id": 5, "name": "wrist_roll", "kind": "angle", "actual_center": 3243, "measured_homing_offset": 1164, "new_homing_offset": 1196, "actual_min": 1296, "actual_max": 5139, "new_min": 100, "new_max": 3943, "new_center": 2021.5, "samples": 3991, "valid": true, "problems": ""},
+    {"id": 6, "name": "gripper", "kind": "linear_percent", "actual_center": 2594, "measured_homing_offset": 107, "new_homing_offset": 547, "actual_min": 2001, "actual_max": 3491, "new_min": 1454, "new_max": 2944, "new_center": 2199, "samples": 3991, "valid": true, "problems": ""}
+  ]
+}

@@ -1446,3 +1446,19 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 
 ### 5. C3 の状態（事実）
 - `src/so_arm101_hardware/config/follower_calibration.yaml` は C3 で更新済み（作業ツリーの変更。`source` は `calibration_records/2026-11-11/…` の相対パス、`applied_by: so_arm101_calib 0.2.0`）。**まだコミットしていない**（`calibration_records/` も未コミット）。C3 の結果の記録とコミット（手順書の「合格後のコミット」）は、ユーザーの報告と指示を受けて行う。
+
+## 段階2c 実機確認: C3（全関節を `measure_C1c_1.json` で書く）合格（2026-11-11）
+- 実施: ユーザー（Claude は実機に触れていない）。合格（手順 2〜6）はユーザーの判断。ログ（`~/so_arm101_check/calib_C3_*.log`、`eeprom_after_C3.json`）は Claude が読んで確認した。終了コード（`exit=`）の数値はログに残っていない（`echo` はログの外）。`OK` の表示で確認した。
+- **dry-run**（`calib_C3_dryrun.log`）: 照合 OK（全関節がバックアップと一致）。書き込む値は 6 関節 18 レジスタ（`measure_C1c_1.json`）。`全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する`、`dry-run: 何も書いていない`。
+- **書き込み**（`calib_C3_apply.log`。待ち 50 ms、リポジトリの直下から相対パス）: 6 関節とも Homing_Offset・Min・Max が `[新]`、各 `Lock: 1`、`OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml を更新した`。
+  - 値（Homing_Offset / Min / Max）: pan 144 / 724 / 3454、lift 117 / 836 / 3211、elbow 119 / 849 / 3090、wrist_flex 143 / 808 / 3174、wrist_roll 1196 / 100 / 3943、gripper 547 / 1454 / 2944。
+- **12 V を入れ直した後の読み出し**（ユーザー報告。`calib_C3_after.log`、`eeprom_after_C3.json`）: 6 関節とも「2 回読んで一致」。値は上のとおり。**EEPROM の値は、電源を切っても残る**（C2 に続き、全関節で確認）。
+- **読み取り専用の起動**（`calib_C3_launch.log`、19:45。C3 の前の起動は `calib_C3_before_launch.log`、19:42）: `[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、`MISMATCH` なし、`READ-ONLY mode`。C3 の前の起動も 6/6 MATCH（旧 EEPROM と旧 yaml）。停止時の move_group の exit code −11 は既知の挙動（段階2b-3c の記録）。
+  - 事実（表示の不具合）: 起動ログの 1 行目の出所の表示が、C3 の前は `[converted_from_lerobot_json, file=…, file_date=…]` だったのに、C3 の後は **`[ros_calibrated, file=?, file_date=?]`**（`source` の項目が変わり、`file`・`file_date` が無いため `?`）。動作には無関係。直す計画は下の「計画」。
+- **yaml**: `source` は `ros_calibrated`、`measure_file: calibration_records/2026-11-11/measure_C1c_1.json`、`backup_file: calibration_records/2026-11-11/eeprom_backup_20261111-163729.json`、`applied_at: 2026-11-11T19:43:04`、`applied_by: so_arm101_calib 0.2.0`。各関節の `center`・`min`・`max`・`eeprom.*` は、`measure_C1c_1.json` と全項目一致（コミットの前に照合）。`schema_version`・`bus`・`conversion`・`id`・`kind`・`direction` は変わっていない。
+- **C3 の前後の比較**（ユーザー報告。腕に触れずに、同じ姿勢のまま、C3 の前と後に読んだ値）: 新座標の値は pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523。C3 の前の読み値に `zero_shift`（`measure_C1c_1.json` と旧 yaml の差から計算）を反映した見込みとの差は、**pan 以外は 0.0001 rad 以内、pan は約 1 tick（約 0.0015 rad）**。これは、測定ファイルの値と、書いた EEPROM・yaml・ドライバの変換が、一貫していることの確認になる。C3 の前の読み値の数値は、ログにも報告にも無いので、ここには書かない（必要ならユーザーが追記する）。
+  - 参考（別の比較。W3.5・W4 の出発点を手で作り直した姿勢の旧座標の値と、`zero_shift` から計算した見込み）: 差は pan −0.0138、lift +0.0276、elbow +0.0077、wrist_flex +0.0062、roll +0.0062、gripper −0.0082 rad（C3 の合格の目安 0.03 rad 以内）。別の姿勢を手で作ったぶんの再現性。
+- **URDF の関節リミットとの余裕**（`calib_C3_pose_margin.log`）: 出発点（新座標）で LOW/OUT は **elbow_flex だけ**: 残り −0.0001 rad（OUT。ユーザーの値で elbow +1.69009、上限 +1.69 を約 0.00009 rad 超え）。ほかの関節は ok（lift の下限まで +0.2624 が最小）。校正で記録した範囲の両端は、gripper を除く全関節で URDF の範囲より広い（pan ±2.0944 / ±1.9199、lift ±1.8220 / ±1.7453、elbow ±1.7192 / ±1.6900、wrist_flex ±1.8151 / ±1.6581、wrist_roll −2.9483..+2.9483 / −2.7439..+2.8412。サーボは URDF の外まで動ける）。
+- **elbow の OUT の扱い: (a) に決めた（ユーザーの判断）**: 何も変えない。OMPL（既定）は `FixStartStateBounds`（`start_state_max_bounds_error: 0.1`）で扱え、mock の move_group で、この姿勢から計画に成功した（上の「出発点の elbow_flex が URDF の上限を 0.0001 rad 超える件」）。URDF・SRDF は変えない。Pilz は開始状態が URDF の範囲をわずかに超えても拒否する。
+- **コミット**: 更新した `follower_calibration.yaml`、`calibration_records/2026-11-11/`（`measure_C1c_1.json`、`eeprom_backup_20261111-163729.json`、`eeprom_after_C3.json`、`README.md`。sha256 は原本と一致、README に記載）、この記録を、同じコミットに入れた（タグは付けない）。
+- 次: 出発点の新座標への文書の書き換え（別コミット）、C4（書き込みモードでの W 系の確認のやり直し）。
