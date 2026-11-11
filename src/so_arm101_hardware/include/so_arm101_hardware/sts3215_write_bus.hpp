@@ -61,7 +61,9 @@ public:
     uint8_t address, uint8_t data_len, const std::vector<uint8_t> & ids,
     const std::vector<std::vector<uint8_t>> & data);
 
-private:
+protected:
+  /// 任意レジスタへの書き込み（範囲検査つき）。公開しない。派生クラスが、自分の allow-list の関数だけを公開するために使う
+  /// （so_arm101_calibration の CalibWriteBus。ドライバ本体は使わない）。
   Status write_bytes(uint8_t id, Register r, int value, int min_value, int max_value);
 };
 

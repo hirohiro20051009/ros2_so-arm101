@@ -87,6 +87,7 @@ def main():
             for i in range(n):
                 mem[addr + i] = (val >> (8 * i)) & 0xFF
         put(3, 777, 2)
+        put(5, id_, 1)   # ID
         put(7, 0, 1)
         put(9, e['min_limit'], 2)
         put(11, e['max_limit'], 2)

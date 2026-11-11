@@ -16,6 +16,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <set>
@@ -112,6 +113,51 @@ public:
   /// Lock=1 のとき SRAM への書き込みも拒否する（Lock=1 の確認 1 が失敗する状況の再現）。
   void lock_blocks_sram(bool v) {lock_blocks_sram_ = v;}
   void set_silent(bool v) {silent_ = v;}
+  /// この (id, addr) への WRITE を無視する（応答はする）。id 指定版（キャリブの読み戻し不一致の再現）。
+  void ignore_writes_to(uint8_t id, uint8_t addr)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    ignored_id_addr_.insert({id, addr});
+  }
+  /// この ID への Lock=1 の書き込みだけを無視する（Lock=0 は通る。Lock=1 を確認できない状況の再現）。
+  void ignore_lock_one(uint8_t id)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    ignore_lock1_.insert(id);
+  }
+  /// EEPROM（アドレス < 40）への書き込みが読み出しに反映されるまでの遅れ（ms）。0 で即時。
+  void eeprom_commit_delay_ms(int ms)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    commit_delay_ms_ = ms;
+  }
+  /// (id, addr) への WRITE の応答を、次の count 回だけ捨てる（書き込み自体は行う。通信エラーの再現）。
+  void drop_write_replies(uint8_t id, uint8_t addr, int count)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    drop_write_[{id, addr}] = count;
+  }
+  /// (id, addr) への WRITE の応答を、次の count 回だけ壊す（書き込み自体は行う）。
+  void corrupt_write_replies(uint8_t id, uint8_t addr, int count)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    corrupt_write_[{id, addr}] = count;
+  }
+  /// n 回目の WRITE の後、サーボが落ちた状態にする（n+1 回目以降の WRITE は反映されず、全ての応答が止まる。
+  /// 書き込みの途中での電源断・通信断の再現）。restore_power() で戻す。
+  void cut_power_after_writes(int n)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    cut_after_ = n;
+    applied_writes_ = 0;
+  }
+  void restore_power()
+  {
+    std::lock_guard<std::mutex> g(m_);
+    cut_after_ = -1;
+    applied_writes_ = 0;
+    silent_ = false;
+  }
   /// 通信エラーの再現: (id, addr) への READ の応答を、次の count 回だけ壊す（チェックサムを 1 ビット反転）。
   void corrupt_read_replies(uint8_t id, uint8_t addr, int count)
   {
@@ -171,6 +217,7 @@ private:
   void power_on(uint8_t id, bool gripper)
   {
     put(id, 3, 777, 2);
+    put(id, 5, id, 1);     // ID
     put(id, 7, 0, 1);
     put(id, 16, gripper ? 500 : 1000, 2);
     put(id, 21, 16, 1);
@@ -230,18 +277,49 @@ private:
     out.push_back(static_cast<uint8_t>(chk(body) ^ (corrupt ? 0x01 : 0x00)));
     ::write(master_, out.data(), out.size());
   }
-  void do_write(uint8_t inst, uint8_t id, uint8_t addr, const std::vector<uint8_t> & data)
+  /// 戻り値: 0=普通に応答 / 1=応答を捨てる / 2=応答を壊す / 3=応答しない（サーボが落ちている）
+  int do_write(uint8_t inst, uint8_t id, uint8_t addr, const std::vector<uint8_t> & data)
   {
     std::lock_guard<std::mutex> g(m_);
+    apply_pending();
+    if (cut_after_ >= 0 && applied_writes_ >= cut_after_) {
+      silent_ = true;  // 落ちた後の WRITE は記録もしない（サーボには届いていない）
+      return 3;
+    }
+    ++applied_writes_;
     writes_.push_back({inst, id, addr, data});
-    if (!mem_.count(id)) {return;}
+    if (!mem_.count(id)) {return 0;}
     const bool locked = mem_[id][55] == 1;
     for (size_t i = 0; i < data.size(); ++i) {
       const uint8_t a = addr + i;
       if (ignored_addr_.count(a)) {continue;}
+      if (ignored_id_addr_.count({id, addr})) {continue;}  // 書き込みの先頭アドレスで指定（2 バイト全体を無視）
+      if (a == 55 && data[i] == 1 && ignore_lock1_.count(id)) {continue;}
       if (a < 40 && locked) {continue;}                              // EEPROM は Lock=1 で保護
       if (a >= 40 && locked && lock_blocks_sram_ && a != 55) {continue;}  // 想定外ケース: Lock=1 で SRAM も拒否
+      if (a < 40 && commit_delay_ms_ > 0) {
+        pending_.push_back(
+          {std::chrono::steady_clock::now() + std::chrono::milliseconds(commit_delay_ms_), id, a, data[i]});
+        continue;
+      }
       mem_[id][a] = data[i];
+    }
+    auto d = drop_write_.find({id, addr});
+    if (d != drop_write_.end() && d->second > 0) {--d->second; return 1;}
+    auto c = corrupt_write_.find({id, addr});
+    if (c != corrupt_write_.end() && c->second > 0) {--c->second; return 2;}
+    return 0;
+  }
+  void apply_pending()  // m_ を持っていること
+  {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = pending_.begin(); it != pending_.end();) {
+      if (it->at <= now) {
+        mem_[it->id][it->addr] = it->val;
+        it = pending_.erase(it);
+      } else {
+        ++it;
+      }
     }
   }
   void handle(const std::vector<uint8_t> & pkt)
@@ -260,8 +338,13 @@ private:
     } else if (inst == 0x82) {
       for (size_t i = 7; i < pkt.size() - 1; ++i) {read_reply(pkt[i], pkt[5], pkt[6]);}
     } else if (inst == 0x03) {
-      do_write(inst, id, pkt[5], std::vector<uint8_t>(pkt.begin() + 6, pkt.end() - 1));
-      if (mem_.count(id)) {reply(id, {});}
+      const int mode = do_write(inst, id, pkt[5], std::vector<uint8_t>(pkt.begin() + 6, pkt.end() - 1));
+      bool known;
+      {
+        std::lock_guard<std::mutex> g(m_);
+        known = mem_.count(id) > 0;
+      }
+      if (known && (mode == 0 || mode == 2)) {reply(id, {}, mode == 2);}
     } else if (inst == 0x83) {
       const uint8_t addr = pkt[5], len = pkt[6];
       for (size_t i = 7; i + len < pkt.size(); i += len + 1u) {
@@ -276,6 +359,7 @@ private:
     {
       std::lock_guard<std::mutex> g(m_);
       if (!mem_.count(id)) {return;}
+      apply_pending();
       for (int i = 0; i < len; ++i) {data.push_back(mem_[id][addr + i]);}
       auto d = drop_.find({id, addr});
       if (d != drop_.end() && d->second > 0) {--d->second; return;}
@@ -291,6 +375,20 @@ private:
   std::map<uint8_t, uint8_t> err_;
   std::map<std::pair<uint8_t, uint8_t>, int> corrupt_, drop_;
   std::set<uint8_t> ignored_addr_;
+  std::set<std::pair<uint8_t, uint8_t>> ignored_id_addr_;
+  std::set<uint8_t> ignore_lock1_;
+  struct Pending
+  {
+    std::chrono::steady_clock::time_point at;
+    uint8_t id;
+    uint8_t addr;
+    uint8_t val;
+  };
+  std::vector<Pending> pending_;
+  int commit_delay_ms_{0};
+  std::map<std::pair<uint8_t, uint8_t>, int> drop_write_, corrupt_write_;
+  int cut_after_{-1};
+  int applied_writes_{0};
   std::vector<WriteRecord> writes_;
   std::map<uint8_t, unsigned> counts_;
   unsigned bad_requests_{0};
