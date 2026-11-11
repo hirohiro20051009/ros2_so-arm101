@@ -5,6 +5,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -171,7 +172,7 @@ TEST(Measure, MeasuresCenterAndRangeWithoutWritingAnything)
   EXPECT_EQ(m.joints[4].new_max - m.joints[4].new_min, 3801);
   // トルクは既に OFF: 何も書かない（EEPROM にも Lock にも触れない）
   EXPECT_TRUE(r.servos.writes().empty());
-  EXPECT_EQ(ms.prompts.size(), 2u);  // 中央、範囲（脱力の確認は無し）
+  EXPECT_EQ(ms.prompts.size(), 1u);  // 中央の Enter だけ（脱力の確認は無し）。記録の終了の Enter は should_stop
 }
 
 TEST(Measure, OnlyTorqueEnableZeroIsWrittenWhenTorqueIsOn)
@@ -190,7 +191,7 @@ TEST(Measure, OnlyTorqueEnableZeroIsWrittenWhenTorqueIsOn)
     EXPECT_EQ(rec.data[0], 0);
   }
   EXPECT_EQ(r.servos.u8(2, 40), 0);
-  EXPECT_EQ(ms.prompts.size(), 3u);  // 脱力の確認が加わる
+  EXPECT_EQ(ms.prompts.size(), 2u);  // 脱力の確認が加わる（記録の終了の Enter は should_stop）
   EXPECT_EQ(count_writes(w, 1, 40), 0);  // トルクが入っていない関節には書かない
 }
 
@@ -294,6 +295,250 @@ TEST(Measure, RefusesWhenAServoDoesNotAnswerOrIsNotAnSts3215)
   MeasureFile m;
   EXPECT_EQ(ms.run(&m), kExitPrecondition);
   EXPECT_TRUE(r.servos.writes().empty());
+}
+
+// ---------------------------------------------------------------- 2 回 Enter・記録中の表示
+TEST(Measure, TwoEntersCenterThenRecordImmediately)
+{
+  Rig r;
+  Measure ms(r);
+  std::vector<std::string> ev;
+  ms.io.wait_enter = [&](const std::string & p) {ev.push_back("enter"); ms.prompts.push_back(p); return true;};
+  auto center = ms.io.on_center_sample;
+  ms.io.on_center_sample = [&, center](int k) {ev.push_back("center"); center(k);};
+  ms.io.on_recording_start = [&]() {ev.push_back("flush");};
+  auto tick = ms.io.on_tick;
+  ms.io.on_tick = [&, tick]() {ev.push_back("tick"); tick();};
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  // Enter は中央の 1 回だけ（トルク OFF）。記録の開始に Enter は要らない
+  EXPECT_EQ(std::count(ev.begin(), ev.end(), "enter"), 1);
+  EXPECT_EQ(ev.front(), "enter");
+  // 中央の測定 → 入力を捨てる（1 回）→ 記録
+  const auto flush = std::find(ev.begin(), ev.end(), "flush");
+  ASSERT_NE(flush, ev.end());
+  EXPECT_EQ(std::count(ev.begin(), ev.end(), "flush"), 1);
+  EXPECT_EQ(std::count(ev.begin(), flush, "center"), 3);
+  EXPECT_EQ(std::count(ev.begin(), flush, "tick"), 0);
+  EXPECT_GT(std::count(flush, ev.end(), "tick"), 0);
+  EXPECT_EQ(std::count(flush, ev.end(), "center"), 0);
+  // 表示の順序: 「中央を測定中」→「中央の測定 OK、記録中」→ 記録の統計
+  const auto p1 = text.find("中央を測定中"), p2 = text.find("中央の測定 OK、記録中"), p3 = text.find("記録: 読み取り");
+  ASSERT_NE(p1, std::string::npos);
+  ASSERT_NE(p2, std::string::npos);
+  ASSERT_NE(p3, std::string::npos);
+  EXPECT_LT(p1, p2);
+  EXPECT_LT(p2, p3);
+}
+
+TEST(Measure, TwoEntersWhenTorqueIsOnTheSupportEnterComesFirst)
+{
+  Rig r;
+  r.servos.set_u8(2, 40, 1);
+  Measure ms(r);
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  ASSERT_EQ(ms.prompts.size(), 2u);
+  EXPECT_NE(ms.prompts[0].find("支えて"), std::string::npos);
+  EXPECT_NE(ms.prompts[1].find("中央"), std::string::npos);
+}
+
+TEST(Measure, ARejectedCenterNeverStartsRecording)
+{
+  Rig r;
+  Measure ms(r);
+  int starts = 0;
+  ms.io.on_recording_start = [&]() {++starts;};
+  int ticks = 0;
+  ms.io.on_tick = [&]() {++ticks;};
+  ms.io.on_center_sample = [&](int k) {
+      for (int i = 0; i < 6; ++i) {set_actual(r, i + 1, kCenter[i] + (i == 0 ? k * 30 : 0));}
+    };
+  MeasureFile m;
+  std::string text;
+  EXPECT_EQ(ms.run(&m, &text), kExitInput) << text;
+  EXPECT_EQ(starts, 0);
+  EXPECT_EQ(ticks, 0);
+  EXPECT_EQ(text.find("記録中"), std::string::npos);
+  EXPECT_TRUE(m.joints.empty());
+}
+
+TEST(LiveDisplay, GapIsReadInTheSameDirectionOnBothSides)
+{
+  EXPECT_EQ(format_gap(12), "あと 12");
+  EXPECT_EQ(format_gap(0), "届いた");
+  EXPECT_EQ(format_gap(-30), "届いた(+30)");
+  LiveJoint j;
+  j.name = "shoulder_pan";
+  j.has_ref = true;
+  j.ref_min = -1300;
+  j.ref_max = 1300;
+  // min 側は「記録した min − yaml の min」、max 側は「yaml の max − 記録した max」。どちらも「あと」が正
+  j.min = -1288;  // 前回の端（−1300）まで 12 tick 足りない
+  j.max = 1288;   // 前回の端（+1300）まで 12 tick 足りない
+  std::string l = format_log_line(3, j);
+  EXPECT_NE(l.find("min 側 あと 12"), std::string::npos) << l;
+  EXPECT_NE(l.find("max 側 あと 12"), std::string::npos) << l;
+  j.min = -1300;
+  j.max = 1300;
+  l = format_log_line(3, j);
+  EXPECT_NE(l.find("min 側 届いた /"), std::string::npos) << l;
+  EXPECT_NE(l.find("max 側 届いた"), std::string::npos) << l;
+  j.min = -1330;  // 30 tick 超えて押した（今回の pan のように）
+  j.max = 1305;
+  j.min_recent = true;
+  l = format_log_line(3, j);
+  EXPECT_NE(l.find("min 側 届いた(+30)*"), std::string::npos) << l;
+  EXPECT_NE(l.find("max 側 届いた(+5)"), std::string::npos) << l;
+  EXPECT_EQ(l.find("max 側 届いた(+5)*"), std::string::npos) << l;  // max 側は直近に更新されていない
+  // 端末の表と同じ表記
+  const auto rows = format_live_table({j});
+  ASSERT_EQ(rows.size(), 2u);
+  EXPECT_NE(rows[1].find("届いた(+30)*"), std::string::npos) << rows[1];
+  EXPECT_NE(rows[1].find("届いた(+5)"), std::string::npos) << rows[1];
+  EXPECT_EQ(rows[1].find("\033"), std::string::npos);  // ANSI を含まない
+  // yaml の範囲が無いとき
+  j.has_ref = false;
+  EXPECT_NE(format_log_line(0, j).find("min 側 - "), std::string::npos);
+}
+
+TEST(LiveDisplay, YamlRangeCrossing4095IsUnwrappedMod4096)
+{
+  // wrist_roll の yaml の生の範囲: min_limit 164 + Homing_Offset 1164 = 1328、max_limit 3965 + 1164 = 5129（4095 をまたぐ）
+  auto r1 = yaml_range_around(1328, 5129, 3228);   // 中央 3228 のとき: 中点 3228.5 → 差 0.5
+  EXPECT_EQ(r1.first, -1900);
+  EXPECT_EQ(r1.second, 1901);
+  // 中央が 4096 ずれた別の表し方（= 同じ物理位置）でも同じ。mod 4096 で折り返す
+  EXPECT_EQ(yaml_range_around(1328 + 4096, 5129 + 4096, 3228), r1);
+  EXPECT_EQ(yaml_range_around(1328 - 4096, 5129 - 4096, 3228), r1);
+  // 中央が 100（= 4196 と同じ位置）のとき: 中点 3228.5 は 100 から見て −967.5。幅 3801 は折り返さない
+  auto r2 = yaml_range_around(1328, 5129, 100);
+  EXPECT_EQ(r2.first, -2868);
+  EXPECT_EQ(r2.second, 933);
+  // 4095 をまたがない関節は、素直な差
+  auto r3 = yaml_range_around(743 + 135, 3452 + 135, 2097);
+  EXPECT_EQ(r3.first, 743 + 135 - 2097);
+  EXPECT_EQ(r3.second, 3452 + 135 - 2097);
+}
+
+TEST(LiveDisplay, WristRollGapIsCorrectWhenTheYamlRangeCrossesTheWrap)
+{
+  Rig r;
+  Measure ms(r);
+  ms.io.live_every_ticks = 1;
+  ms.io.log_every_ticks = 1;
+  // roll の中央は 3228。yaml の生の範囲は 1328..5129（4095 をまたぐ）。他の関節は yaml の範囲 = 測る範囲
+  ms.io.yaml_ref.clear();
+  for (int i = 0; i < 6; ++i) {ms.io.yaml_ref.push_back({kCenter[i] + kLo[i], kCenter[i] + kHi[i]});}
+  ms.io.yaml_ref[4] = {1328, 5129};
+  ms.io.on_center_sample = [&](int) {
+      for (int i = 0; i < 6; ++i) {set_actual(r, i + 1, i == 4 ? 3228 : kCenter[i]);}
+    };
+  ms.io.on_tick = [&]() {
+      ++ms.tick;
+      for (int i = 0; i < 6; ++i) {
+        const int base = i == 4 ? 3228 : kCenter[i];
+        int d = 0;
+        if (ms.tick == 1) {d = i == 4 ? -1895 : kLo[i];}   // roll は前回の端（−1900）の 5 手前
+        if (ms.tick == 2) {d = i == 4 ? 1905 : kHi[i];}    // roll は前回の端（+1901）を 4 超えた
+        set_actual(r, i + 1, (base + d + 4096) % 4096);
+      }
+    };
+  std::vector<std::vector<LiveJoint>> frames;
+  ms.io.on_live = [&](const std::vector<LiveJoint> & v) {frames.push_back(v);};
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  ASSERT_FALSE(frames.empty());
+  const LiveJoint & roll = frames.back()[4];
+  EXPECT_EQ(roll.name, "wrist_roll");
+  EXPECT_EQ(roll.min, -1895);
+  EXPECT_EQ(roll.max, 1905);
+  EXPECT_EQ(roll.ref_min, -1900);
+  EXPECT_EQ(roll.ref_max, 1901);
+  const auto line = text.find("wrist_roll");
+  ASSERT_NE(line, std::string::npos);
+  EXPECT_NE(text.find("min 側 あと 5"), std::string::npos) << text;
+  EXPECT_NE(text.find("max 側 届いた(+4)"), std::string::npos) << text;
+  // 他の関節は前回の端と同じ位置まで来ている
+  EXPECT_NE(text.find("shoulder_pan"), std::string::npos);
+  EXPECT_EQ(frames.back()[0].min - frames.back()[0].ref_min, 0);
+}
+
+TEST(LiveDisplay, FramesAndLogLinesAreEmittedAtTheirOwnCadence)
+{
+  Rig r;
+  Measure ms(r);
+  ms.io.live_every_ticks = 2;
+  ms.io.log_every_ticks = 4;
+  ms.io.recent_ticks = 2;
+  ms.io.should_stop = [&]() {return ms.tick >= 8;};
+  int frames = 0;
+  std::vector<bool> recent;
+  ms.io.on_live = [&](const std::vector<LiveJoint> & v) {++frames; recent.push_back(v[0].min_recent);};
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  EXPECT_EQ(frames, 4);  // 8 tick / 2
+  EXPECT_EQ(ms.io.stats.live_frames, 4);
+  // ログの行: 4 tick ごと（8 tick で 2 回）× 6 関節
+  size_t joint_lines = 0;
+  for (const char * n : {"shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"}) {
+    for (size_t pos = text.find(std::string(" s] ") + n); pos != std::string::npos; pos = text.find(std::string(" s] ") + n, pos + 1)) {
+      ++joint_lines;
+    }
+  }
+  EXPECT_EQ(joint_lines, 12u) << text;
+  // min は tick 1 で更新（kLo）。recent_ticks=2 なので、tick 2 の枠では * が付き、tick 8 の枠では消えている
+  ASSERT_EQ(recent.size(), 4u);
+  EXPECT_TRUE(recent.front());
+  EXPECT_FALSE(recent.back());
+}
+
+TEST(LiveDisplay, DisplayDoesNotChangeTheReadCadence)
+{
+  // 表示（整形・on_live・ログ行）を付けても、記録の読み取りの回数と間隔は付けないときと同じ。
+  // 回数は決定的に等しい（1 周期に SYNC_READ を 1 回）。間隔は実時間なので、付けない場合との差を許容範囲で比べる。
+  auto run_once = [](bool display, int * sync_reads, RecordStats * st) {
+      Rig r;
+      Measure ms(r);
+      ms.io.tick_ms = 20;
+      ms.io.center_samples = 3;
+      ms.io.should_stop = [&]() {return ms.tick >= 60;};
+      std::string sink;
+      if (display) {
+        ms.io.yaml_ref.clear();
+        for (int i = 0; i < 6; ++i) {ms.io.yaml_ref.push_back({kCenter[i] + kLo[i], kCenter[i] + kHi[i]});}
+        ms.io.on_live = [&](const std::vector<LiveJoint> & v) {for (const auto & row : format_live_table(v)) {sink += row + "\n";}};
+        ms.io.live_every_ticks = 10;
+        ms.io.log_every_ticks = 50;
+      } else {
+        ms.io.log_every_ticks = 1000000;
+      }
+      const auto before = r.servos.instruction_counts();
+      MeasureFile m;
+      std::string text;
+      ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+      auto after = r.servos.instruction_counts();
+      *sync_reads = static_cast<int>(after[0x82] - (before.count(0x82) ? before.at(0x82) : 0u));
+      *st = ms.io.stats;
+    };
+  int reads_off = 0, reads_on = 0;
+  RecordStats off, on;
+  run_once(false, &reads_off, &off);
+  run_once(true, &reads_on, &on);
+  EXPECT_EQ(off.ticks, 60);
+  EXPECT_EQ(on.ticks, 60);
+  EXPECT_EQ(reads_off, 60 + 3);  // 記録 60 回 + 中央 3 回
+  EXPECT_EQ(reads_on, reads_off);
+  EXPECT_EQ(off.read_failures, 0);
+  EXPECT_EQ(on.read_failures, 0);
+  EXPECT_EQ(on.live_frames, 6);
+  EXPECT_LT(on.mean_interval_ms, off.mean_interval_ms * 1.25 + 3.0)
+    << "表示あり " << on.mean_interval_ms << " ms / なし " << off.mean_interval_ms << " ms";
+  EXPECT_LT(on.live_max_ms, 5.0) << "表示 1 回の最大 " << on.live_max_ms << " ms";
 }
 
 TEST(MeasureFileIo, RoundTripAndCorruptionAreDetected)

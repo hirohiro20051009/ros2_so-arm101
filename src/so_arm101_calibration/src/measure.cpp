@@ -259,6 +259,73 @@ void sleep_ms(int ms)
 }
 }  // namespace
 
+// ---------------------------------------------------------------- 記録中の表示
+std::pair<int, int> yaml_range_around(int yaml_actual_min, int yaml_actual_max, int center)
+{
+  // 範囲の中点 (min+max)/2 を mod 4096 で center からの差に折り返す（2 倍の値で整数のまま扱う）。幅は折り返さない。
+  const int width = yaml_actual_max - yaml_actual_min;
+  int d2 = (yaml_actual_min + yaml_actual_max - 2 * center) % 8192;
+  if (d2 >= 4096) {d2 -= 8192;}
+  if (d2 < -4096) {d2 += 8192;}
+  return {static_cast<int>(std::floor((d2 - width) / 2.0)), static_cast<int>(std::floor((d2 + width) / 2.0))};
+}
+
+std::string format_gap(int remaining)
+{
+  if (remaining > 0) {return "あと " + std::to_string(remaining);}
+  if (remaining == 0) {return "届いた";}
+  return "届いた(+" + std::to_string(-remaining) + ")";
+}
+
+namespace
+{
+/// 表示幅（UTF-8 の日本語などは 2 桁）。
+int display_width(const std::string & s)
+{
+  int w = 0;
+  for (size_t i = 0; i < s.size();) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    const int len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+    w += len >= 3 ? 2 : 1;
+    i += static_cast<size_t>(len);
+  }
+  return w;
+}
+std::string pad(const std::string & s, int width, bool right)
+{
+  const int fill = std::max(0, width - display_width(s));
+  return right ? std::string(static_cast<size_t>(fill), ' ') + s : s + std::string(static_cast<size_t>(fill), ' ');
+}
+std::string gap_cell(const LiveJoint & j, bool min_side)
+{
+  if (!j.has_ref) {return "-";}
+  const int remaining = min_side ? j.min - j.ref_min : j.ref_max - j.max;
+  return format_gap(remaining) + ((min_side ? j.min_recent : j.max_recent) ? "*" : "");
+}
+}  // namespace
+
+std::vector<std::string> format_live_table(const std::vector<LiveJoint> & joints)
+{
+  std::vector<std::string> rows;
+  rows.push_back(
+    pad("joint", 14, false) + pad("今", 6, true) + pad("min", 7, true) + pad("max", 7, true) + pad("幅", 6, true) + "  " +
+    pad("min 側: 前回の端まで", 21, false) + pad("max 側: 前回の端まで", 21, false));
+  for (const auto & j : joints) {
+    rows.push_back(
+      pad(j.name, 14, false) + pad(std::to_string(j.now), 6, true) + pad(std::to_string(j.min), 7, true) +
+      pad(std::to_string(j.max), 7, true) + pad(std::to_string(j.max - j.min), 6, true) + "  " +
+      pad(gap_cell(j, true), 21, false) + pad(gap_cell(j, false), 21, false));
+  }
+  return rows;
+}
+
+std::string format_log_line(int elapsed_s, const LiveJoint & j)
+{
+  return "[" + std::to_string(elapsed_s) + " s] " + pad(j.name, 14, false) + " 今 " + std::to_string(j.now) + " / min " +
+         std::to_string(j.min) + " / max " + std::to_string(j.max) + " / 幅 " + std::to_string(j.max - j.min) +
+         " / min 側 " + gap_cell(j, true) + " / max 側 " + gap_cell(j, false);
+}
+
 int run_measure(
   CalibWriteBus & bus, const std::vector<JointId> & all, const std::vector<std::string> & kinds, const Options & opt,
   MeasureIO & io, std::ostream & out, MeasureFile * result)
@@ -323,11 +390,16 @@ int run_measure(
   } else {
     out << "全関節のトルクは OFF（何も書かない）\n";
   }
-  // 3. 中央の姿勢
-  if (!io.wait_enter("腕を「中央」の姿勢（各関節の可動範囲のほぼ中央。LeRobot の中央姿勢と同じ）にして、動かさずに Enter")) {
+  // 3. 中央の姿勢（Enter 1 回目）→ そのまま記録を始める
+  if (!io.wait_enter(
+      "腕を「中央」の姿勢（各関節の可動範囲のほぼ中央。LeRobot の中央姿勢と同じ）にして、動かさずに Enter。"
+      "Enter の後、約 0.3 秒は動かさない（「記録中」と出たら動かしてよい）"))
+  {
     out << "中止（何も書いていない）\n";
     return kExitInput;
   }
+  out << "中央を測定中（約 " << std::fixed << std::setprecision(1) << io.center_samples * (io.tick_ms + 3) / 1000.0
+      << " 秒。動かさない）…\n" << std::flush;
   std::vector<std::vector<int>> deltas(n);
   std::vector<int> first_actual(n, -1);
   std::vector<std::vector<int>> actual_samples(n);
@@ -360,33 +432,96 @@ int run_measure(
     if (c < 0) {c += 4096;}
     center[i] = c;
   }
-  // 4. MIN/MAX の記録
-  if (!io.wait_enter("全関節を端から端まで順に動かす。終わったら Enter（記録を終える）。Enter を押すと記録を始める")) {
-    out << "中止（何も書いていない）\n";
-    return kExitInput;
+  // 4. MIN/MAX の記録（Enter 2 回目で終える）。中央の測定中に押した Enter が残っていると、記録がすぐ終わるので捨てる
+  if (io.on_recording_start) {io.on_recording_start();}
+  out << "\n中央の測定 OK、記録中。動かし始めてよい。全関節を端から端まで押し切り、終わったら Enter\n"
+      << "（値は中央からの差。前回の端まで あと N tick。「届いた」になれば前回の端と同じ位置まで届いている。* は直近 1 秒に更新）\n"
+      << std::flush;
+  std::vector<int> dmin(n, 0), dmax(n, 0), count(n, 0), now(n, 0);
+  std::vector<long> min_tick(n, 0), max_tick(n, 0);
+  std::vector<std::pair<int, int>> ref(n, {0, 0});
+  std::vector<bool> has_ref(n, false);
+  for (size_t i = 0; i < n && i < io.yaml_ref.size(); ++i) {
+    ref[i] = yaml_range_around(io.yaml_ref[i].first, io.yaml_ref[i].second, center[i]);
+    has_ref[i] = true;
   }
-  std::vector<int> dmin(n, 0), dmax(n, 0), count(n, 0);
+  using Clock = std::chrono::steady_clock;
+  auto ms_between = [](Clock::time_point a, Clock::time_point b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+  auto live_joints = [&](long tick) {
+      std::vector<LiveJoint> v(n);
+      for (size_t i = 0; i < n; ++i) {
+        v[i].name = all[i].name;
+        v[i].now = now[i];
+        v[i].min = dmin[i];
+        v[i].max = dmax[i];
+        v[i].has_ref = has_ref[i];
+        v[i].ref_min = ref[i].first;
+        v[i].ref_max = ref[i].second;
+        v[i].min_recent = min_tick[i] > 0 && tick - min_tick[i] <= io.recent_ticks;
+        v[i].max_recent = max_tick[i] > 0 && tick - max_tick[i] <= io.recent_ticks;
+      }
+      return v;
+    };
+  RecordStats st;
+  const auto t_begin = Clock::now();
+  Clock::time_point prev_start{};
+  double interval_sum = 0.0;
   int consecutive_fail = 0;
   long ticks = 0;
   while (true) {
     if (io.on_tick) {io.on_tick();}
+    const auto t0 = Clock::now();
+    if (ticks > 0) {
+      const double iv = ms_between(prev_start, t0);
+      interval_sum += iv;
+      st.max_interval_ms = std::max(st.max_interval_ms, iv);
+    }
+    prev_start = t0;
     std::vector<int> pos;
     if (read_present(bus, ids, opt.retries, &pos, &err)) {
       consecutive_fail = 0;
       for (size_t i = 0; i < n; ++i) {
         const int d = unwrap_delta(actual_from_present(pos[i], homing[i]), center[i]);
-        dmin[i] = std::min(dmin[i], d);
-        dmax[i] = std::max(dmax[i], d);
+        now[i] = d;
+        if (d < dmin[i]) {dmin[i] = d; min_tick[i] = ticks + 1;}
+        if (d > dmax[i]) {dmax[i] = d; max_tick[i] = ticks + 1;}
         ++count[i];
       }
-    } else if (++consecutive_fail >= 20) {
-      out << "ERROR: 記録中に Present_Position を連続して読めない: " << err << "\n";
-      return kExitPrecondition;
+    } else {
+      ++st.read_failures;
+      if (++consecutive_fail >= 20) {
+        out << "ERROR: 記録中に Present_Position を連続して読めない: " << err << "\n";
+        return kExitPrecondition;
+      }
     }
     ++ticks;
+    // 表示（読み取りの後。かかった時間を測り、統計に出す）
+    if ((io.on_live && ticks % io.live_every_ticks == 0) || ticks % io.log_every_ticks == 0) {
+      const auto d0 = Clock::now();
+      const std::vector<LiveJoint> lj = live_joints(ticks);
+      if (io.on_live && ticks % io.live_every_ticks == 0) {
+        io.on_live(lj);
+        ++st.live_frames;
+      }
+      if (ticks % io.log_every_ticks == 0) {
+        const int sec = static_cast<int>(ms_between(t_begin, Clock::now()) / 1000.0);
+        for (const auto & j : lj) {out << format_log_line(sec, j) << "\n";}
+      }
+      const double dt = ms_between(d0, Clock::now());
+      st.live_total_ms += dt;
+      st.live_max_ms = std::max(st.live_max_ms, dt);
+    }
     if (io.should_stop && io.should_stop()) {break;}
     sleep_ms(io.tick_ms);
   }
+  st.ticks = ticks;
+  st.mean_interval_ms = ticks > 1 ? interval_sum / static_cast<double>(ticks - 1) : 0.0;
+  io.stats = st;
+  out << std::fixed << std::setprecision(1) << "\n記録: 読み取り " << st.ticks << " 回（失敗 " << st.read_failures
+      << " 回）、間隔 平均 " << st.mean_interval_ms << " ms / 最大 " << st.max_interval_ms << " ms、表示 " << st.live_frames
+      << " 回（合計 " << st.live_total_ms << " ms、最大 " << st.live_max_ms << " ms）\n";
   // 5. 結果
   MeasureFile m;
   m.created = now_string(false);

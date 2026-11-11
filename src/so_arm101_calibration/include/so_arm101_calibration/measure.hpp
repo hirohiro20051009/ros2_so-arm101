@@ -14,6 +14,7 @@
 #include <functional>
 #include <iosfwd>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "so_arm101_calibration/calib_write_bus.hpp"
@@ -64,16 +65,57 @@ int actual_from_present(int present, int homing_offset);
 /// 中央からの差を ±2048 に展開する。
 int unwrap_delta(int actual, int actual_center);
 
+// ---------------------------------------------------------------- 記録中の表示（その場で端まで押し切れたかを確かめる）
+/// 1 関節ぶんの表示データ。値はすべて「中央の姿勢からの差（tick）」。
+struct LiveJoint
+{
+  std::string name;
+  int now{0}, min{0}, max{0};      // 今の値、記録した最小・最大
+  bool has_ref{false};
+  int ref_min{0}, ref_max{0};      // 今の yaml の生の範囲（中央の姿勢からの差に直したもの）
+  bool min_recent{false}, max_recent{false};  // 直近 1 秒以内に更新された（* を付ける）
+};
+
+/// yaml の生の範囲（actual 座標。min_limit + Homing_Offset, max_limit + Homing_Offset。wrist_roll は 4095 をまたぎ、
+/// 約 1328〜5129 のように 4096 以上の値になる）を、測った中央 center からの差に直す。
+/// 範囲の中点を mod 4096 で折り返して center からの差を出し（±2048 に収める）、幅（max − min）はそのまま保つ。
+std::pair<int, int> yaml_range_around(int yaml_actual_min, int yaml_actual_max, int center);
+
+/// 「前回の端まで あと N tick」。remaining > 0: "あと N" / 0: "届いた" / < 0: "届いた(+N)"（N tick 超えた）。
+/// min 側は remaining = 記録した min − yaml の min、max 側は remaining = yaml の max − 記録した max（どちらも同じ向きで読める）。
+std::string format_gap(int remaining);
+/// 見出し + 関節ごとの行（ANSI なし。端末の表示とログで共通）。
+std::vector<std::string> format_live_table(const std::vector<LiveJoint> & joints);
+/// ログの 1 秒ごとの行（同じ表記）。
+std::string format_log_line(int elapsed_s, const LiveJoint & j);
+
+/// 記録の統計（読み取りの回数と間隔、表示にかかった時間）。表示を足しても読み取りが遅れないことの確認用。
+struct RecordStats
+{
+  long ticks{0};            // 読み取りを試みた回数
+  long read_failures{0};    // 再試行しても読めなかった回数
+  double mean_interval_ms{0.0}, max_interval_ms{0.0};  // 読み取りの開始から次の開始まで
+  long live_frames{0};      // on_live を呼んだ回数
+  double live_total_ms{0.0}, live_max_ms{0.0};  // 表示（整形・on_live・ログ行）にかかった時間
+};
+
 /// 対話の部品。試験ではこれを差し替える。
 struct MeasureIO
 {
   std::function<bool(const std::string &)> wait_enter;  // 表示して Enter を待つ。false なら中止
   std::function<bool()> should_stop;                    // 記録中に呼ぶ。true で記録を終える
+  std::function<void()> on_recording_start;             // 中央の測定が終わり、記録を始める直前（端末では溜まった入力を捨てる）
   std::function<void()> on_tick;                        // 記録の 1 周期ごと（試験で姿勢を動かす）
   std::function<void(int)> on_center_sample;            // 中央の k 回目の読み取りの前（試験で姿勢を動かす）
+  std::function<void(const std::vector<LiveJoint> &)> on_live;  // live_every_ticks ごと。端末の表示（遅れさせないこと）
+  std::vector<std::pair<int, int>> yaml_ref;            // 関節ごとの yaml の生の範囲（actual 座標）。空なら差を出さない
   int tick_ms{20};
   int center_samples{11};
   int center_tolerance_ticks{4};
+  int live_every_ticks{10};   // 約 0.2 秒
+  int log_every_ticks{50};    // 約 1 秒（ログの行）
+  int recent_ticks{50};       // 端を更新してから * を付ける長さ
+  RecordStats stats;          // 出力: 記録の統計
 };
 
 /// 測定。戻り値は ExitCode: 0 = 全関節の検査が通った / 3 = 前提の失敗 / 4 = 中央が安定しない・検査の不合格

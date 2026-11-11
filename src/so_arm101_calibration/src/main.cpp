@@ -11,7 +11,9 @@
 //   so_arm101_calib apply   --measure FILE --backup FILE [--joints a,b] [--write]  既定は dry-run
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
+#include <fcntl.h>
 #include <poll.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <cstdlib>
@@ -98,6 +100,31 @@ bool to_int(const std::string & s, int * v)
     return n == s.size();
   } catch (...) {return false;}
 }
+
+/// 記録中の表示を、制御端末（/dev/tty）に直接書く。開けなければ使わない（ログの行だけになる）。
+class TtyLive
+{
+public:
+  ~TtyLive() {if (fd_ >= 0) {::close(fd_);}}
+  bool open()
+  {
+    fd_ = ::open("/dev/tty", O_WRONLY | O_NOCTTY | O_NONBLOCK);
+    return fd_ >= 0;
+  }
+  /// 前のフレームの行数だけ上へ戻り、各行を消して書き直す。1 回の write で出し、書けなければ（EAGAIN）そのフレームを捨てる。
+  void draw(const std::vector<std::string> & rows)
+  {
+    std::string buf;
+    if (lines_ > 0) {buf += "\033[" + std::to_string(lines_) + "A";}
+    for (const auto & r : rows) {buf += "\r\033[K" + r + "\n";}
+    const ssize_t n = ::write(fd_, buf.data(), buf.size());
+    if (n == static_cast<ssize_t>(buf.size())) {lines_ = static_cast<int>(rows.size());}
+  }
+
+private:
+  int fd_{-1};
+  int lines_{0};
+};
 }  // namespace
 
 int main(int argc, char ** argv)
@@ -263,9 +290,11 @@ int main(int argc, char ** argv)
         std::string line;
         return static_cast<bool>(std::getline(std::cin, line));
       };
-    long n = 0;
-    io.should_stop = [&n]() {
-        if (++n % 25 == 0) {std::cout << "." << std::flush;}
+    // 中央の測定中（約 0.3 秒）に押された Enter が溜まっていると、記録がすぐ終わる。記録を始める直前に捨てる
+    io.on_recording_start = []() {
+        if (::isatty(STDIN_FILENO)) {::tcflush(STDIN_FILENO, TCIFLUSH);}
+      };
+    io.should_stop = []() {
         pollfd p{0, POLLIN, 0};
         if (::poll(&p, 1, 0) > 0 && (p.revents & POLLIN)) {
           std::string line;
@@ -274,6 +303,14 @@ int main(int argc, char ** argv)
         }
         return false;
       };
+    // 今の yaml の生の範囲（actual 座標 = min_limit/max_limit + Homing_Offset。wrist_roll は 4095 をまたぐ）
+    for (const auto & j : cal.joints) {
+      io.yaml_ref.push_back({j.raw_min + j.eeprom.homing_offset, j.raw_max + j.eeprom.homing_offset});
+    }
+    // 記録中の表示。ログ（stdout は tee につながるので ANSI は出さない）には 1 秒ごとの行が run_measure から出る。
+    // 端末には /dev/tty を直接開いて、7 行を書き換える。O_NONBLOCK なので端末が詰まっても読み取りを止めない（そのフレームは捨てる）。
+    TtyLive tty;
+    if (tty.open()) {io.on_live = [&tty](const std::vector<LiveJoint> & v) {tty.draw(format_live_table(v));};}
     std::cout << "measure: EEPROM には書かない。書くのはトルクが入っている関節の Torque_Enable=0 だけ。ポート " << path << "\n";
     MeasureFile result;
     const int rc = run_measure(bus, all, kinds, opt, io, std::cout, &result);
