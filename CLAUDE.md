@@ -12,6 +12,8 @@
    - 実機（サーボ）を動かすコマンドは実行しない。必要なら私に依頼する
    - 起動したものを止めた後は、ps と `ros2 node list` の両方で残りがないことを確認する。`ros2 node list` だけに残り、ps が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する
    - MoveIt本体の設定（URDF・関節リミット・planning_frame・IK solver）は勝手に変えない
+   - pkill -f や killall など、名前・パターンでプロセスを止めない（ユーザーが実機の launch を動かしていることがあり、止めるとトルクが切れて腕が落ちる）。止めるのは、自分で起動したプロセスを、控えた PID で kill -INT するだけ
+   - コミットの前に、関係するパッケージの colcon test を実行し、失敗があればコミットの前に報告する
    ## 最終構成（目標）
    - so_arm101_description / so_arm101_moveit_config
    - so_arm101_hardware : ros2_control SystemInterface（Feetechドライバ、use_mock_hardwareで切替）
