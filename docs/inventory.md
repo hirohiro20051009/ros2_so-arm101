@@ -1611,3 +1611,8 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - `drain_quiet_ms` の起動引数（`bringup.launch.py`・xacro 2 つ）は**保留**。C4 の順 8 は「問題が出たときに承認を取ってから」のまま。
 - `so_arm101_calibration_check.md` C0.6: 手順 0（`backup --out eeprom_backup_before_C0.6.json` と、`eeprom_after_C3.json` との全関節・全バイトの比較コマンド）、dry-run で gripper が 547/1454/2944 であることの確認、戻す方法（`restore --backup <手順 0 のファイル> --write`）と終了コード 0〜4 ごとの対応を追加。以降の手順は手順 0 のファイルを使う。
 - `feetech_write_check.md`: 合格の基準を不合格／要観察／合格の 3 つに分けた。順 6 に「範囲をわずかに超えた出発点（elbow +1.69009）からの OMPL の計画」の具体的手順（書き込みモードで起動、send_joint_delta の前に elbow_flex だけ −5° で Plan→Execute、報告項目、Pilz は使わない）を追加。W4 は 10 分に短縮。順 1 の説明を更新。
+
+## C4 手順書の修正 その 2（docs のみ）
+- 順 6: Execute の条件を「elbow_flex 以外の関節は 0.5° 以内の変化なら許容、1° 超なら Execute しない」に変更。`<current>` で elbow_flex が 97°（+1.6930 rad、上限 +1.69 超え）に丸められる可能性と、その扱い（表示は未確認として報告、目標は約 92°、無効表示が消えなければ Plan/Execute しない）を注意として追加。
+- 確認: `torque_limit` は bringup.launch.py に宣言済み（既定 1000）。W1/W2/W4 の起動と同じ `torque_limit:=500`。
+- 確認: eeprom_after_C3.json のキーと `backup` の出力形式（eeprom_backup.cpp の読み書き）が一致。比較スクリプトを、同じファイル 2 つ（コピー、読むだけ）で試して MATCH を確認。
