@@ -1119,3 +1119,9 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 停止後: `ps` は空。`ros2 node list` には `/move_group` と `/moveit_simple_controller_manager` が残ったが、`ros2 daemon stop; ros2 daemon start` の後は空。推測（未確認）: move_group が Segmentation fault で終わり、daemon に古い一覧が残った。
 - 判定: **合格**（既定の `hardware:=feetech read_only:=true` で LeRobot を使わず読み取り専用で起動する）。
 - 同時に修正: `feetech_readonly_check.md` の launch の `tee` に `-i` を付けた（2 箇所）。後始末の確認（`ros2 node list` に残り `ps` が空なら daemon を再起動して再確認）を `feetech_write_check.md`（共通の約束 8）、`feetech_readonly_check.md`（5.5 節）、`CLAUDE.md` に追記。
+
+## 段階2c: 計画（2026-11-11 承認。全文は `docs/stage2c_plan.md`）
+- 承認: 2c-1a（書き込みモードのときだけ EEPROM/yaml の不一致で起動拒否）、2c-1b（`so_arm101_hardware` の export。公開ヘッダが他パッケージのヘッダを include するなら `ament_export_dependencies` も同じコミット）、失敗時の動き・再試行・D1/D2/D3・C1 後の判断・0 rad の一覧。
+- ユーザー指摘で直した 3 点: (1) `calibrate` を「測定（EEPROM に書かない。測定ファイルに保存）」と「適用（測定ファイルから `--write`）」に分けた。C2 は gripper だけ適用して yaml は更新せず、バックアップへ戻す。C3 は**同じ測定ファイル**で 6 関節（gripper を含む）を 1 回で適用し、yaml はそのとき 1 回だけ更新する。適用の前に今の EEPROM がバックアップと一致していることを確認する。(2) Lock は電源投入時に 1（実機で確認済み、上の「確定した事実」の表）。Lock=1 を確認できなかったときの対処は「サーボの電源を入れ直す」。(3) C3 で新座標の出発点の姿勢を測るとき、URDF の関節リミットまでの余裕（rad）も出し、範囲の外や余裕が小さい関節は C4 の前に報告する。
+- C0.5 で `--eeprom-wait-ms 0` などで読み戻しが一致しないと、失敗扱いで戻す処理が走り、終了コード 1 になる。想定どおり（手順書の合格基準に明記）。
+- 実機のコマンドとシリアルポートを開くコマンドは Claude は実行しない。
