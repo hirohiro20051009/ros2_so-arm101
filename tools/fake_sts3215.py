@@ -17,10 +17,13 @@ Torque_Limit=Max_Torque_Limit。EEPROM（アドレス < 40）への書き込み�
 <dir>/reset というファイルを作ると、次の要求の前にサーボが電源を入れ直した状態（SRAM が上の値）に戻り、ファイルは消える。
 """
 import argparse
+import fcntl
 import json
 import os
 import pty
 import sys
+import termios
+import threading
 import time
 import tty
 
@@ -159,6 +162,17 @@ def main():
         if m == 'corrupt':
             c ^= 0x55
         return bytes([0xFF, 0xFF] + body + [c])
+
+    # 実機のシリアルポートは、最後に閉じると TIOCEXCL（排他）が解除される。pty は master が開いている間は残るので、
+    # 偽サーボ側で定期的に解除して、続けて何度でもクライアントを起動できるようにする（結合確認用）。
+    def release_exclusive():
+        while True:
+            try:
+                fcntl.ioctl(slave, termios.TIOCNXCL)
+            except OSError:
+                pass
+            time.sleep(0.003)
+    threading.Thread(target=release_exclusive, daemon=True).start()
 
     buf = bytearray()
     counts = {}

@@ -34,6 +34,7 @@ struct Options
   bool rewrite_same{false};  // 同じ値でも書く（復元経路の実機確認用）
 };
 constexpr int kMaxWaitMs = 1000;
+constexpr const char * kConfirmText = "WRITE-EEPROM";  // 書き込みの確認文字列（手入力）
 
 struct JointId
 {
@@ -63,6 +64,19 @@ struct StepResult
 StepResult write_calib_verified(CalibWriteBus & bus, uint8_t id, CalibReg r, uint16_t raw, const Options & opt);
 /// Lock を書いて読み戻す（待ちなし。SRAM）。
 StepResult set_lock_verified(CalibWriteBus & bus, uint8_t id, bool locked, const Options & opt);
+
+/// 1 台に Lock=0 → （値のある）レジスタを順に書く → Lock=1 を行う。値の無い（nullopt）レジスタは書かない。
+/// Lock=0 を試みたら、途中で失敗しても Lock=1 を必ず試みる。失敗したレジスタより後ろは書かない。
+struct JointWriteResult
+{
+  bool ok{true};          // 全部書けて読み戻しが一致し、Lock=1 を確認できた
+  bool touched{false};    // Lock=0 を試みた（EEPROM に書いた可能性がある）
+  bool lock_ok{true};     // 最後の Lock=1 を確認できた
+  std::vector<std::string> problems;
+};
+JointWriteResult write_joint_sequence(
+  CalibWriteBus & bus, uint8_t id, const std::optional<uint16_t> (&values)[kNumCalibRegs], const Options & opt,
+  std::ostream * progress = nullptr, const std::string & name = "");
 
 /// 全関節: 機種番号 777 と Torque_Enable=0 を確認する。満たさなければ false（理由を out へ）。
 bool preflight(

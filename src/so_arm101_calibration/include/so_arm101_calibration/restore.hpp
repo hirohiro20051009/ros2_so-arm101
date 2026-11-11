@@ -17,8 +17,6 @@
 namespace so_arm101_calibration
 {
 
-constexpr const char * kConfirmText = "WRITE-EEPROM";
-
 struct RestoreArgs
 {
   Backup backup;

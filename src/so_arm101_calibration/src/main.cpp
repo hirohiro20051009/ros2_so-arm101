@@ -6,7 +6,13 @@
 //   so_arm101_calib backup  [--port P] [--calibration Y] [--out FILE]            読み取り専用
 //   so_arm101_calib restore --backup FILE [--joints a,b] [--write] [--rewrite-same]
 //                           [--eeprom-wait-ms N]                                  既定は dry-run
+//   so_arm101_calib measure [--out FILE] [--backup FILE]    測定（EEPROM には書かない。トルク OFF だけ書く）
+//   so_arm101_calib compare --a FILE --b FILE [--calibration yaml]   オフライン（ポートを開かない）
+//   so_arm101_calib apply   --measure FILE --backup FILE [--joints a,b] [--write]  既定は dry-run
 #include <ament_index_cpp/get_package_share_directory.hpp>
+
+#include <poll.h>
+#include <unistd.h>
 
 #include <cstdlib>
 #include <filesystem>
@@ -14,7 +20,9 @@
 #include <map>
 #include <sstream>
 
+#include "so_arm101_calibration/apply.hpp"
 #include "so_arm101_calibration/eeprom_backup.hpp"
+#include "so_arm101_calibration/measure.hpp"
 #include "so_arm101_calibration/restore.hpp"
 #include "so_arm101_hardware/calibration.hpp"
 #include "so_arm101_hardware/serial_port.hpp"
@@ -43,7 +51,7 @@ bool parse_args(int argc, char ** argv, Args * a, std::string * err)
   }
   a->cmd = argv[1];
   const char * flags[] = {"--write", "--rewrite-same", "--help"};
-  const char * values[] = {"--port", "--calibration", "--out", "--backup", "--joints", "--eeprom-wait-ms", "--timeout-ms"};
+  const char * values[] = {"--port", "--calibration", "--out", "--backup", "--joints", "--eeprom-wait-ms", "--timeout-ms", "--measure", "--a", "--b"};
   for (int i = 2; i < argc; ++i) {
     const std::string k = argv[i];
     bool found = false;
@@ -71,6 +79,14 @@ void usage()
     "                        [--eeprom-wait-ms 50] [--port ...] [--calibration yaml] [--timeout-ms 100]\n"
     "    バックアップから Homing_Offset と Min/Max_Position_Limit を戻す。既定は dry-run。\n"
     "    書くには --write と、確認文字列 WRITE-EEPROM の入力が必要。\n"
+    "so_arm101_calib measure [--out FILE] [--backup FILE] [--port ...] [--calibration yaml]\n"
+    "    脱力 → 中央 → MIN/MAX を測って測定ファイルに保存する。EEPROM には書かない（Lock にも触れない）。\n"
+    "    書くのは Torque_Enable=0 だけ（トルクが入っているときだけ）。\n"
+    "so_arm101_calib compare --a FILE --b FILE [--calibration yaml]\n"
+    "    2 つの測定ファイルの再現性と、今の yaml との差を表示する。ポートは開かない。\n"
+    "so_arm101_calib apply --measure FILE --backup FILE [--joints name,name] [--write] [--eeprom-wait-ms 50]\n"
+    "    測定ファイルの値を EEPROM へ書く。既定は dry-run。--write と WRITE-EEPROM の入力が必要。\n"
+    "    全関節を 1 回で書いたときだけ、--calibration の yaml を 1 回更新する。失敗したら全部バックアップへ戻す。\n"
     "ros2_control（launch）を止めてから実行する。実行するのはユーザーだけ。\n";
 }
 
@@ -88,7 +104,7 @@ int main(int argc, char ** argv)
 {
   Args a;
   std::string err;
-  if (!parse_args(argc, argv, &a, &err) || a.has("--help") || (a.cmd != "backup" && a.cmd != "restore")) {
+  if (!parse_args(argc, argv, &a, &err) || a.has("--help") || (a.cmd != "backup" && a.cmd != "restore" && a.cmd != "measure" && a.cmd != "compare" && a.cmd != "apply")) {
     if (!err.empty()) {std::cerr << "ERROR: " << err << "\n";}
     usage();
     return (a.has("--help") && err.empty()) ? 0 : kExitInput;
@@ -117,10 +133,42 @@ int main(int argc, char ** argv)
   }
   opt.rewrite_same = a.has("--rewrite-same");
 
-  // restore: 先にバックアップファイルを検査する（ポートを開く前）
+  // compare: オフライン（ポートを開かない）
+  if (a.cmd == "compare") {
+    MeasureFile ma, mb;
+    if (!load_measure_file(a.get("--a"), &ma, &err) || !load_measure_file(a.get("--b"), &mb, &err)) {
+      std::cerr << "ERROR: 測定ファイルを読めない/壊れている: " << err << "\n";
+      return kExitInput;
+    }
+    std::vector<std::pair<std::string, YamlJoint>> yj;
+    for (const auto & j : cal.joints) {
+      YamlJoint y;
+      y.kind = j.kind == so_arm101_hardware::JointKind::Angle ? "angle" : "linear_percent";
+      y.center = j.center;
+      y.min = j.raw_min;
+      y.max = j.raw_max;
+      y.homing_offset = j.eeprom.homing_offset;
+      yj.push_back({j.name, y});
+    }
+    compare_measures(ma, mb, yj, cal.angle_ticks, std::cout);
+    return kExitOk;
+  }
+
+  // restore / apply: 先にバックアップ（と測定）ファイルを検査する（ポートを開く前）
   Backup backup;
+  MeasureFile measure;
   std::string backup_path = a.get("--backup");
-  if (a.cmd == "restore") {
+  if (a.cmd == "apply") {
+    if (a.get("--measure").empty()) {
+      std::cerr << "ERROR: --measure が必要\n";
+      return kExitInput;
+    }
+    if (!load_measure_file(a.get("--measure"), &measure, &err)) {
+      std::cerr << "ERROR: 測定ファイルを読めない/壊れている: " << err << "。何も書かない（ポートも開かない）\n";
+      return kExitInput;
+    }
+  }
+  if (a.cmd == "restore" || a.cmd == "apply") {
     if (backup_path.empty()) {
       std::cerr << "ERROR: --backup が必要\n";
       return kExitInput;
@@ -197,6 +245,74 @@ int main(int argc, char ** argv)
     return kExitOk;
   }
 
+  auto confirm_cli = []() {
+      std::cout << "EEPROM に書き込む。続けるなら " << kConfirmText << " と入力して Enter: " << std::flush;
+      std::string line;
+      std::getline(std::cin, line);
+      return line == kConfirmText;
+    };
+
+  if (a.cmd == "measure") {
+    std::vector<std::string> kinds;
+    for (const auto & j : cal.joints) {
+      kinds.push_back(j.kind == so_arm101_hardware::JointKind::Angle ? "angle" : "linear_percent");
+    }
+    MeasureIO io;
+    io.wait_enter = [](const std::string & prompt) {
+        std::cout << "\n>>> " << prompt << " " << std::flush;
+        std::string line;
+        return static_cast<bool>(std::getline(std::cin, line));
+      };
+    long n = 0;
+    io.should_stop = [&n]() {
+        if (++n % 25 == 0) {std::cout << "." << std::flush;}
+        pollfd p{0, POLLIN, 0};
+        if (::poll(&p, 1, 0) > 0 && (p.revents & POLLIN)) {
+          std::string line;
+          std::getline(std::cin, line);
+          return true;
+        }
+        return false;
+      };
+    std::cout << "measure: EEPROM には書かない。書くのはトルクが入っている関節の Torque_Enable=0 だけ。ポート " << path << "\n";
+    MeasureFile result;
+    const int rc = run_measure(bus, all, kinds, opt, io, std::cout, &result);
+    if (rc == kExitOk || rc == kExitInput) {
+      if (result.joints.empty()) {return rc;}  // 中止などで結果が無い
+      result.port = path;
+      result.backup_file = backup_path;
+      std::string out_path = a.get("--out");
+      if (out_path.empty()) {
+        const char * home = std::getenv("HOME");
+        out_path = std::string(home ? home : ".") + "/so_arm101_check/measure_" + now_string(true) + ".json";
+      }
+      std::error_code ec;
+      std::filesystem::create_directories(std::filesystem::path(out_path).parent_path(), ec);
+      if (!save_measure_file(out_path, result, &err)) {
+        std::cerr << "ERROR: " << err << "\n";
+        return kExitPrecondition;
+      }
+      std::cout << "測定ファイルを保存して読み直し、一致を確認した: " << out_path << "\n";
+    }
+    return rc;
+  }
+
+  if (a.cmd == "apply") {
+    ApplyArgs aa;
+    aa.measure = measure;
+    aa.measure_path = a.get("--measure");
+    aa.backup = backup;
+    aa.backup_path = backup_path;
+    aa.all = all;
+    aa.selected = selected;
+    aa.opt = opt;
+    aa.write = a.has("--write");
+    aa.yaml_path = cal_path;
+    const char * home = std::getenv("HOME");
+    aa.fallback_yaml_path = std::string(home ? home : ".") + "/so_arm101_check/follower_calibration_new_" + now_string(true) + ".yaml";
+    return run_apply(bus, aa, confirm_cli, std::cout);
+  }
+
   RestoreArgs ra;
   ra.backup = backup;
   ra.backup_path = backup_path;
@@ -204,11 +320,5 @@ int main(int argc, char ** argv)
   ra.selected = selected;
   ra.opt = opt;
   ra.write = a.has("--write");
-  auto confirm = []() {
-      std::cout << "EEPROM に書き込む。続けるなら " << kConfirmText << " と入力して Enter: " << std::flush;
-      std::string line;
-      std::getline(std::cin, line);
-      return line == kConfirmText;
-    };
-  return run_restore(bus, ra, confirm, std::cout);
+  return run_restore(bus, ra, confirm_cli, std::cout);
 }

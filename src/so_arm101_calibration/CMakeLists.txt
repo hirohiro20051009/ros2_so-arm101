@@ -14,7 +14,9 @@ add_library(so_arm101_calib_core SHARED
   src/calib_write_bus.cpp
   src/eeprom_backup.cpp
   src/eeprom_ops.cpp
-  src/restore.cpp)
+  src/restore.cpp
+  src/measure.cpp
+  src/apply.cpp)
 target_include_directories(so_arm101_calib_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -33,6 +35,11 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   # 偽サーボ（pty）は so_arm101_hardware の test/fake_servo.hpp を使う（実機・実ポートは開かない）
   ament_add_gtest(test_calibration test/test_calibration.cpp)
+  ament_add_gtest(test_measure_apply test/test_measure_apply.cpp)
+  target_link_libraries(test_measure_apply so_arm101_calib_core util)
+  target_include_directories(test_measure_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test)
+  target_compile_definitions(test_measure_apply PRIVATE
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/config/follower_calibration.yaml")
   target_link_libraries(test_calibration so_arm101_calib_core util)
   target_include_directories(test_calibration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test)
   target_compile_definitions(test_calibration PRIVATE

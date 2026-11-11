@@ -90,6 +90,39 @@ StepResult set_lock_verified(CalibWriteBus & bus, uint8_t id, bool locked, const
   return {};
 }
 
+JointWriteResult write_joint_sequence(
+  CalibWriteBus & bus, uint8_t id, const std::optional<uint16_t> (&values)[kNumCalibRegs], const Options & opt,
+  std::ostream * progress, const std::string & name)
+{
+  JointWriteResult r;
+  bool any = false;
+  for (int i = 0; i < kNumCalibRegs; ++i) {any = any || values[i].has_value();}
+  if (!any) {return r;}
+  if (progress) {*progress << "-- " << name << " (id " << int(id) << "): Lock=0\n";}
+  r.touched = true;
+  StepResult s = set_lock_verified(bus, id, false, opt);
+  if (!s.ok) {
+    r.problems.push_back(s.msg);
+    r.ok = false;
+  }
+  for (int i = 0; i < kNumCalibRegs && r.ok; ++i) {
+    if (!values[i]) {continue;}
+    if (progress) {*progress << "   " << to_string(static_cast<CalibReg>(i)) << " <- " << *values[i] << "\n";}
+    s = write_calib_verified(bus, id, static_cast<CalibReg>(i), *values[i], opt);
+    if (!s.ok) {
+      r.problems.push_back(s.msg);
+      r.ok = false;
+    }
+  }
+  s = set_lock_verified(bus, id, true, opt);
+  if (!s.ok) {
+    r.problems.push_back(s.msg);
+    r.lock_ok = false;
+    r.ok = false;
+  }
+  return r;
+}
+
 bool preflight(Sts3215Bus & bus, const std::vector<JointId> & all, int retries, std::ostream & out)
 {
   bool ok = true;
