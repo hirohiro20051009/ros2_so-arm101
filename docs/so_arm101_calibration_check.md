@@ -30,18 +30,19 @@ C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測�
 ```bash
 mkdir -p ~/so_arm101_check
 ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
-  2>&1 | tee -i ~/so_arm101_check/calib_C0_backup.log
+  2>&1 | tee -i ~/so_arm101_check/calib_C0_backup.log; echo "exit=${PIPESTATUS[0]}"
 ```
 - 全関節の EEPROM（アドレス 0〜39）を 2 回読んで一致を確認し、`~/so_arm101_check/eeprom_backup_<日時>.json` に保存し、読み直して一致を確認する。
 - 合格基準:
   - 終了コード 0。各関節の行に「2 回読んで一致」が出る。`保存して読み直し、一致を確認した:` が出る。
   - `Homing_Offset` と Min/Max が、現在の yaml（`so_arm101_hardware/config/follower_calibration.yaml` の `eeprom.*`）と一致する:
     pan 135 / 743 / 3452、lift 112 / 842 / 3216、elbow 122 / 862 / 3088、wrist_flex 89 / 889 / 3185、wrist_roll 1164 / 164 / 3965、gripper 107 / 1900 / 3385。
-- **EEPROM の全 40 バイトを 8 バイトずつ読む**ことが実機で通るかは未確認。ERR 応答などで読めない場合は、そのメッセージを報告する（書き込みは起きていない）。
+- 終了コードは、パイプの後に `; echo "exit=${PIPESTATUS[0]}"` を付けて取る（`tee` につなぐと `$?` は `tee` の値になるため）。**`PIPESTATUS` は、パイプを実行した直後の同じ行で読む**（間に別のコマンドを挟まない）。
+- EEPROM の全 40 バイトを 8 バイトずつ読むことは、実機で通った（2026-11-11 の C0。合格）。
 - 続けて、復元の dry-run（何も書かない）で「全部同じ」になることを確認する:
   ```bash
   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
-    --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C0_dryrun.log
+    --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C0_dryrun.log; echo "exit=${PIPESTATUS[0]}"
   ```
   `== 前提の確認（全関節）` の各行が `OK`（機種番号 777、Torque_Enable=0）で、全レジスタが「同じ（書かない）」、`dry-run: 何も書いていない`、終了コード 0。
 - バックアップのファイルは `~/so_arm101_check/` に残し、**消さない**（以降の復元の元になる）。
@@ -54,24 +55,33 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 目的: (1) 書き込み → 待ち → 読み戻し → Lock=1 の経路が実機で動くことの確認、(2) `--eeprom-wait-ms` の実測。
 
 ### 手順
+`<日時>` は `20261111-163729`（バックアップのファイル名）。終了コードは、各コマンドの後ろの `; echo "exit=${PIPESTATUS[0]}"` で取る（`tee` につないでいるので `$?` は使わない）。
 1. dry-run（何も書かない。`--rewrite-same` で「書き直す予定」が表示される）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
-     --joints gripper --rewrite-same --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C05_dryrun.log
+     --joints gripper --rewrite-same --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C05_dryrun.log; echo "exit=${PIPESTATUS[0]}"
    ```
-2. 書き込み（待ち 50 ms。確認文字列を求められたら `WRITE-EEPROM` と入力）:
-   ```bash
-   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
-     --joints gripper --rewrite-same --write --eeprom-wait-ms 50 --port /dev/ttyACM0 \
-     2>&1 | tee -i ~/so_arm101_check/calib_C05_w50.log
-   ```
-3. 待ち時間を変えて繰り返す: `--eeprom-wait-ms` を **0、5、10、20** にして、ログ名を `calib_C05_w0.log` などにして同じコマンドを実行する（各回、終了コードを `echo "rc=$?"` で記録する）。
-4. 最後にもう一度 C0 の dry-run（`--joints` なし、`--rewrite-same` なし）で、全部同じで、`注意: ... アドレス n がバックアップと違う` が出ないこと。
+2. 待ち時間を **50 → 20 → 10 → 5 → 0（ms）の順**に、1 回ずつ書き込む。各回は次の 2 つのコマンドで 1 組（`<W>` は待ち時間）:
+   - (a) 書き込み（確認文字列を求められたら `WRITE-EEPROM` と入力）。ログは `calib_C05_w<W>.log`:
+     ```bash
+     ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+       --joints gripper --rewrite-same --write --eeprom-wait-ms <W> --port /dev/ttyACM0 \
+       2>&1 | tee -i ~/so_arm101_check/calib_C05_w<W>.log; echo "exit=${PIPESTATUS[0]}"
+     ```
+   - (b) C0 の dry-run（`--joints` なし、`--rewrite-same` なし）。ログは `calib_C05_after_w<W>.log`:
+     ```bash
+     ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+       --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C05_after_w<W>.log; echo "exit=${PIPESTATUS[0]}"
+     ```
+   - **次の待ち時間へ進んでよいのは、(a) が exit=0 で、(b) が全レジスタ「同じ（書かない）」・`注意: ... アドレス n がバックアップと違う` なし・exit=0 のとき だけ。**
+3. **ある待ち時間で失敗したら（(a) が exit=0 でない、または (b) が上の条件を満たさない）、そこで止める。それより短い待ち時間は試さない。** 失敗した値は「短すぎる」という測定結果として記録する。その後は「失敗したとき」に従って状態を確認し、必要なら `--eeprom-wait-ms 50` で `restore` して戻す（これは C0.5 の追加の書き込みなので、実行前に Claude に伝える）。
+4. 5 つ全部（50・20・10・5・0）が通ったら、最後に (b) をもう一度行う（ログ名 `calib_C05_final.log`）。
 
 ### 合格基準
-- 手順 2（待ち 50 ms）が終了コード 0 で、`OK: バックアップの値に戻り、Lock=1 を確認した`、`gripper Lock: 1`。
-- 手順 3 の各回: 終了コード 0 なら読み戻しが一致した。**`--eeprom-wait-ms 0` などで読み戻しが一致せず失敗した場合は、失敗として扱われ（`read-back mismatch`）、Lock=1 に戻す処理が走り、終了コードは 1（または一部が残れば 2）になる。これは想定どおりで、不合格ではない**。そのときの待ち時間が「短すぎる」という測定結果として記録する。値の不一致は再試行しない（通信エラーだけ 3 回まで再試行する）。
-- 失敗した回の後も、最後の C0 dry-run で全レジスタがバックアップと同じ（gripper が「実行前」＝バックアップの値のまま）であること。
+- 待ち 50 ms の回が終了コード 0 で、`OK: バックアップの値に戻り、Lock=1 を確認した`、`gripper Lock: 1`。これが通らなければ（`restore` 自体の確認なので）以降へ進まず報告する。
+- 各回の (a): 終了コード 0 なら読み戻しが一致した。**短い待ち時間で失敗した場合（`read-back mismatch` または `read-back failed`）は、その値が「短すぎる」という測定結果で、不合格ではない**。ただし、そこで止める（手順 3）。値の不一致は再試行しない（通信エラーだけ 3 回まで再試行する）。
+- 失敗時の動き（コードで確認）: `restore` には「バックアップへ戻す」2 回目の書き込みは無い（`apply` にだけある）。失敗したら残りの関節へ進まず、**待ちなしで** Lock=1 を書いて読み戻し、全レジスタの状態を読んで表示する（`src/restore.cpp`、`src/eeprom_ops.cpp`）。待ち時間の指定は、各項目の書き込みと読み戻しの間にだけ効く。終了コードは、Lock=1 を確認でき、全レジスタが読めて「実行前」と同じなら 1。**Lock=1 を確認できない、またはレジスタが読めない（読み戻しが失敗するほど短いとき）と 2 になりうる**。2 のときは「失敗したとき」に従う（サーボの電源を入れ直す）。
+- どの回の後も、(b) で全レジスタがバックアップと同じ（gripper が「実行前」＝バックアップの値のまま）であること。
 - 全回を通して、`Torque_Enable` への書き込みが無い（コマンドはトルクに触れない）。腕は動かない。
 - 同じ値の書き込みでは「値が変わった」ことは待ち時間では確かめられない。この段階で見るのは、終了コードと、`ERROR` が出ないこと（通信エラーは内部で 3 回まで再試行され、表示はされない）。値が変わる状況での確認は C2（gripper に新しい値を書く）で、各項目の読み戻しの一致として記録する。
 - 決め方: 全回で一致した最小の待ち時間の 2〜3 倍を、`--eeprom-wait-ms` の既定（今は仮置きの 50 ms）にする（コードの定数を直す。Claude が行う）。
@@ -81,8 +91,8 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 - どの場合も、書き込みモード（`read_only:=false`）の launch は起動しない。起動しても、EEPROM と yaml が違えば起動を拒否する（段階2c-1a）が、まず復元する。
 
 ### 報告してほしいもの
-- `calib_C05_dryrun.log`、`calib_C05_w50.log`、`calib_C05_w0.log`、`w5`、`w10`、`w20` の各ログと終了コード、最後の C0 dry-run のログ。
-- 待ち時間を変えたとき、読み戻しが一致しなかった回があればその待ち時間。
+- `calib_C05_dryrun.log`、実行した回の `calib_C05_w<W>.log` と `calib_C05_after_w<W>.log`（W は 50・20・10・5・0 のうち実行したもの）、`calib_C05_final.log`（全部通ったとき）、各ログの `exit=` の値。
+- 失敗して止めた場合は、その待ち時間（それより短い値は試していないこと）。
 
 ## C1: 測定を 2 回（EEPROM には書かない。Lock にも触れない）
 `measure` が書くのは **`Torque_Enable=0` だけ**（トルクが入っている関節があるときだけ。腕が脱力して落ちるので、**腕を手で支えてから** Enter を押す）。EEPROM と Lock は書かない。
