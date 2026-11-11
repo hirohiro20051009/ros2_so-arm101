@@ -917,3 +917,29 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 
 ### W0 の次
 再実行して、再試行が出るか・出たときのバイト列を見る。**W0 は未合格**のまま。
+
+### USB-シリアルの情報（ユーザー報告、2026-11-11。W0 の結果を記録するコミットに含める）
+- 事実（ユーザー報告）: USB-シリアルは 1a86:55d3（QinHeng CH343 系）で、cdc_acm の `/dev/ttyACM0`。RealSense とは別の USB バス。`sudo dmesg` に USB のエラーは出ていない（ただし接続時の行は流れていて見えない）。
+- 解釈（推測）: USB 層のリセット・切断は起きていない。バス競合の可能性は低い。チェックサム不良の原因は、受信バイト列（`rx=…`）を見ないと切り分けられない。
+
+## W0 合格（2026-11-11、`write_W0_4.log`、`tee -i`）
+### 結果（事実。ログを読んで確認）
+- `WRITE mode` → `[probe] ... ACCEPTED on all joints` → `write mode active ... startup_read_retries=0`。
+- トルクが入っても腕は動かなかった（ユーザー報告）。Ctrl-C で脱力した。
+- `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`。
+- `deactivated. reads=1083 retried=0 failed_cycles=0 goal_writes=1083 monitors=21 rate_limited=0 port_contention=0 startup_read_retries=0`（約 21 秒動かしたので monitors=21。1 Hz 監視として数は合う）。
+- 停止後の状態は `write_W0_after.log` で確認済み: `torque_enable=0 lock=1 acceleration=50`、6/6 match。
+- `FAULT`・`COMMUNICATION LOST`・`activation failed` は無し。ERROR は octomap（3D センサー未設定）と、終了時の move_group の exit code -11（既知の挙動。対応不要）だけ。
+- `sudo dmesg` に ttyACM0 / cdc_acm / USB のエラーは無い（ユーザー報告）。
+- **合格基準**: 腕が動かない／`rate_limited=0`／`port_contention=0`／`monitors` が時間どおり／停止後に `torque_enable=0 lock=1` ― すべて満たした。確認 1（Lock=1・トルク ON で SRAM に書けるか）は「書ける」。
+
+### checksum mismatch の経過（原因は未特定のまま）
+- 起動 4 回のうち、1 回目・4 回目が成功、2・3 回目が Goal_Position の読み戻しで失敗。
+- 3 回目と 4 回目の間（約 1.5 時間）、サーボの外部電源の入れ直しは無し（ユーザー報告）。
+- 4 回目は再試行 0 回で成功したため、受信バイト列は取れていない。
+- 推測: 「電源投入後の最初の起動は成功し、直前に書き込みモードで起動していると失敗する」という形かどうかは、回数が足りず言えない。4 回目は電源の入れ直し無しで成功しており、その形とは合わない（ただし 1 件）。
+- 今後: W1 以降も起動ごとに `startup_read_retries` と `retrying` の WARN の行を報告する。再試行が出たときのバイト列（`tx=… rx=… flushed_before_request=…`）で切り分ける。再試行 0 回が続くなら、頻度を記録する。
+
+### 状態
+- W0: **合格**。W1 に進む。
+- 未確認のまま: Acceleration=50 の単位と効き方、通信断の保持（W5、任意）、checksum mismatch の原因。
