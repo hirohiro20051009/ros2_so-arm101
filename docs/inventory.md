@@ -867,3 +867,53 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 承認: ユーザーが 2026-11-11 に事後承認した。
 - 今後のルール: MoveIt の設定（URDF・SRDF・関節リミット・planning_frame・IK solver・コントローラ設定・xacro）は、**実装前に**変更箇所と理由を示して承認を得てから変える。
 - 2b-3 関連のコミット（確認済み、6 つ）: 438c4c9（計画 v3）、8151336（2b-3a）、e7b2194（2b-3a 実機記録）、b12b384（計画 v4）、ff91fd6（2b-3b）、43748b7（2b-3c 手順書）。
+
+## 段階2b-3c 実機確認 W0 の途中経過（2026-11-11）。**W0 は合格していない**
+ログ（`~/so_arm101_check/`）: `write_W0.log`（1 回目）、`write_W0_after.log`（停止後の読み取り専用）、`write_W0_2.log`、`write_W0_3.log`（起動失敗）。
+
+### 事実
+- **確認 1 の結果**: Lock=1 かつトルク ON のまま、SRAM の Acceleration に書き込めた（`[probe] ... ACCEPTED on all joints`）。トルクが入っても腕は動かなかった（1 回目）。
+- **停止後の状態**（`write_W0_after.log`）: 6 関節とも SRAM が `torque_enable=0 lock=1 acceleration=50 goal_velocity=0`、`torque_limit`=1000（gripper は 500）。EEPROM vs yaml 6/6 match、設定 vs LeRobot 6/6 match。LeRobot では lock=0 のまま残っていたのに対し、こちらは lock=1 に戻る。
+- 1 回目は停止時のログが 1 行も残っていない（tee が Ctrl-C で先に終了したため、と考えている）。`[deactivate]` の行と `deactivated. reads=…` の数値は未取得。`tee -i` なら残る（`write_W0_after.log` で確認）。
+- **起動失敗 2 回**（`write_W0_2.log`、`write_W0_3.log`）: どちらも Goal_Position の読み戻しで `checksum mismatch`（2 回目は shoulder_pan id=1、3 回目は wrist_roll id=5）→ `activation failed: Goal_Position`。`[activation failed] torque OFF and Lock=1 confirmed` を確認。トルクは一度も入っていない。続いて `ros2_control_node` が exit code -6（controller_manager が `Failed to set the initial state of the component ... to active` の例外。Humble の仕様）。
+- 1 回目は電源投入直後（Acceleration=0、Lock=1）、2・3 回目は Acceleration=50、Lock=1、トルク OFF が残った状態からの起動。
+
+### コードを読んだ事実（原因の調査。`sts3215_system.cpp` 起動手順、`sts3215_bus.cpp`、`sts3215_write_bus.cpp`）
+- 受信は 10 ms のタイムアウトで、`FF FF`→ID・LEN→本体を読み、チェックサムを検証する。失敗が `timeout` ではなく `checksum mismatch` なので、応答は届いており、ID（1、5）は期待どおり。壊れたのは応答の ERR・データ・チェックサムのどこか。
+- 書き込みは ACK を読み切る。要求の直前に受信バッファを捨てる（`tcflush(TCIFLUSH)`）。書き込みの ACK から次の要求までの待ち時間は無い。
+- 起動手順の各段階の並び:
+
+| 段階 | 並び | 読み戻し（1 台あたり） |
+|---|---|---|
+| 2 Lock=0 | 関節ごとに「書く→読み戻す」の交互 | Lock |
+| 4 Acceleration・Torque_Limit | 関節ごとに「書く→読み戻す→Torque_Limit を読む（違えば書く→読み戻す）」の交互 | Acceleration、Torque_Limit |
+| 5 Goal_Position | 先に全関節の位置を SYNC_READ で 1 回読み、その後は関節ごとに「書く→読み戻す」の交互 | Goal_Position（2 バイト） |
+| 6 Torque_Enable=1 | 関節ごとに交互 | Torque_Enable |
+| 7 Lock=1 | 関節ごとに交互 | Lock |
+| 8 最終確認 | 関節ごとに読み出しだけ（書かない） | Torque_Enable、Lock、Acceleration、Torque_Limit、Goal_Velocity |
+
+- 起動手順の読み戻しは全部で約 60 回あり、Goal_Position はそのうち 6 回。**Goal_Position の段階だけが特有なのは**、(a) 2 バイトのレジスタへの書き込み直後の読み戻しであること（Torque_Limit も 2 バイトだが、値が同じなら書かない）、(b) 直前に SYNC_READ（全関節の位置）が走ること、(c) 書き込む値が `Present_Position` 相当の値であること。ほかの段階と同じ「書く→読み戻す」の交互パターンは段階 2・4・6・7 にもある。
+- 起動手順に再試行は無かった。失敗時に受信したバイト列はログに出なかった。
+- 偽サーボは化け・遅延・ノイズを注入できず、応答は常に正しく即時なので、この失敗は再現しなかった（再現できなくて当然で、ドライバの手順・順序の確認だけを担っていた）。
+
+### 既存ログの確認（周期の読み取りの失敗。ファイルを読んだだけ）
+- `write_W0_after.log`（読み取り専用、約 12 秒）: `deactivated (no register was written). reads=618 retried=0 failed_cycles=0`。再試行も失敗周期も 0。
+- ほかの全ログ（`feetech_launch.log`、`feetech_launch_P2a.log`、`feetech_launch_P2b.log`、`servo_config_A.log`、`servo_config_B.log`、`write_W0.log`、`write_W0_2.log`、`write_W0_3.log`）: `read failed`、`consecutive=`、`COMMUNICATION LOST`、`FAULT` の行は 0 件（WARN・ERROR は URDF・MoveIt 由来の既知のものだけ。`write_W0_2/3` を除く）。
+- ただし、これらのログには終了時の集計行（`deactivated. reads=… retried=… failed_cycles=…`）が無い（tee が先に終了したため）。数値として確認できるのは `write_W0_after.log` の 1 件だけ。`feetech_P1/P2a/P2b.csv` には NaN が 0 件、行数は各 251〜252（5 秒、約 50 Hz）。
+- 解釈（推測）: 周期の読み取りは、確認できた範囲でほぼ失敗していない。通信品質が全般に悪いという仮説（候補 A）は弱まる。一方で、Goal_Position の段階で 2 回続けて失敗した事実から、その段階に特有の原因（書き込み直後の 2 バイトの読み戻し、直前の SYNC_READ との並び）が残る。
+
+### 原因の候補（確定していない）
+- A. 通信品質（USB-シリアル、ノイズ、電源）。周期の読み取りが安定していることから弱い。
+- B. Goal_Position の書き込み直後にサーボが内部処理中で、直後の READ 応答が壊れる。段階特有の原因として有力。
+- C. 直前の SYNC_READ の末尾が遅れて届き、後続の応答と混ざる（受信バッファを捨てるのは要求の直前のみ）。ただしヘッダ・ID が正しい点と合いにくい。
+- D. 別プロセスがポートを触った。ユーザーが `ps` で否定済み。
+
+### 対応（段階 2b-3d、コミット c56774c。実機未確認）
+- 起動手順の読み戻しだけ、**通信エラー（チェックサム不良・フレーム不良・タイムアウト）のときに限り**最大 3 回（再試行 2 回、間に 5 ms）まで読み直す。値が期待と違うときは再試行せず即中止（Acceleration=0 を含む）。3 回失敗したらトルクは ON にならない。周期の read/write と 1 Hz 監視は変えていない。
+- 通信エラーのとき、`last_error()` に `[tx=<送った要求> rx=<受信したバイト> flushed_before_request=<要求の前に捨てた古いバイト数>]` を追加。WARN に出る。
+- 再試行の合計回数を `write mode active` の行と終了時の `deactivated. …` の行の末尾（`startup_read_retries=N`）、`activation failed` の行に出す。
+- 試験: 偽サーボに化け・無応答の注入（`corrupt_read_replies`、`drop_read_replies`）を追加。化け 2 回→再試行で成功／無応答 1 回→成功／3 回化け→トルクを入れない（Lock=1、Torque_Enable=0）／値の不一致は再試行 0／Acceleration=0 は再試行 0／バイト列がエラーに出る。`colcon test` は 79 件（既存 73＋追加 6）合格。
+- 手順書: `tee` を `tee -i` に、`ros2_control_node` の exit code -6 の説明を追加、W4 の止め方の順序を変更、報告用の grep に `retrying`・`startup_read_retries` を追加。
+
+### W0 の次
+再実行して、再試行が出るか・出たときのバイト列を見る。**W0 は未合格**のまま。

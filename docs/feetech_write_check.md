@@ -28,7 +28,7 @@ ls -l /dev/ttyACM0                                          # ポートがある
 基本の起動（段階ごとに引数だけ変える）:
 ```bash
 ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
-  2>&1 | tee ~/so_arm101_check/write_<段階>.log
+  2>&1 | tee -i ~/so_arm101_check/write_<段階>.log
 ```
 起動で出るべきログ: `WRITE mode: this driver will turn torque ON ...`（WARN）、`write mode active: torque ON, Lock=1, Acceleration=50, ...`。
 **起動の途中で ERROR（`activation failed`、`Acceleration reads back as 0`、`Goal_Velocity=...` など）が出た場合、トルクは ON になっていない**（ドライバが Lock=1・トルク OFF に戻したことをログで確認する）。
@@ -44,7 +44,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 起動（`acceleration:=50 torque_limit:=1000` は既定値。確認 1 を有効にする）:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
-    probe_lock_sram:=true 2>&1 | tee ~/so_arm101_check/write_W0.log
+    probe_lock_sram:=true 2>&1 | tee -i ~/so_arm101_check/write_W0.log
   ```
 - 見るログ: `write mode active`、`[probe] with Lock=1 and torque ON, a write to SRAM (Acceleration) was ACCEPTED on all joints`（NOT accepted の WARN でも起動は続く。報告する）。
 - 10 秒待つ。腕が動いていないこと。`FAULT` が出ていないこと。
@@ -52,11 +52,12 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 続けて、読み取り専用で状態を確認する（数秒後に Ctrl-C。トルクは OFF のまま）:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false \
-    2>&1 | tee ~/so_arm101_check/write_W0_after.log
+    2>&1 | tee -i ~/so_arm101_check/write_W0_after.log
   ```
   `[diag]` の SRAM で **`torque_enable=0 lock=1`**（LeRobot では lock=0 のまま残っていた）、`acceleration=50` であること。`6/6 joints match`。
 
 合格: 起動でトルクが ON になっても腕が動かない / `rate_limited=0` / `port_contention=0` / `monitors` が約 10（10 秒ぶん）/ 停止後に `torque_enable=0 lock=1`。
+- 起動の読み戻しの再試行: `write mode active` の行と、停止時の `deactivated. ...` の行の末尾に `startup_read_retries=N` が出る。**0 が望ましい**。N>0 のときは、直前の WARN `read of ... failed (...: ... [tx=… rx=… flushed_before_request=…]); retrying` の行を**全部**報告する（原因の切り分けに使う）。再試行は通信エラー（checksum mismatch・フレーム不良・タイムアウト）のときだけ、読み戻し 1 件につき最大 3 回。読み戻した値が期待と違うときは再試行せずに起動を中止する。3 回失敗したらトルクは入らない。
 
 ## W1. wrist_roll と gripper（軽い関節）
 
@@ -66,7 +67,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 起動:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
-    torque_limit:=500 2>&1 | tee ~/so_arm101_check/write_W1.log
+    torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_W1.log
   ```
 - 別の端末（同じ `source` をして）で、少しずつ動かす。**1 回ごとに、動きが止まってから次へ**:
   ```bash
@@ -101,7 +102,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 起動（`torque_limit` は不要。指定しても lift / elbow / wrist_flex には効かない）:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
-    2>&1 | tee ~/so_arm101_check/write_W3.log
+    2>&1 | tee -i ~/so_arm101_check/write_W3.log
   ```
 - 1 関節ずつ、**小さく（0.1 rad）、ゆっくり（4 秒）**。動いて止まったら元へ戻す。向き（開く／閉じる）は初回に確認する（折りたたみ姿勢から**開く向き**だけ。閉じる向きは動かさない）:
   ```bash
@@ -126,7 +127,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 起動は W4 と同じ（RViz あり。ここでは RViz を操作しない）。**W3.5 と W4 は同じ起動のまま続けて行う**（開いた姿勢で Ctrl-C しないため）。ログは `write_W4.log`:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
-    2>&1 | tee ~/so_arm101_check/write_W4.log
+    2>&1 | tee -i ~/so_arm101_check/write_W4.log
   ```
 - 別の端末で（W3 と同じ `send_joint_delta.py`。向きは W3 の結果に合わせる）:
   ```bash
@@ -140,7 +141,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 起動: W3.5 の起動のまま（RViz あり）。
 - RViz の MotionPlanning で、**Velocity Scaling と Acceleration Scaling を 0.1**（既定）のまま、小さな目標（現在位置から 0.1〜0.2 rad 程度）を Plan & Execute。1 回ごとに動きが止まってから次へ。
 - 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。
-- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 動きが止まっていることを確認 → `send_joint_delta.py`（W3.5 と逆向き、0.1 rad ずつ）で**折りたたみ姿勢に戻してから止める**。戻せないときは手で前腕を支えてから止める → RViz の操作を止め、**launch の端末で Ctrl-C**。
+- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 順に: ① 動きが止まっていることを確認 → ② RViz で、W3.5 で作った開いた姿勢へ戻す（W4 で動かした後は W3.5 の姿勢からずれているため）→ ③ `send_joint_delta.py` で W3.5 の逆（0.1 rad ずつ）を送って折りたたみ姿勢へ戻す → ④ 前腕を支える（戻せないときも手で支える）→ ⑤ **launch の端末で Ctrl-C**。
 - 合格: W3 と同じ基準＋ログ末尾 `rate_limited=0`（arm）。
 
 ## W5（任意・最後に 1 回）. 通信断
@@ -160,13 +161,16 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `COMMUNICATION LOST` | 通信断。**サーボは最後の目標でトルク ON のまま。ドライバから OFF にできない** | 腕を支えて、サーボの電源を切る |
 | `step limit: 'X' requested +N ticks ... limited` | 1 周期の変化量の上限（312 tick ≈ 0.48 rad）を超える指令を削った。gripper の `ramping` は正常 | arm 関節で出たら報告 |
 | `activation failed: ...` | 起動の手順のどこかで失敗。トルクは ON にならない（または OFF に戻した） | ログを報告 |
+| `read of X failed (...); retrying n/2`（WARN） | 起動の読み戻しの通信エラー（checksum mismatch・フレーム不良・タイムアウト）。`[tx=… rx=… flushed_before_request=…]` に送った要求と受信したバイトが出る。再試行で直れば起動は続く | 行を全部報告。`startup_read_retries` の数も見る |
+| `cannot read back X (...)`、直前に `retrying` が 2 回 | 3 回とも通信エラー。トルクは ON にならない | 報告。`[activation failed] torque OFF and Lock=1 confirmed` を確認 |
+| `ros2_control_node` が exit code -6、直前に `terminate called after throwing an instance of 'std::runtime_error'` / `Failed to set the initial state of the component ... to active` | 起動に失敗したとき、controller_manager（Humble）が例外で終了する。Humble の仕様 | `[activation failed] torque OFF and Lock=1 confirmed (read back) on all joints` の行があれば安全面の問題はない。その行が無ければサーボの電源を切る |
 | `[deactivate] ... could NOT confirm ...` | 終了でトルク OFF／Lock=1 を確認できなかった | 腕を支えてサーボの電源を切る |
 
 ## 報告してほしいもの（段階ごと）
 - ログのパス（`~/so_arm101_check/write_<段階>.log`）
 - 段階ごとの抜き出しの出力（W3.5 は W4 のログに含まれる）:
   ```bash
-  P='WRITE mode\|write mode active\|\[probe\]\|FAULT\|COMMUNICATION\|step limit\|activation failed\|\[deactivate\]\|deactivated\|ERROR'
+  P='WRITE mode\|write mode active\|\[probe\]\|FAULT\|COMMUNICATION\|step limit\|activation failed\|\[deactivate\]\|deactivated\|ERROR\|retrying\|startup_read_retries'
   grep -a "$P" ~/so_arm101_check/write_W0.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
   grep -a "\[diag\]\|ERROR" ~/so_arm101_check/write_W0_after.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300   # 停止後の読み取り専用
   grep -a "$P" ~/so_arm101_check/write_W1.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
