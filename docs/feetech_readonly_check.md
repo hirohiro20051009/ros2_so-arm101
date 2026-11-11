@@ -47,7 +47,7 @@ LeRobot 側の基準は、**姿勢によって使うものが違う**。
 ターミナル1（LeRobot 用の環境変数を設定して起動）:
 ```bash
 export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false 2>&1 | tee ~/so_arm101_check/lerobot_launch.log
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/lerobot_launch.log
 ```
 （ログは必ず保存する。起動に失敗したときの原因調査に要る。3.5 節）
 `joint_state_broadcaster` が active になり、`Failed to send commands` が出ていないことを確認する。bridge は接続時にトルクを ON にする（腕が保持される）。
@@ -75,7 +75,7 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 echo "CONDA_PREFIX=[$CONDA_PREFIX] LECONDA_SITE_PACKAGES=[$LECONDA_SITE_PACKAGES]"   # どちらも空であること
 source /opt/ros/humble/setup.bash && source ~/ros2_so-arm101/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee ~/so_arm101_check/feetech_launch.log
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/feetech_launch.log
 ```
 
 腕は動かさない（手順 1 の停止後の姿勢のまま）。別ターミナルで記録して比較する:
@@ -193,6 +193,10 @@ P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツ�
 - 読み取り専用なので、**指令は破棄され腕は動かない**。軌道は（open_loop のため）「成功」と表示されることがあるが、実機は動かない。実行しても意味がなく、混乱のもとになる。
 - 確認は `use_rviz:=false` で行う（`/joint_states` の記録だけ）。RViz を開く場合も、表示を見るだけにする。
 - 書き込みモード（トルク ON、Goal_Position）は段階2b-3 で別途承認してから実装する。
+
+## 5.5 後始末の確認
+
+後始末の確認: `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` と `ros2 node list` の両方で残りがないことを確認する。**`ros2 node list` に残っていても `ps` が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する**（move_group が Segmentation fault で終わると、daemon に古い一覧が残ることがある。推測）。それでも残るなら、ps に出ない原因を調べる。
 
 ## 6. 報告してほしいもの
 - `compare_joint_states.py` の出力（P1、ツール自体の確認 `lerobot_P1` vs `lerobot_P1_tool`、P2a・P2b）

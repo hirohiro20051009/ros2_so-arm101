@@ -1109,3 +1109,13 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 実機は動かしていない。
 - 補足（2b-4、2026-11-11）: mock:=true のとき hardware の値は使われないことの確認。根拠は `src/so_arm101_moveit_config/config/so101_new_calib.ros2_control.xacro` の分岐（`use_fake_hardware` が真なら `mock_components/GenericSystem` のみ。feetech・lerobot の分岐は `unless use_fake_hardware` の内側）。`xacro so101_new_calib.urdf.xacro use_fake_hardware:=… hardware:=…` の 4 通りの出力: true/feetech → GenericSystem、true/lerobot → GenericSystem（serial_port・calibration_file・read_only も出ない）、false/feetech → Sts3215System、false/lerobot → So101HardwareBridge。bridge ノードの条件式（`mock=='false' and hardware=='lerobot'`）も mock=true では常に偽。
 - 注意（変更なし）: xacro マクロ自身の `hardware` の既定は `lerobot` のまま（moveit_config の xacro なので触っていない）。`bringup.launch.py` は常に `hardware` を渡すので影響しない。xacro を直接呼ぶ場合に限り、実機（`use_fake_hardware:=false`）では `hardware:=` の明示が要る。段階2c の archive で扱う（承認制）。
+
+## 段階2b-4: 実機確認 合格（2026-11-11、ユーザー報告。ログ: `~/so_arm101_check/stage2b4_default_launch.log`）
+- 起動: `ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false`（`hardware:=` も `read_only:=` も付けない）。
+- プラグインは `so_arm101_hardware/Sts3215System`。`arm_controller`・`gripper_controller`・`joint_state_broadcaster` がすべて active。
+- `[diag] EEPROM vs yaml` 6/6、`servo settings` 6/6 MATCH。`READ-ONLY mode` の WARN あり、`write mode active` なし。全関節 `torque_enable=0`。
+- ユーザーが gripper を手で動かし、トルク OFF を確認。そのとき `READ-ONLY: command for 'gripper' differs ... -0.025 rad and is discarded` が 1 回出た（手で動かしたため。異常ではない）。
+- bridge のノードなし。`lerobot` / `miniforge3` / `follower_ros2_node` のプロセスなし。
+- 停止後: `ps` は空。`ros2 node list` には `/move_group` と `/moveit_simple_controller_manager` が残ったが、`ros2 daemon stop; ros2 daemon start` の後は空。推測（未確認）: move_group が Segmentation fault で終わり、daemon に古い一覧が残った。
+- 判定: **合格**（既定の `hardware:=feetech read_only:=true` で LeRobot を使わず読み取り専用で起動する）。
+- 同時に修正: `feetech_readonly_check.md` の launch の `tee` に `-i` を付けた（2 箇所）。後始末の確認（`ros2 node list` に残り `ps` が空なら daemon を再起動して再確認）を `feetech_write_check.md`（共通の約束 8）、`feetech_readonly_check.md`（5.5 節）、`CLAUDE.md` に追記。

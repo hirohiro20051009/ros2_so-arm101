@@ -17,6 +17,7 @@
 5. ログの `FAULT:` または `COMMUNICATION LOST` が出たら、その段階を中止して Ctrl-C（支えながら）。原因を報告してから再開する。
 6. LeRobot 経路と同時に起動しない。conda を activate していない新しい端末を使う。
 7. 腕の周りに物を置かない。ケーブルが引っかからないようにする。
+8. 後始末の確認: `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` と `ros2 node list` の両方で残りがないことを確認する。**`ros2 node list` に残っていても `ps` が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する**（move_group が Segmentation fault で終わると、daemon に古い一覧が残ることがある。推測）。それでも残るなら、ps に出ない原因を調べる。
 
 ## 0. 準備（共通）
 ```bash

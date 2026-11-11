@@ -10,6 +10,7 @@
    - 作業は段階ごとに計画を出し、承認を得てから実行する
    - 1段階ごとに colcon build が通ることを確認し、git commit する
    - 実機（サーボ）を動かすコマンドは実行しない。必要なら私に依頼する
+   - 起動したものを止めた後は、ps と `ros2 node list` の両方で残りがないことを確認する。`ros2 node list` だけに残り、ps が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する
    - MoveIt本体の設定（URDF・関節リミット・planning_frame・IK solver）は勝手に変えない
    ## 最終構成（目標）
    - so_arm101_description / so_arm101_moveit_config
