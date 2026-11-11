@@ -234,6 +234,63 @@ TEST(WriteMode, RefusesWhenGoalPositionReadbackDiffers)
   for (int id = 1; id <= 6; ++id) {EXPECT_EQ(r.servos.u8(id, 55), 1);}
 }
 
+// 通信エラー（化け・無応答）は起動の読み戻しを再試行する。値の不一致は再試行しない。
+TEST(WriteMode, CorruptedGoalReadbackIsRetriedAndStartupSucceeds)
+{
+  Rig r;
+  r.servos.corrupt_read_replies(1, 42, 2);  // 1 台目の Goal_Position の読み戻しが 2 回化ける
+  ASSERT_TRUE(r.init());
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.sys->startup_read_retries(), 2u);
+  EXPECT_EQ(r.servos.goal_position(1), kPresent[0]);
+}
+
+TEST(WriteMode, DroppedReadbackReplyIsRetriedAndStartupSucceeds)
+{
+  Rig r;
+  r.servos.drop_read_replies(5, 42, 1);  // タイムアウト
+  ASSERT_TRUE(r.init());
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.sys->startup_read_retries(), 1u);
+}
+
+TEST(WriteMode, PersistentCorruptionNeverEnablesTorque)
+{
+  Rig r;
+  r.servos.corrupt_read_replies(5, 42, 1000);  // 3 回とも化ける
+  ASSERT_TRUE(r.init());
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::ERROR);
+  EXPECT_EQ(r.sys->startup_read_retries(), 2u);  // 3 回試して 2 回再試行
+  EXPECT_LT(first_index(r.servos.writes(), 40, 1), 0);  // Torque_Enable=1 は書かれていない
+  for (int id = 1; id <= 6; ++id) {
+    EXPECT_EQ(r.servos.u8(id, 40), 0);
+    EXPECT_EQ(r.servos.u8(id, 55), 1);  // Lock=1 に戻した
+  }
+}
+
+TEST(WriteMode, ValueMismatchIsNotRetried)
+{
+  Rig r;
+  r.servos.ignore_writes_to(42);  // 正しく受信できるが、値が期待と違う
+  ASSERT_TRUE(r.init());
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::ERROR);
+  EXPECT_EQ(r.sys->startup_read_retries(), 0u);
+}
+
+TEST(WriteMode, AccelerationZeroIsNotRetried)
+{
+  Rig r;
+  r.servos.ignore_writes_to(41);  // Acceleration が 0 のまま
+  ASSERT_TRUE(r.init());
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::ERROR);
+  EXPECT_EQ(r.sys->startup_read_retries(), 0u);
+}
+
 TEST(WriteMode, RefusesWhenGoalVelocityIsNotZero)
 {
   Rig r;

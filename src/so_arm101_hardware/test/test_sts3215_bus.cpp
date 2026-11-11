@@ -253,6 +253,22 @@ TEST_F(BusTest, BadChecksumIsDetected)
   EXPECT_EQ(failed, 2);
 }
 
+TEST_F(BusTest, CommErrorMessageCarriesRawBytesForDiagnosis)
+{
+  servos.set_fault(2, Fault::BadChecksum);
+  std::vector<uint8_t> d;
+  EXPECT_EQ(bus->read(2, reg::kPresentPosition, &d), Status::BadChecksum);
+  const std::string & e = bus->last_error();
+  EXPECT_NE(e.find("tx=FF FF 02 04 02 38 02"), std::string::npos) << e;  // 要求（Present_Position=56=0x38, 2 バイト）
+  EXPECT_NE(e.find("rx=FF FF 02"), std::string::npos) << e;               // 受信したバイト
+  EXPECT_NE(e.find("flushed_before_request="), std::string::npos) << e;
+  EXPECT_TRUE(Sts3215Bus::is_comm_error(Status::BadChecksum));
+  EXPECT_TRUE(Sts3215Bus::is_comm_error(Status::Timeout));
+  EXPECT_TRUE(Sts3215Bus::is_comm_error(Status::BadFrame));
+  EXPECT_FALSE(Sts3215Bus::is_comm_error(Status::ServoError));
+  EXPECT_FALSE(Sts3215Bus::is_comm_error(Status::IdMismatch));
+}
+
 TEST_F(BusTest, ServoErrorByteIsDetected)
 {
   servos.set_fault(5, Fault::ServoError);

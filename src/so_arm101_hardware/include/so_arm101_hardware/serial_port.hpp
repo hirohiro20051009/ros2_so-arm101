@@ -34,7 +34,8 @@ public:
   size_t read_exact(uint8_t * buf, size_t n, std::chrono::microseconds timeout);
 
   /// 受信バッファを捨てる（再同期用）。
-  void flush_input();
+  /// 受信バッファを捨てる。捨てたバイト数（FIONREAD で数える。不明なら 0）を返す。
+  size_t flush_input();
 
   /// バスの「1 往復」（要求の送信から応答の受信まで）をポート単位で排他にする RAII。
   /// ポートを使う処理は必ずこれを持つ。別スレッドが同時にポートを使おうとしても、後から来た方は

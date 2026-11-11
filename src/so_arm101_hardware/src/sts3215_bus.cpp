@@ -83,9 +83,33 @@ std::vector<uint8_t> Sts3215Bus::build_packet(
   return pkt;
 }
 
+static std::string hex_bytes(const std::vector<uint8_t> & v)
+{
+  std::string out;
+  char buf[4];
+  for (size_t i = 0; i < v.size(); ++i) {
+    std::snprintf(buf, sizeof(buf), "%02X", v[i]);
+    if (i) {out += ' ';}
+    out += buf;
+  }
+  return out;
+}
+
+void Sts3215Bus::begin_request(const std::vector<uint8_t> & req)
+{
+  flushed_before_request_ = port_.flush_input();
+  last_request_ = req;
+  rx_bytes_.clear();
+}
+
 Status Sts3215Bus::fail(Status s, const std::string & msg)
 {
   last_error_ = msg;
+  if (is_comm_error(s)) {
+    // 原因の切り分け用: 送った要求・受け取ったバイト・要求の前に捨てた古いバイト数
+    last_error_ += " [tx=" + hex_bytes(last_request_) + " rx=" + hex_bytes(rx_bytes_) +
+      " flushed_before_request=" + std::to_string(flushed_before_request_) + "]";
+  }
   last_servo_error_ = 0;
   port_.flush_input();  // 次の要求で再同期できるように
   return s;
@@ -101,6 +125,7 @@ Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vecto
     if (port_.read_exact(&b, 1, timeout_) != 1) {
       return fail(Status::Timeout, "timeout waiting for header (id " + std::to_string(expect_id) + ")");
     }
+    rx_bytes_.push_back(b);
     if (b == 0xFF) {
       ++ff_count;
     } else {
@@ -109,7 +134,9 @@ Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vecto
     }
   }
   uint8_t head[2];  // ID, LEN
-  if (port_.read_exact(head, 2, timeout_) != 2) {
+  const size_t got_head = port_.read_exact(head, 2, timeout_);
+  rx_bytes_.insert(rx_bytes_.end(), head, head + got_head);
+  if (got_head != 2) {
     return fail(Status::Timeout, "timeout reading id/len (id " + std::to_string(expect_id) + ")");
   }
   const uint8_t id = head[0];
@@ -118,7 +145,9 @@ Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vecto
     return fail(Status::BadFrame, "invalid length " + std::to_string(len));
   }
   std::vector<uint8_t> rest(len);  // ERR + DATA + CHK
-  if (port_.read_exact(rest.data(), len, timeout_) != len) {
+  const size_t got_rest = port_.read_exact(rest.data(), len, timeout_);
+  rx_bytes_.insert(rx_bytes_.end(), rest.begin(), rest.begin() + got_rest);
+  if (got_rest != len) {
     return fail(Status::Timeout, "timeout reading payload (id " + std::to_string(expect_id) + ")");
   }
   std::vector<uint8_t> body;
@@ -161,7 +190,7 @@ Status Sts3215Bus::read(uint8_t id, Register r, std::vector<uint8_t> * data)
   if (!port_.is_open()) {return fail(Status::PortError, "port not open");}
   if (id > kMaxId) {return fail(Status::BadFrame, "invalid id");}
   const auto req = build_request(id, Instruction::Read, {r.address, r.length});
-  port_.flush_input();
+  begin_request(req);
   if (!port_.write_all(req.data(), req.size())) {return fail(Status::PortError, "write failed");}
   return receive_status(id, r.length, data);
 }
@@ -187,7 +216,7 @@ Status Sts3215Bus::sync_read(
   std::vector<uint8_t> params{r.address, r.length};
   params.insert(params.end(), ids.begin(), ids.end());
   const auto req = build_request(kBroadcastId, Instruction::SyncRead, params);
-  port_.flush_input();
+  begin_request(req);
   if (!port_.write_all(req.data(), req.size())) {return fail(Status::PortError, "write failed");}
   out->assign(ids.size(), {});
   for (size_t i = 0; i < ids.size(); ++i) {

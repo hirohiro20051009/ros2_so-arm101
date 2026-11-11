@@ -75,7 +75,7 @@ Status Sts3215WriteBus::write_bytes(uint8_t id, Register r, int value, int min_v
     data = {static_cast<uint8_t>(value & 0xFF)};
   }
   const auto req = build_write(id, r.address, data);
-  port_.flush_input();
+  begin_request(req);
   if (!port_.write_all(req.data(), req.size())) {return fail(Status::PortError, "write failed");}
   std::vector<uint8_t> ack;
   return receive_status(id, 0, &ack);

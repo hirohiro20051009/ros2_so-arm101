@@ -112,6 +112,11 @@ public:
   const std::string & last_error() const {return last_error_;}
   /// 直近の ServoError で受け取った ERR バイト（それ以外では 0）。
   uint8_t last_servo_error() const {return last_servo_error_;}
+  /// 直近の失敗が通信エラー（再送で直りうるもの: タイムアウト・フレーム不良・チェックサム不良）か。
+  static bool is_comm_error(Status s)
+  {
+    return s == Status::Timeout || s == Status::BadFrame || s == Status::BadChecksum;
+  }
 
   // --- テスト用に公開 ---
   static uint8_t checksum(const uint8_t * body, size_t len);  // ~sum(ID..PARAM) & 0xFF
@@ -124,12 +129,18 @@ protected:
     uint8_t id, uint8_t inst, const std::vector<uint8_t> & params);
   Status receive_status(uint8_t expect_id, size_t data_len, std::vector<uint8_t> * data);
   Status fail(Status s, const std::string & msg);
+  /// 要求の直前に受信バッファを捨てる。要求の控えと捨てたバイト数を診断用に残す。
+  void begin_request(const std::vector<uint8_t> & req);
 
   SerialPort & port_;
   std::chrono::microseconds timeout_;
   std::string last_error_;
   int last_rx_id_{-1};  // 直近に受信したパケットの ID（IdMismatch の分類用）
   uint8_t last_servo_error_{0};
+  // 診断用（通信エラーのときに last_error() へ 16 進で添える）
+  std::vector<uint8_t> last_request_;
+  std::vector<uint8_t> rx_bytes_;       // 今回の応答で受信したバイト（ヘッダから）
+  size_t flushed_before_request_{0};    // 要求の直前に捨てた（古い）バイト数
 };
 
 /// ERR バイトのビットの説明（STS3215 の保護: bit0 電圧、1 センサ、2 温度、3 電流、4 角度、5 過負荷）。

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -386,8 +387,8 @@ hardware_interface::CallbackReturn Sts3215System::on_deactivate(const rclcpp_lif
     for (auto v : limited_count_) {limited += v;}
     RCLCPP_INFO(
       logger(), "deactivated. reads=%lu retried=%lu failed_cycles=%lu goal_writes=%lu monitors=%lu "
-      "rate_limited=%lu port_contention=%lu", reads_, retried_, failed_cycles_, goal_writes_, monitors_, limited,
-      port_.contention_count());
+      "rate_limited=%lu port_contention=%lu startup_read_retries=%lu", reads_, retried_, failed_cycles_,
+      goal_writes_, monitors_, limited, port_.contention_count(), startup_retries_);
   }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -513,12 +514,31 @@ hardware_interface::return_type Sts3215System::write(const rclcpp::Time & time, 
 
 // ===================== 書き込みモード（段階2b-3b）=====================
 
-bool Sts3215System::read_reg(uint8_t id, Register r, int * value)
+bool Sts3215System::read_reg(uint8_t id, Register r, int * value, Status * status)
 {
   std::vector<uint8_t> b;
-  if (bus_->read(id, r, &b) != Status::Ok || b.size() != r.length) {return false;}
+  const Status s = bus_->read(id, r, &b);
+  if (status) {*status = s;}
+  if (s != Status::Ok || b.size() != r.length) {return false;}
   *value = (r.length == 2) ? int(b[0] | (b[1] << 8)) : int(b[0]);
   return true;
+}
+
+bool Sts3215System::read_reg_retry(const JointCalibration & c, Register r, const char * name, int * value)
+{
+  constexpr int kAttempts = 3;
+  for (int attempt = 1; attempt <= kAttempts; ++attempt) {
+    Status s = Status::Ok;
+    if (read_reg(c.id, r, value, &s)) {return true;}
+    if (!Sts3215Bus::is_comm_error(s)) {return false;}  // サーボの ERR、ID 違い等は再試行しない
+    if (attempt == kAttempts) {return false;}            // 最後の失敗は呼び出し側が ERROR にする
+    ++startup_retries_;
+    RCLCPP_WARN(
+      logger(), "%s id=%d: read of %s failed (%s: %s); retrying %d/%d", c.name.c_str(), int(c.id), name,
+      to_string(s), bus_->last_error().c_str(), attempt, kAttempts - 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
 }
 
 bool Sts3215System::read_settings(const JointCalibration & c, ServoSettings * a)
@@ -543,7 +563,7 @@ bool Sts3215System::write_check(const char * what, const JointCalibration & c, S
 bool Sts3215System::verify_reg(const JointCalibration & c, Register r, int expected, const char * name)
 {
   int v = -1;
-  if (!read_reg(c.id, r, &v)) {
+  if (!read_reg_retry(c, r, name, &v)) {
     RCLCPP_ERROR(
       logger(), "%s id=%d: cannot read back %s (%s)", c.name.c_str(), int(c.id), name, bus_->last_error().c_str());
     return false;
@@ -686,8 +706,9 @@ bool Sts3215System::activate_write_mode()
   // ここから書く。失敗したら終了の手順（トルク OFF → Lock=1）で戻す
   touched_ = true;
   shutdown_attempts_ = 0;
+  startup_retries_ = 0;
   auto fail = [&](const char * msg) {
-      RCLCPP_ERROR(logger(), "activation failed: %s", msg);
+      RCLCPP_ERROR(logger(), "activation failed: %s (startup_read_retries=%lu)", msg, startup_retries_);
       shutdown_servos("activation failed");
       return false;
     };
@@ -717,14 +738,14 @@ bool Sts3215System::activate_write_mode()
       return fail("Acceleration");
     }
     int a = -1;
-    if (!read_reg(c.id, reg::kAcceleration, &a) || a == 0 || a != acceleration_) {
+    if (!read_reg_retry(c, reg::kAcceleration, "Acceleration", &a) || a == 0 || a != acceleration_) {
       RCLCPP_ERROR(
         logger(), "%s id=%d: Acceleration reads back as %d (wanted %d, must be non-zero). Torque is NOT enabled",
         c.name.c_str(), int(c.id), a, acceleration_);
       return fail("Acceleration readback");
     }
     int tl = -1;
-    if (!read_reg(c.id, reg::kTorqueLimit, &tl)) {return fail("Torque_Limit read");}
+    if (!read_reg_retry(c, reg::kTorqueLimit, "Torque_Limit", &tl)) {return fail("Torque_Limit read");}
     if (tl != desired_torque_limit_[i]) {
       if (!write_check("Torque_Limit", c, write_bus_->write_torque_limit(c.id, desired_torque_limit_[i])) ||
         !verify_reg(c, reg::kTorqueLimit, desired_torque_limit_[i], "Torque_Limit"))
@@ -771,7 +792,7 @@ bool Sts3215System::activate_write_mode()
     if (!verify_reg(c, reg::kTorqueEnable, 1, "Torque_Enable") || !verify_reg(c, reg::kLock, 1, "Lock") ||
       !verify_reg(c, reg::kAcceleration, acceleration_, "Acceleration") ||
       !verify_reg(c, reg::kTorqueLimit, desired_torque_limit_[i], "Torque_Limit") ||
-      !read_reg(c.id, reg::kGoalVelocity, &gv) || gv != 0)
+      !read_reg_retry(c, reg::kGoalVelocity, "Goal_Velocity", &gv) || gv != 0)
     {
       return fail("final verification");
     }
@@ -797,7 +818,8 @@ bool Sts3215System::activate_write_mode()
   armed_ = true;
   RCLCPP_INFO(
     logger(), "write mode active: torque ON, Lock=1, Acceleration=%d, Goal_Position = current position. "
-    "Per-cycle step limit: %d ticks (angle joints)", acceleration_, max_step_raw_[0]);
+    "Per-cycle step limit: %d ticks (angle joints). startup_read_retries=%lu", acceleration_, max_step_raw_[0],
+    startup_retries_);
   return true;
 }
 

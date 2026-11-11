@@ -129,9 +129,13 @@ size_t SerialPort::read_exact(uint8_t * buf, size_t n, std::chrono::microseconds
   return got;
 }
 
-void SerialPort::flush_input()
+size_t SerialPort::flush_input()
 {
-  if (fd_ >= 0) {::tcflush(fd_, TCIFLUSH);}
+  if (fd_ < 0) {return 0;}
+  int pending = 0;
+  if (::ioctl(fd_, FIONREAD, &pending) != 0 || pending < 0) {pending = 0;}
+  ::tcflush(fd_, TCIFLUSH);
+  return static_cast<size_t>(pending);
 }
 
 }  // namespace so_arm101_hardware

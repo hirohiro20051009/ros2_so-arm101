@@ -46,6 +46,9 @@ public:
 
   ~Sts3215System() override;
 
+  /// 起動手順（書き込みモード）の読み戻しで行った再試行の回数。
+  unsigned long startup_read_retries() const {return startup_retries_;}
+
   hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo & info) override;
   hardware_interface::CallbackReturn on_configure(const rclcpp_lifecycle::State &) override;
   hardware_interface::CallbackReturn on_activate(const rclcpp_lifecycle::State &) override;
@@ -80,7 +83,10 @@ private:
 
   // --- 書き込みモード（read_only:=false）---
   bool activate_write_mode();                        ///< 起動の手順 1〜8（失敗したら後始末して false）
-  bool read_reg(uint8_t id, Register r, int * value);
+  bool read_reg(uint8_t id, Register r, int * value, Status * status = nullptr);
+  /// 起動手順の読み戻し用。通信エラー（タイムアウト・フレーム不良・チェックサム不良）のときだけ、最大 3 回まで
+  /// 読み直す。正しく受信できた値は、期待と違っても再試行しない（呼び出し側が判定する）。
+  bool read_reg_retry(const JointCalibration & c, Register r, const char * name, int * value);
   bool read_settings(const JointCalibration & c, ServoSettings * out);
   bool write_check(const char * what, const JointCalibration & c, Status s);
   bool verify_reg(const JointCalibration & c, Register r, int expected, const char * name);
@@ -121,6 +127,7 @@ private:
   // 失敗の扱い
   int consecutive_failures_{0};
   unsigned long reads_{0}, retried_{0}, failed_cycles_{0};
+  unsigned long startup_retries_{0};  ///< 起動手順の読み戻しで行った再試行の回数（W0 の報告用）
   bool warned_discard_{false};
   bool read_only_{true};
 

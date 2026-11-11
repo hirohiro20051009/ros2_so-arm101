@@ -112,6 +112,18 @@ public:
   /// Lock=1 のとき SRAM への書き込みも拒否する（Lock=1 の確認 1 が失敗する状況の再現）。
   void lock_blocks_sram(bool v) {lock_blocks_sram_ = v;}
   void set_silent(bool v) {silent_ = v;}
+  /// 通信エラーの再現: (id, addr) への READ の応答を、次の count 回だけ壊す（チェックサムを 1 ビット反転）。
+  void corrupt_read_replies(uint8_t id, uint8_t addr, int count)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    corrupt_[{id, addr}] = count;
+  }
+  /// (id, addr) への READ に、次の count 回だけ応答しない（タイムアウト）。
+  void drop_read_replies(uint8_t id, uint8_t addr, int count)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    drop_[{id, addr}] = count;
+  }
   /// この ID は全ての応答の ERR バイトに値を入れる（0 で解除）。
   void set_err(uint8_t id, uint8_t err)
   {
@@ -203,7 +215,7 @@ private:
     for (auto c : body) {s += c;}
     return static_cast<uint8_t>(~s & 0xFF);
   }
-  void reply(uint8_t id, const std::vector<uint8_t> & data)
+  void reply(uint8_t id, const std::vector<uint8_t> & data, bool corrupt = false)
   {
     if (silent_) {return;}
     uint8_t err;
@@ -215,7 +227,7 @@ private:
     body.insert(body.end(), data.begin(), data.end());
     std::vector<uint8_t> out{0xFF, 0xFF};
     out.insert(out.end(), body.begin(), body.end());
-    out.push_back(chk(body));
+    out.push_back(static_cast<uint8_t>(chk(body) ^ (corrupt ? 0x01 : 0x00)));
     ::write(master_, out.data(), out.size());
   }
   void do_write(uint8_t inst, uint8_t id, uint8_t addr, const std::vector<uint8_t> & data)
@@ -260,18 +272,24 @@ private:
   void read_reply(uint8_t id, uint8_t addr, uint8_t len)
   {
     std::vector<uint8_t> data;
+    bool corrupt = false;
     {
       std::lock_guard<std::mutex> g(m_);
       if (!mem_.count(id)) {return;}
       for (int i = 0; i < len; ++i) {data.push_back(mem_[id][addr + i]);}
+      auto d = drop_.find({id, addr});
+      if (d != drop_.end() && d->second > 0) {--d->second; return;}
+      auto c = corrupt_.find({id, addr});
+      if (c != corrupt_.end() && c->second > 0) {--c->second; corrupt = true;}
     }
-    reply(id, data);
+    reply(id, data, corrupt);
   }
 
   std::vector<uint8_t> ids_;
   std::map<uint8_t, std::array<uint8_t, 256>> mem_;
   std::map<uint8_t, bool> is_gripper_;
   std::map<uint8_t, uint8_t> err_;
+  std::map<std::pair<uint8_t, uint8_t>, int> corrupt_, drop_;
   std::set<uint8_t> ignored_addr_;
   std::vector<WriteRecord> writes_;
   std::map<uint8_t, unsigned> counts_;
