@@ -1471,3 +1471,24 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - **elbow の OUT の扱い: (a) に決めた（ユーザーの判断）**: 何も変えない。OMPL（既定）は `FixStartStateBounds`（`start_state_max_bounds_error: 0.1`）で扱え、mock の move_group で、この姿勢から計画に成功した（上の「出発点の elbow_flex が URDF の上限を 0.0001 rad 超える件」）。URDF・SRDF は変えない。Pilz は開始状態が URDF の範囲をわずかに超えても拒否する。
 - **コミット**: 更新した `follower_calibration.yaml`、`calibration_records/2026-11-11/`（`measure_C1c_1.json`、`eeprom_backup_20261111-163729.json`、`eeprom_after_C3.json`、`README.md`。sha256 は原本と一致、README に記載）、この記録を、同じコミットに入れた（タグは付けない）。
 - 次: 出発点の新座標への文書の書き換え（別コミット）、C4（書き込みモードでの W 系の確認のやり直し）。
+
+## 計画（実装は未。承認の後）と残課題（2026-11-11）
+### 計画 1（最優先。C4 の前）: 試験が本番の yaml の値に依存していて、C3 のコミット（59e49d6）の後に落ちる
+- **事実**（C3 のコミットの後に `colcon test` を実行して確認）: `so_arm101_hardware` の 5 件（`Conversion.YamlMatchesLeRobotJsonSource`、`Conversion.MatchesLeRobotGoldenTable`、`Conversion.AngleIsNotClampedLikeLeRobot`、`Conversion.GripperTickInRad`、`InverseConversion.MatchesLeRobotUnnormalizeWithinOneTick`）と、`so_arm101_calibration` の 3 件（`Measure.MeasuresCenterAndRangeWithoutWritingAnything`、`Backup.CorruptOrInconsistentFilesAreRejected`、`Apply.WhenTheRollbackAlsoFailsTheStateTableShowsOldNewUnknownAndRestoreWorksAfterAPowerCycle`）が失敗する。`colcon build` は成功する。C3 の前（2c-3d のコミットの後）は、不安定な既存の 1 件を除いて全部通っていた。
+- **原因**: これらの試験は `CALIBRATION_YAML`（`src/so_arm101_hardware/config/follower_calibration.yaml`。本番の yaml）を読み、**旧 yaml の値を固定で期待している**（例: `wrist_roll` の `center` 2064.5、Homing_Offset 1164、`source` に `2026-09-07` を含む。LeRobot の json から作った黄金表（`gen_conversion_golden.py`）との一致。偽サーボの EEPROM の初期値が yaml の値で、`measured_homing_offset` に 1164 を期待）。C3 で本番の yaml が新しい校正の値になったので、前提が崩れた。試験の不具合ではなく、**試験が本番の設定に結合していた**ことが原因。
+- **計画（要承認。動作は変えない）**: 旧 yaml（`1e9e968` の内容。LeRobot の json から変換した値）を、**試験用の固定ファイル**として置く（例: `src/so_arm101_hardware/test/data/follower_calibration_lerobot_20260906.yaml`）。`so_arm101_hardware`・`so_arm101_calibration` の `CALIBRATION_YAML`（CMake の `target_compile_definitions`）を、本番の yaml からこの固定ファイルへ向ける。試験の中身（期待値）は変えない。本番の yaml の更新（今後の再校正）で試験が落ちなくなる。
+  - 付け足す試験: 本番の yaml が読めて、構造が正しいこと（6 関節、`min < max`、`eeprom.*` が `min`/`max` と同じ、`center` が範囲の中にある。値は固定しない）。`apply` が書いた形式（`source` が `ros_calibrated`）を読み込めること。
+  - 確認: `colcon build`・`colcon test`（`so_arm101_hardware` 84 件、`so_arm101_calibration` 62 件が、不安定な 1 件を除いて通る）。偽サーボでの確認は変わらない。
+### 計画 2: 起動ログ 1 行目の出所の表示（`[ros_calibrated, file=?, file_date=?]`）を直す
+- 事実: `src/so_arm101_hardware/src/calibration.cpp:54-59` が、`source` の `kind`・`file`・`file_date` だけを表示用の文字列 `c.source` に入れる（無いと `?`）。C3 の後の yaml の `source` は `kind`・`measure_file`・`backup_file`・`applied_at`・`applied_by` なので `?` になる。表示は `sts3215_system.cpp:109`。動作には無関係。
+- 計画: 存在する項目だけを、決まった順で出す。旧形式は今と同じ（`[converted_from_lerobot_json, file=…, file_date=…]`）。新形式は `[ros_calibrated, measure_file=…, backup_file=…, applied_at=…, applied_by=…]`。`?` は出さない。`source` が無いときは今と同じ（空）。
+- 試験: 旧形式の表示（固定ファイル。既存の `test_conversion.cpp:117` の期待を保つ）、新形式の表示、`apply` が書いた yaml を読んだときの表示（`so_arm101_calibration` の試験）、項目が欠けたとき。`colcon build`・`colcon test`。ドライバの動作（変換・診断・書き込み）は変えない。
+- 時期: 計画 1 の後（同じ試験の固定ファイルを使うため）。C4 の前でも後でもよい。
+### 計画 3: measure の「ほぼ届いた」の表示（前回の端まであと 10 tick 以内）
+- 上の「計画（実装は C3 の後。今はツールを変えない）: 記録中の表示で『ほぼ届いた』を出す」のとおり。C3 は終わったので、実装してよい時期（ユーザーの承認の後）。表示だけの変更で、実機での再確認は不要（ユーザーの判断）。
+### 残課題（C4 で確認する項目。出発点の姿勢の見直しは (a) で決着）
+- **たたみ切りの読み値のばらつき**: 出発点（たたみ切った姿勢）の読み値は、毎回数 tick ばらつく（elbow_flex: 旧座標 +1.66938、新座標 +1.69009。`zero_shift` からの見込みとの差で、人が姿勢を作る再現性は数 tick）。上限（+1.69）を超える量は、今後も 0.01 rad 程度まで変わりうる。OMPL（0.1 まで許容）なら計画に影響しない。C4 で、W3.5 の前に複数回たたみ直して読み値のばらつきを見る（読み取り専用の起動。腕は動かさない）。
+- **モデルの衝突と実機のたたみ切りの差**: モデルでは、出発点の姿勢のまま elbow_flex を閉じる向きに進めると、+1.70（有効）〜+1.74（upper_arm_link と wrist_link が接触）の間で衝突する（mock の `/check_state_validity`）。実機のたたみ切り（機械的な止まり）は +1.69 前後で、校正した範囲の端は +1.7192。**モデルの衝突が始まる値と、実機が止まる値の差**を、C4 で **RViz の重なり表示**（MotionPlanning の現在の状態。Scene Robot とロボットの衝突形状）と一緒に見る: 実機を出発点にしたとき、RViz で upper_arm_link と wrist_link に重なり・接触が見えるか、隙間がどれだけか。`/check_state_validity` に実測の姿勢を渡した結果（valid か）も記録する。
+### 未確認として残すもの（C4 で確かめる）
+- **実行側の `allowed_start_tolerance`（MoveIt の既定 0.01 rad。設定していない）に収まるか**: 軌道の最初の点（出発点 +1.69009）と、現在の実測の差。mock の計画では最初の点が出発点と同じだった（実行の確認はしていない）。
+- **新座標の出発点から、OMPL で Plan & Execute できるか**（実機）。mock の move_group では、`FixStartStateBounds` の範囲内で計画に成功した（実行はしていない）。
