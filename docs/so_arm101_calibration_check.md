@@ -152,37 +152,60 @@ shoulder_pan   -1299  -1300   1247  2547  届いた(+43)   あと 205
   - Claude は、結果をこの目安に照らして報告する（数値を並べる）。進むかの最終判断はユーザー。
 
 ## C2: gripper だけに新しい値を書く（yaml は更新しない）→ バックアップへ戻す
-**EEPROM に新しい値を書く最初の操作。実行する前に Claude に伝えて承認を得る。** C0.5 が合格していること。
+**EEPROM に新しい値を書く最初の操作（実機で初めて、値が変わる書き込み）。実行する前に Claude に「これから C2 を実行する」と伝え、承認を得る。** C0.5 と C1c が合格していること。
+使うファイル: 測定ファイル `~/so_arm101_check/measure_C1c_1.json`、バックアップ `~/so_arm101_check/eeprom_backup_20261111-163729.json`。待ち時間は 50 ms（`--eeprom-wait-ms 50`）。対象は **gripper の 1 関節だけ**で、書く項目は Homing_Offset・Min・Max の 3 つだけ（トルクには書かない。腕は動かない）。
+gripper に書く値（`measure_C1c_1.json`。今の EEPROM との差）:
+
+| 項目 | 今（バックアップ） | 書く値 |
+|---|---|---|
+| Homing_Offset | 107 | **547** |
+| Min_Position_Limit | 1900 | **1454** |
+| Max_Position_Limit | 3385 | **2944** |
+
+**C2 の間は、launch を起動しない（読み取り専用の `read_only:=true` も含む。mock も不要）。** 理由: ① `so_arm101_calib` と ros2_control は同じシリアルポートを使う（同時に動かさない）。② C2 の間、**gripper の EEPROM と yaml が食い違う**（yaml は C3 まで更新しない）。読み取り専用の launch は WARN のまま起動してしまい、gripper の位置が古い yaml で（約 440 tick ずれて）変換される。書き込みモード（`read_only:=false`）は、EEPROM と yaml が違えば起動を拒否するが、それに頼らない。launch は、C2 の手順 4 のあとの dry-run で「全部同じ」になるまで、起動しない（C3 の手順 3 まで起動しない）。
+実行前の確認（共通の約束 1）:
+```bash
+ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"
+ros2 node list
+```
+どちらも空であること。
+
 1. dry-run（何も書かない。書く予定の値が出る）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/<選んだ C1c の測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
      --joints gripper 2>&1 | tee -i ~/so_arm101_check/calib_C2_dryrun.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   `今の EEPROM とバックアップの照合` が `OK 全関節がバックアップと一致`、`書き込む値` の gripper の Homing_Offset / Min / Max が測定ファイルの値であること。
-2. 書き込み（`--eeprom-wait-ms` は既定の 50。C0.5 では同じ値の書き込みで待ち時間の必要量を決められなかったので、ここで初めて値が変わる書き込みを 50 ms で行い、各項目の読み戻しの一致を確認する）:
+   `今の EEPROM とバックアップの照合` が `OK 全関節がバックアップと一致`、`書き込む値` の gripper が上の表の値（Homing_Offset 107 → 547、Min 1900 → 1454、Max 3385 → 2944）、`dry-run: 何も書いていない`、終了コード 0 であること。値が違う／他の関節が対象に入っているときは、書かずに報告する。
+2. 書き込み（確認文字列を求められたら `WRITE-EEPROM` と入力。**Enter だけでは何も書かれない**）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/<選んだ C1c の測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
      --joints gripper --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_apply.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   `OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。
-3. **サーボの電源を入れ直す**（外部電源を切って入れる）。値が残ることを確認（読み取り専用）:
+   `OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`gripper Lock: 1`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。書く順序は Lock=0 → Homing → Min → Max → Lock=1（各項目を 50 ms 待って読み戻す。**値が変わるので、読み戻しの一致が、待ち時間が足りていることの最初の実測になる**）。
+3. **サーボの電源を入れ直す**（外部電源を切って入れる。USB は抜かなくてよい）。値が残ることを確認（読み取り専用。launch は起動しない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
      --out ~/so_arm101_check/eeprom_after_C2.json 2>&1 | tee -i ~/so_arm101_check/calib_C2_after.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   gripper の Homing_Offset / Min / Max が新しい値のまま、他の関節は変わっていないこと。
+   gripper の Homing_Offset / Min / Max が **547 / 1454 / 2944** のまま、他の関節（pan 135/743/3452、lift 112/842/3216、elbow 122/862/3088、wrist_flex 89/889/3185、wrist_roll 1164/164/3965）は変わっていないこと。
 4. **バックアップへ戻す**:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib restore --port /dev/ttyACM0 \
-     --backup ~/so_arm101_check/eeprom_backup_<日時>.json --joints gripper --write \
+     --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json --joints gripper --write \
      --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_restore.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   `OK: バックアップの値に戻り、Lock=1 を確認した`。続けて同じ `restore`（`--write` なし）の dry-run で、全部「同じ（書かない）」。
-- 合格基準: 手順 2 と 4 が終了コード 0。手順 3 で電源を入れ直した後も値が残る。手順 4 の後、全関節がバックアップと一致。
-- 失敗したとき: `apply` は書いた関節をバックアップへ自動で戻そうとする。表示される `旧 / 新 / 不明` と終了コード（上の表）を報告する。終了コード 2 は、表示された `restore --backup … --write` で戻す。**この段階で失敗したら、C3 には進まない。**
-- 報告してほしいもの: `calib_C2_dryrun.log`、`calib_C2_apply.log`、`calib_C2_after.log`、`calib_C2_restore.log`。
+   `OK: バックアップの値に戻り、Lock=1 を確認した`、終了コード 0。続けて、**全関節の dry-run**（何も書かない）で、全部「同じ（書かない）」であること:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib restore --port /dev/ttyACM0 \
+     --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
+     2>&1 | tee -i ~/so_arm101_check/calib_C2_restore_check.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   18 レジスタすべて「同じ（書かない）」、`注意: ... アドレス n がバックアップと違う` なし、終了コード 0。
+- 合格基準: 手順 2 と 4 が終了コード 0。手順 3 で電源を入れ直した後も値が残る（547 / 1454 / 2944）。手順 4 の後、全関節がバックアップと一致（EEPROM は C2 を行う前に戻る。yaml は C2 では更新しないので、C2 が終われば EEPROM と yaml はもとどおり一致する）。
+- 失敗したとき: `apply` は書いた関節をバックアップへ自動で戻そうとする。表示される `旧 / 新 / 不明` と終了コード（上の表）を報告する。終了コード 2 は、表示された `restore --backup … --write` で戻す（`Lock=1 を確認できない` と出たら、サーボの電源を入れ直す）。**この段階で失敗したら、C3 には進まない。launch も起動しない。**
+- 報告してほしいもの: `calib_C2_dryrun.log`、`calib_C2_apply.log`、`calib_C2_after.log`、`calib_C2_restore.log`、`calib_C2_restore_check.log`、各ログの `exit=` の値。
 
 ## C3: 全関節（gripper を含む 6 関節）を 1 回で書く（yaml はそのとき 1 回だけ更新）
 **実行する前に Claude に伝えて承認を得る。** C2 が合格していること。**C2 と同じ C1c の測定ファイル**を使う（旧形式の測定ファイルは `apply` が拒否する）。
