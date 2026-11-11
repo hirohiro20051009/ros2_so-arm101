@@ -243,6 +243,15 @@ ls calibration_records/2026-11-11/
 最初の 3 つは空であること（launch は止まっている。yaml に未コミットの変更がない）。`ls` は `eeprom_backup_20261111-163729.json  measure_C1c_1.json` の 2 つ。（`git status --short` 全体には `?? calibration_records/` が出る。複製は、C3 の合格後に yaml と一緒にコミットする。）
 
 ### 手順
+0. **書き込みの前に、旧校正で出発点の姿勢を読む**（C3 の前後を比べる基準。何も書かない。**C3 の前後で、腕に触れずに同じ姿勢で読む**のが、正式な確認）。読み取り専用で起動し、腕を**出発点の姿勢**（トルク OFF でたたみ切って、手を離しても止まる姿勢。手で作る）にして、値を読む。**この姿勢のまま、手順 5 の読み取りまで、腕に触れない**（動かしてしまったら、手順 0 をやり直す）:
+   ```bash
+   ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_before_launch.log
+   ```
+   別の端末で:
+   ```bash
+   ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_pose_before.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   `[diag] EEPROM vs yaml: 6/6 joints match`（旧 EEPROM と旧 yaml）を確認し、`position` の 6 つの値（順序: pan, lift, elbow, wrist_flex, wrist_roll, gripper）を控える。停止は Ctrl-C だけ（読み取り専用なので腕は動かない。トルク OFF のまま）。後始末（下の手順 5 と同じ）をしてから手順 1 へ。
 1. dry-run（何も書かない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
@@ -270,20 +279,44 @@ ls calibration_records/2026-11-11/
    ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_readonly.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、全関節 `torque_enable=0`、`MISMATCH` の行なし。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
-5. 同じ起動のまま、腕を**出発点の姿勢**（W3.5・W4 の出発点。トルク OFF で手を離しても止まる姿勢。手で作る）にして、新しい座標での値を読む:
+5. **腕に触れずに**（手順 0 と同じ姿勢のまま）、新しい座標での値を読む（手順 4 の起動のまま）:
    ```bash
    ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_start_pose.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   見込み（計算。同じ物理姿勢なら）: pan −0.0844、lift −1.5106、elbow **+1.6824**、wrist_flex +0.4971、roll −0.0545、gripper +0.0234（出発点は pan −0.0836、lift −1.5113、elbow +1.6694、wrist_flex +0.5094、roll −0.0713、gripper +0.0165）。**目安: 各関節が見込みから 0.03 rad 以内**（姿勢を手で作る再現性のぶん。符号の誤り・単位の誤り・オフセットの誤りのような大きなずれを見つける確認。それより大きくずれたら、書き込みモードに進まず報告する）。
+   **C3 の前後の差を、`zero_shift` から計算した見込みと比べる**（同じ物理姿勢なら `新 rad = 旧 rad − zero_shift × 2π/4095`。gripper は新しい範囲での %）。次を、手順 0 と手順 5 の 6 つの値に直して、リポジトリの直下で実行する:
+   ```bash
+   python3 - <<'EOF'
+   import json, math, yaml
+   BEFORE = [0, 0, 0, 0, 0, 0]   # 手順 0（C3 の前、旧校正）の position: pan, lift, elbow, wrist_flex, wrist_roll, gripper
+   AFTER  = [0, 0, 0, 0, 0, 0]   # 手順 5（C3 の後、新校正）の position
+   old = yaml.safe_load(open('/home/hirok/so_arm101_check/follower_calibration_before_C3.yaml'))   # C3 の前の yaml
+   m = json.load(open('calibration_records/2026-11-11/measure_C1c_1.json'))                        # C3 で書いた測定ファイル
+   k = 2 * math.pi / old['conversion']['angle_ticks']
+   print(f"{'joint':14s}{'before':>9s}{'after':>9s}{'見込み':>9s}{'差(rad)':>9s}{'差(tick)':>9s}")
+   for j, b, a in zip(m['joints'], BEFORE, AFTER):
+       o = old['joints'][j['name']]
+       if o['kind'] == 'angle':   # rad = direction*(raw - center)*k、raw = actual - Homing_Offset
+           actual = b / k * o['direction'] + o['center'] + o['eeprom']['homing_offset']
+           exp = o['direction'] * (actual - j['new_homing_offset'] - j['new_center']) * k
+           tick = (a - exp) / k
+       else:                      # gripper: pct = (clamp(raw,min,max) - min)/(max - min)*100、rad = radians(pct)
+           actual = o['min'] + math.degrees(b) / 100 * (o['max'] - o['min']) + o['eeprom']['homing_offset']
+           raw = actual - j['new_homing_offset']
+           exp = math.radians((min(max(raw, j['new_min']), j['new_max']) - j['new_min']) / (j['new_max'] - j['new_min']) * 100)
+           tick = float('nan')
+       print(f"{j['name']:14s}{b:9.5f}{a:9.5f}{exp:9.5f}{a - exp:9.5f}{tick:9.1f}")
+   EOF
+   ```
+   **目安: 各関節で、実測と見込みの差が 0.003 rad（約 2 tick）以内**。符号の誤り・単位の誤り・オフセットの誤りのような大きなずれを見つけられる。2026-11-11 の C3 の結果: pan 以外は 0.0001 rad 以内、pan は約 1 tick。**腕に触れてしまって同じ姿勢で読めなかったときは**、出発点の旧座標の値（pan -0.08362、lift -1.51134、elbow +1.66938、wrist_flex +0.50941、roll -0.07135、gripper +0.01645）を `BEFORE` にして比べる。姿勢を手で作り直したぶん、差は大きくなる（C3 の目安は 0.03 rad 以内）。
    停止は Ctrl-C だけ。後始末: `ps`（上の `ps aux | grep …` と同じ）と `ros2 node list` が空であること。`ros2 node list` だけに残り `ps` が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する。
 6. **URDF の関節リミットとの余裕**（オフライン。URDF・SRDF は読むだけ。`source install/setup.bash` の後に実行）:
    ```bash
    python3 tools/pose_margin.py --pose start=<pan>,<lift>,<elbow>,<wrist_flex>,<wrist_roll>,<gripper> \
      2>&1 | tee -i ~/so_arm101_check/calib_C3_margin.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   （値は手順 5 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。`--calibration` は新しい yaml（既定）。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。**見込みでは elbow_flex の上限までの余裕が約 0.008 rad（今は 0.021）と小さい**ので、LOW が出るかもしれない。**C3 はこのまま進め、実測（この手順）で判断する**（ユーザーの判断）。LOW・OUT が出たら報告し、**C4 の前に、出発点の姿勢の見直し（elbow を少し開く）を検討する**。URDF・SRDF は変えない。
-- 合格基準: 手順 2 が終了コード 0（6 関節 `[新]`、yaml 更新）。手順 3 で 12 V を入れ直した後も値が残る。手順 4 が 6/6 MATCH（2 行とも）。手順 5 の各関節が見込みから 0.03 rad 以内。手順 6 のログが取れている（LOW・OUT は報告して判断）。
-- 報告してほしいもの（**コミットはまだしない**。Claude が確認してから）: `calib_C3_dryrun.log`、`calib_C3_apply.log`、`calib_C3_after.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`、`calib_C3_margin.log`、各ログの `exit=` の値、`git diff --stat` の出力。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
+   （値は手順 5 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。`--calibration` は新しい yaml（既定）。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。**C3 の実測（2026-11-11）: 出発点（新座標）で OUT は elbow_flex だけ（+1.69009。上限 +1.69 を約 0.00009 rad 超える）。ユーザーの判断で、(a) 何も変えない（OMPL は `FixStartStateBounds`（0.1）で扱える。MotionPlanning では OMPL を使い、Pilz を選ばない。`docs/feetech_write_check.md`）。** 今後の再校正で LOW・OUT が出たら、報告して判断を仰ぐ（URDF・SRDF は変えない）。
+- 合格基準: 手順 2 が終了コード 0（6 関節 `[新]`、yaml 更新）。手順 3 で 12 V を入れ直した後も値が残る。手順 4 が 6/6 MATCH（2 行とも）。手順 0 と手順 5 の前後の差が、`zero_shift` からの見込みと 0.003 rad（約 2 tick）以内。手順 6 のログが取れている（LOW・OUT は報告して判断）。
+- 報告してほしいもの（**コミットはまだしない**。Claude が確認してから）: `calib_C3_before_launch.log`、`calib_C3_pose_before.log`（手順 0）、`calib_C3_dryrun.log`、`calib_C3_apply.log`、`calib_C3_after.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`（手順 5）、`calib_C3_margin.log`、各ログの `exit=` の値、`git diff --stat` の出力、手順 5 の比較の表。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
 
 ### 合格後のコミット（Claude が行う。ユーザーの作業は、手順 3〜6 のログの報告まで）
 手順 3〜6 が合格（手順 6 の LOW・OUT は報告して判断）してから、Claude が次を行う:

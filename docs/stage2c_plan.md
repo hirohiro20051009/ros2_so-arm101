@@ -68,7 +68,7 @@
 ## 7. 0 rad が動いたときに意味が変わるもの
 | 項目 | 取り直す時期 |
 |---|---|
-| 出発点の姿勢（pan −0.0836、lift −1.5113、elbow +1.6694、wrist_flex +0.5094、roll −0.0713、gripper +0.0165。手順書と指示書） | C3 で読み取り専用の起動時に新座標で測り直し、C4 の前に手順書を直す |
+| 出発点の姿勢（旧校正の座標: pan −0.0836、lift −1.5113、elbow +1.6694、wrist_flex +0.5094、roll −0.0713、gripper +0.0165。手順書と指示書） | C3 で新座標で測り直した（2026-11-11）: pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523。手順書（`feetech_write_check.md`）は新座標に直した。elbow は URDF の上限を約 0.00009 rad 超える（OUT）が、OMPL は許容する（対応 (a)。`docs/inventory.md`）。指示書（リポジトリの外）はユーザーが直す |
 | SRDF の home（lift −1.57、elbow 1.57、wrist_flex 0.8） | C4 で問題2 を再確認。変えるなら計画を出して承認 |
 | `~/ros2_so101/test` の数値 | 段階2d の移植時（元は読み取り専用） |
 | Eye-to-Hand の TF と数値（`Tzili.json` 前提） | 段階2e |

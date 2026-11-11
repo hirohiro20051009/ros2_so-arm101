@@ -127,18 +127,18 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 理由: home の折りたたみ姿勢は衝突判定で Plan & Execute が中止される既知の問題がある（`inventory.md` の問題2）。RViz を使う前に、elbow_flex だけを少し開く。
 **W3 に合格してから行う。** shoulder_lift は動かさない。他の関節も動かさない。
 
-- **出発点（W3.5 と W4 の基準。トルク OFF で手で調整した姿勢を、読み取り専用の起動で測った値。`~/so_arm101_check/start_pose.log`）**。W4 の後に戻して Ctrl-C する姿勢もこれ:
+- **出発点（W3.5 と W4 の基準。トルク OFF で手でたたみ切った姿勢を、C3 の後（新しい校正の座標）に、読み取り専用の起動で測った値。ユーザー報告。丸めた値は `~/so_arm101_check/calib_C3_pose_margin.log`）**。W4 の後に戻して Ctrl-C する姿勢もこれ。（旧校正の座標＝C3 の前の値は pan -0.08362、lift -1.51134、elbow +1.66938、wrist_flex +0.50941、roll -0.07135、gripper +0.01645。`~/so_arm101_check/start_pose.log`。今は使わない。）
 
   | 関節 | 出発点の値 [rad] |
   |---|---|
-  | shoulder_pan | -0.08362 |
-  | shoulder_lift | -1.51134 |
-  | elbow_flex | +1.66938 |
-  | wrist_flex | +0.50941 |
-  | wrist_roll | -0.07135 |
-  | gripper | +0.01645 |
+  | shoulder_pan | -0.09820 |
+  | shoulder_lift | -1.48295 |
+  | elbow_flex | +1.69009 |
+  | wrist_flex | +0.50327 |
+  | wrist_roll | -0.04833 |
+  | gripper | +0.01523 |
 
-- モックの MoveIt（`/check_state_validity`、2026-11-11）の判定: 出発点と、そこから elbow_flex を -0.10 / -0.15 / -0.20 / -0.30 にした姿勢は**すべて有効**。gripper 先端の高さは出発点から +0.026 / +0.039 / +0.053 / +0.081 m。
+- （**旧校正の座標の出発点での判定。新座標でのやり直しは未。やり直したらこの行を直す**）モックの MoveIt（`/check_state_validity`、2026-11-11）の判定: 出発点と、そこから elbow_flex を -0.10 / -0.15 / -0.20 / -0.30 にした姿勢は**すべて有効**。gripper 先端の高さは出発点から +0.026 / +0.039 / +0.053 / +0.081 m。
 - **腕の支え方**: W3 と同じ（動かすあいだは前腕の下に触れずに構える。止めるときは触れて受ける）。
 - 起動（**W3.5 と W4 は同じ起動のまま続けて行う**。開いた姿勢で Ctrl-C しないため）。W4 は初めての MoveIt の実行なので `torque_limit:=500`（pan と wrist_roll に効く。lift / elbow_flex / wrist_flex は常に 1000）を付ける。RViz あり、ここでは RViz を操作しない。ログは `write_W4.log`:
   ```bash
@@ -148,9 +148,9 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - 別の端末で、elbow_flex に **-0.10 を 2 回**（1 回ごとに動きが止まってから `/joint_states` で実測を確認してから次へ）:
   ```bash
   python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.1 --seconds 4
-  ros2 topic echo /joint_states --once    # elbow_flex の実測。出発点 +1.66938 との差を計算する
+  ros2 topic echo /joint_states --once    # elbow_flex の実測。出発点 +1.69009 との差を計算する
   ```
-- 開く向き（自重に逆らう向き）は、目標の約 0.04 rad 手前で止まる（W3・W3.5 の実測。W3.5 では -0.10 を 2 回で出発点から約 -0.12、実測 +1.5620 になった。閉じる向きは約 3 tick）。実測の変化量で判断する:
+- 開く向き（自重に逆らう向き）は、目標の約 0.04 rad 手前で止まる（W3・W3.5 の実測。旧校正の座標の出発点（+1.66938）での W3.5 では -0.10 を 2 回で出発点から約 -0.12、実測 +1.5620 になった。閉じる向きは約 3 tick）。実測の変化量で判断する:
   - 2 回目の後、出発点からの変化が **-0.10 〜 -0.15** → 終わり（先端は約 +0.03 〜 +0.04 m 上がる。モックで -0.10〜-0.30 は有効）。
   - -0.10 に届かない → 足りない量（**最大 -0.05**）を **1 回だけ**足す。（W3.5 では -0.05 を足しても約 -0.012 しか動かなかった。手前止まりが約 0.04 rad あるため、効く量は小さい）
   - **出発点から -0.25 を超えて開く指令は送らない**（モックで確認済みなのは -0.30 まで。余裕を見ている）。
@@ -164,7 +164,8 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **最初の Execute の前（W4 の実測 2026-11-11 に基づく）**: MotionPlanning の Planning タブで **Goal State を `<current>` に選び直し**、Joints タブで**スライダーを 1 つだけ**動かす。**Plan のアニメーションで、動かしていない関節が動いていないか**を見てから Execute する。
 - **注意（事実）: Joints タブのスライダーは整数の度**。目標の姿勢は**全関節が整数の度**になるため、動かしていない関節も目標が最大 約 0.5° 変わる（W4 の実測: 実行後の実機が pan +2.33°、lift −86.07°、elbow +90.29°、wrist_flex +29.54° のとき、スライダーは 2、−86、90、30）。MoveIt と arm_controller は渡された目標どおりに動いている。
 - **注意: 閉じる向き（重力に沿う向き）に変わる関節は、落ちるように動くことがある。** W4 では elbow_flex が約 88.5° → 90°（約 1.8°）と閉じる向きに変わり、1 回の Execute で「カタン」と落ちる動きがあった（推測: 閉じる向きの目標でギアの摩擦から外れて自重で動いた）。Plan の前に、閉じる向きに変わる関節が無いかを Plan のアニメーションで見る。
-- **目標の作り方の注意**: 出発点の elbow_flex は URDF のリミット（+1.69）まで **0.021 rad** しかない。**W4 の目標は elbow_flex を + に動かさない（現在より大きくしない）ものにする。** shoulder_lift も出発点付近でリミットに近い向き（−側）へは動かさない。
+- **目標の作り方の注意**: 出発点の elbow_flex は URDF のリミット（+1.69）を**約 0.00009 rad 超えている**（C3 の後の新座標。OUT。旧校正の座標では 0.021 rad の余裕があった）。OMPL は計画要求アダプタ `FixStartStateBounds`（`start_state_max_bounds_error: 0.1`）で扱えるので、この姿勢から Plan & Execute できる見込み（モックの move_group で計画の成功を確認。**実機は C4 で確認**）。**W4 の目標は elbow_flex を + に動かさない（現在より大きくしない）ものにする。** shoulder_lift も出発点付近でリミットに近い向き（−側）へは動かさない。
+- **MotionPlanning では OMPL を使い、Pilz を選ばない**（開始状態が URDF の範囲をわずかに超えると、Pilz は計画を拒否する（`INVALID_ROBOT_STATE`）ため。出発点の elbow_flex は約 0.00009 rad 超えている）。**Pilz を使うときや、W3.5 を飛ばして起動直後に計画するときは、先に `python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.10 --seconds 4` で elbow_flex を開く**（開く向きは目標の約 0.04 rad 手前で止まるので、約 -0.05 動く。開いた姿勢のまま Ctrl-C しない）。
 - 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。pan の向き（+ で上から見て時計回り）が RViz の表示と実機で一致するか。
 - **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 戻す先は**出発点の値**（W3.5 の表）。戻しは RViz を使わず、`send_joint_delta.py` で 1 関節ずつ行う（理由: RViz では関節ごとの目標値を数値で指定する操作が分かりにくく、計画の衝突判定で中止される可能性もある。`send_joint_delta.py` は差分を直接指定でき、1 回ごとに実測で確認できる）。
   1. 動きが止まっていることを確認。
@@ -173,7 +174,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
      ```bash
      python3 ~/ros2_so-arm101/tools/send_joint_delta.py <関節名> <出発点 - 実測> --seconds 4
      ```
-  4. elbow_flex は「出発点 (+1.66938) − 現在値」を 1 回で送る（目標が +1.66938 なので URDF リミット +1.69 まで 0.021 rad の余裕がある。折りたたむ向きは差が約 3 tick）。
+  4. elbow_flex は「出発点 (+1.69009) − 現在値」を 1 回で送る（目標の +1.69009 は URDF リミット +1.69 を約 0.00009 rad 超える。`send_joint_delta.py` は URDF の範囲を見ず、ドライバは校正した範囲（±1.7192）でクランプするので、送れる。たたみ切った機械的な止まりなので、折りたたむ向きは差が約 3 tick）。
   5. 再び `/joint_states` を読み、**各関節が出発点から約 0.02 rad 以内**であることを確認する。
   6. 前腕を支える（戻せないときも手で支える）→ **launch の端末で Ctrl-C**。
 - 合格: W3 と同じ基準＋ログ末尾 `rate_limited=0`（arm）。

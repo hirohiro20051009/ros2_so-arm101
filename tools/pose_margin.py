@@ -2,7 +2,7 @@
 """姿勢と校正範囲が、URDF の関節リミットまでどれだけ余裕があるかを表示する（段階2c の C3 で使う）。
 
 オフライン。シリアルポートは開かない。URDF・SRDF は読むだけ（変更しない）。
-  python3 tools/pose_margin.py --pose start=-0.0836,-1.5113,1.6694,0.5094,-0.0713,0.0165 \
+  python3 tools/pose_margin.py --pose start=-0.0982,-1.4830,1.6901,0.5033,-0.0483,0.0152 \
       [--pose home=...] [--calibration follower_calibration.yaml] [--threshold 0.05]
 
 --pose NAME=v1,...,v6 : 6 関節の値（rad）。順序は shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper。

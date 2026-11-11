@@ -989,6 +989,8 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - W2: **合格**。W3 に進む（W3 は重力を受ける関節。前腕の下を支える）。
 
 ## W3 合格（2026-11-11、`write_W3.log`）
+
+> **注（2026-11-11 追記。元の記録は書き換えていない）**: この節の関節の値（出発点・W3.5/W4 の elbow_flex など）は **旧校正の座標**（C3 の前）。C3 の後（新しい校正の座標）の出発点は pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523（「段階2c 実機確認: C3」）。
 ### 結果（事実。ユーザー報告とログの確認）
 - `write mode active ... startup_read_retries=0`。
 - `deactivated. reads=38348 retried=0 failed_cycles=0 goal_writes=38348 monitors=758 rate_limited=0 port_contention=0 startup_read_retries=0`、`[deactivate] torque OFF and Lock=1 confirmed`。`FAULT`・`step limit`・`COMMUNICATION LOST`・`retrying` の行は無し。
@@ -1020,6 +1022,8 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - URDF の関節リミット: elbow_flex ±1.69、shoulder_lift ±1.74533、wrist_flex ±1.65806、shoulder_pan ±1.91986。W3 の開始時の elbow +1.6771 は elbow の URDF 上限（1.69）の 0.013 rad 手前（問題2の記録と同じ、リミット近傍）。校正範囲（約 +1.707）は URDF 上限より広い。
 
 ## 問題2への注記（2026-11-11。上の元の記録は変更していない）
+
+> **注（2026-11-11 追記。元の記録は書き換えていない）**: この節の関節の値（出発点・W3.5/W4 の elbow_flex など）は **旧校正の座標**（C3 の前）。C3 の後（新しい校正の座標）の出発点は pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523（「段階2c 実機確認: C3」）。
 - 事実（モック。`mock:=true use_rviz:=false` の `/check_state_validity`、group=arm、実機は使っていない）:
   - 問題2の値（shoulder_lift −1.749、elbow_flex 1.700、wrist_flex 1.313、pan 0、roll 0）: **無効**、contacts は `upper_arm_link` ↔ `wrist_link`（元の記録と一致。再現した）。
   - 同じ姿勢を URDF のリミット内に丸めた値（−1.745 / 1.69 / 1.313）: **有効**。SRDF の home（−1.57 / 1.57 / 0.8）: 有効。
@@ -1027,6 +1031,8 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 変更なし: URDF・SRDF のリミットや home の値は変えていない（変更が必要と考えたら計画を出して承認を取る）。
 
 ## 段階2b-3c: W3.5 の最終案（2026-11-11 承認。手順書 `docs/feetech_write_check.md` に反映）
+
+> **注（2026-11-11 追記。元の記録は書き換えていない）**: この節の関節の値（出発点・W3.5/W4 の elbow_flex など）は **旧校正の座標**（C3 の前）。C3 の後（新しい校正の座標）の出発点は pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523（「段階2c 実機確認: C3」）。
 - W3.5/W4 の出発点と W4 後の戻し先: 調整後の値（pan -0.08362、lift -1.51134、elbow +1.66938、wrist_flex +0.50941、roll -0.07135、gripper +0.01645。`~/so_arm101_check/start_pose.log`）。lift は +0.022 rad、wrist_flex は約 -0.43 rad 調整した（トルク OFF で手で動かした）。
 - モック判定（すべて有効）: 出発点、elbow -0.10 / -0.15 / -0.20 / -0.30。先端 z（FK、base_link 基準）の出発点からの差: +0.026 / +0.039 / +0.053 / +0.081 m（出発点の z は +0.0304 m）。
 - W3.5: elbow_flex に -0.10 を 2 回（--seconds 4、各回の後に実測確認）。出発点から -0.15〜-0.20 で終了、届かなければ最大 -0.05 を 1 回だけ追加、-0.25 を超える指令は送らない。lift は動かさない。
@@ -1035,6 +1041,8 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 後始末の事実: バックグラウンド起動した launch は SIGINT が効かず、SIGTERM と PID 指定で停止した（最後の ps で残りなしを確認）。
 
 ## 段階2b-3c: W3.5・W4 合格、W0〜W4 すべて合格（2026-11-11。ユーザー報告。ログ: `~/so_arm101_check/write_W4.log`、`use_rviz:=true torque_limit:=500`）
+
+> **注（2026-11-11 追記。元の記録は書き換えていない）**: この節の関節の値（出発点・W3.5/W4 の elbow_flex など）は **旧校正の座標**（C3 の前）。C3 の後（新しい校正の座標）の出発点は pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523（「段階2c 実機確認: C3」）。
 
 ### W3.5（elbow_flex を開く）
 - 起動: `write mode active ... startup_read_retries=0`。トルク ON で腕は動かず、値は出発点と同じ。
@@ -1384,6 +1392,7 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - C3 の後に元に戻す手順: **EEPROM は `restore --backup …163729.json --write`（全関節。違う項目だけ書く）、yaml は、コミット前なら `git checkout -- src/so_arm101_hardware/config/follower_calibration.yaml`、コミット後なら `git revert <そのコミット>`**（履歴は書き換えない）。`restore` は yaml を更新しない。どちらも戻して、全関節 dry-run が「同じ」で、読み取り専用の起動で 6/6 MATCH になるまで、書き込みモードは起動しない。**yaml をコミットする時期は、C3 の手順 3〜5（読み取りのログ）が合格してから**（失敗したら `git checkout` で戻せる。コミット後は revert）。
 
 ### 出発点の姿勢で、新しい座標の値の見込み（計算。実測ではない）
+> **注（2026-11-11 追記）**: 表の「旧」は旧校正の座標、「新の見込み」は C3 の前に計算した値。実測は「段階2c 実機確認: C3」。
 - 同じ物理姿勢なら、`新 rad = 旧 rad − zero_shift × 2π/4095`（angle、direction=1）。`zero_shift` は `measure_C1c_1.json` と今の yaml の差。gripper は新しい範囲（1454〜2944、旧 1900〜3385）での %。
 - 出発点（`start_pose.log` の調整後の値）からの見込み:
 
