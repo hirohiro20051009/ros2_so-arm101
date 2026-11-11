@@ -98,23 +98,25 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 
 目的: 重力を受ける 3 関節で、トルク ON のまま動かせること。Torque_Limit は常に 1000（下げない）。
 
-- **腕の支え方（最重要）**: **折りたたみ姿勢で、前腕の下に手のひらを入れて、腕の重さを受ける。** 動かす関節が弱い／沈むと感じたらすぐ手で受ける。もう片手はサーボ電源の近く。
+- **腕の支え方（最重要）**: 折りたたみ姿勢。**前腕の下に手のひらを構え、触れずに数 cm あけておく**（W3 の実測は、手で支えると遊びの分だけ腕が動いて測定に影響するため、動かすあいだは自重だけを受けた状態で行った）。沈む／弱いと感じたらすぐ手で受ける。**止めるとき（Ctrl-C の前）は前腕に触れて重さを受ける**。もう片手はサーボ電源の近く。
 - 起動（`torque_limit` は不要。指定しても lift / elbow / wrist_flex には効かない）:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
     2>&1 | tee -i ~/so_arm101_check/write_W3.log
   ```
-- 1 関節ずつ、**小さく（0.1 rad）、ゆっくり（4 秒）**。動いて止まったら元へ戻す。向き（開く／閉じる）は初回に確認する（折りたたみ姿勢から**開く向き**だけ。閉じる向きは動かさない）:
+- 1 関節ずつ、**小さく（0.1 rad）、ゆっくり（4 秒）**。**開始時の実測値（`ros2 topic echo /joint_states --once`）を控えておく**。向きは実測（W3、2026-11-11）: **wrist_flex の − と elbow_flex の − が「開く向き」**（手先／前腕が離れる）。**shoulder_lift の + は腕全体が前へ倒れ、先端が下がる向き**で、0.1 rad で gripper の先端が台に接触した（強い押し付け・異音は無し）。lift は台に近いので + は小さく、まず 0.05 rad から。
   ```bash
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py wrist_flex -0.1 --seconds 4    # 向きが逆なら +0.1
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py wrist_flex  0.1 --seconds 4
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py wrist_flex -0.1 --seconds 4
   python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex  -0.1 --seconds 4
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex   0.1 --seconds 4
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py shoulder_lift 0.1 --seconds 4
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py shoulder_lift -0.1 --seconds 4
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py shoulder_lift 0.05 --seconds 4   # 台に近い。先端が当たらないか見ながら
+  ```
+- **戻し方（重要）**: `send_joint_delta.py` は**今の実測値から**目標を計算する。開く向き（自重に逆らう向き）では、実測が目標の手前で止まる（W3 の実測: elbow_flex で約 27 tick ≈ 0.04 rad、wrist_flex で約 8 tick）。**戻すときに +0.1／−0.1 の固定量を送ると、開始位置を越える**（elbow_flex では校正範囲の端 約 +1.71 を越える目標になった）。そこで、**戻す量 = 開始時の値 − 今の実測値** を計算して送る。端に近い関節（elbow_flex、shoulder_lift）は、開始時の値の**少し（0.02 rad ほど）手前まで**にする。
+  ```bash
+  ros2 topic echo /joint_states --once        # 今の実測値
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex <開始時の値 - 今の値 - 0.02> --seconds 4
   ```
   ※ 折りたたみ姿勢の shoulder_lift / elbow_flex は関節リミットの端に近い（`inventory.md` の問題2）。**リミットの外へ向かう向きは動かさない**（ドライバは校正範囲でクランプする）。
-- **止め方**: 元の折りたたみ姿勢に戻っている → 前腕の下を支える → **Ctrl-C**（脱力で腕が沈む）。
+- **止め方**: 元の折りたたみ姿勢（開始時の値）に戻っている → **前腕に触れて重さを受ける** → **Ctrl-C**（脱力で腕が沈む）。
 - 合格: 沈まない／指令の向きに動く／`FAULT` なし／`rate_limited` が 0。
 
 ## W3.5. W4 の前に: 折りたたみ姿勢から少し開いた姿勢にする
