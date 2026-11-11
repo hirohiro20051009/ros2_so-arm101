@@ -1131,3 +1131,13 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 試験（偽サーボ）: 追加 5 件（homing 不一致、min/max 不一致、apply_servo_config でも拒否、一致なら起動、読み取り専用は継続して書き込み 0 件）。試験の `Rig` は、偽サーボの EEPROM（Homing_Offset・Min/Max）を yaml の値に初期化するようにした（実機の状態と同じ。以前は 0 のままで、不一致を検査していなかった）。
 - 結果: `colcon build` 成功。`so_arm101_hardware` の `colcon test` は 84 件すべて通過。
 - 事実: `colcon test`（全体）で `apriltag_test`・`so_arm101_bringup`・`so_arm101_lerobot_bridge` に失敗（lint の copyright/flake8/pep257、pytest の収集エラー）。この変更を stash した状態でも同じ（106 件中 2 errors・14 failures）で、今回の変更とは無関係。未対応（段階の対象外）。
+
+## 段階2c-1b: `so_arm101_hardware` のライブラリの export（2026-11-11）
+- 変更: `src/so_arm101_hardware/CMakeLists.txt` の `ament_package()` の直前に追加（ほかは変更なし。ドライバの動作は変わらない）:
+  ```cmake
+  ament_export_include_directories(include)
+  ament_export_libraries(so_arm101_sts3215)
+  ament_export_dependencies(rclcpp rclcpp_lifecycle hardware_interface std_msgs sensor_msgs yaml-cpp)
+  ```
+- 依存の export が必要だった理由（事実）: 公開ヘッダのうち `sts3215_system.hpp` が `hardware_interface`・`rclcpp`・`rclcpp_lifecycle`、`so101_hardware_bridge.hpp` が `hardware_interface`・`rclcpp`・`rclcpp_lifecycle`・`std_msgs`・`sensor_msgs` を include する（bus 系のヘッダ `sts3215_bus.hpp` など 5 つは標準ライブラリと互いだけ）。`yaml-cpp` は `so_arm101_sts3215` がリンクしている。
+- 確認: 使い捨ての利用側（scratchpad の外部 CMake プロジェクト。`find_package(so_arm101_hardware)` + `ament_target_dependencies`）が、`sts3215_write_bus.hpp`・`calibration.hpp`・`sts3215_system.hpp` を include し、`Sts3215WriteBus::build_write` を呼ぶ実行ファイルをビルド・実行できた。`colcon build` 成功、`so_arm101_hardware` の `colcon test` は 84 件通過。

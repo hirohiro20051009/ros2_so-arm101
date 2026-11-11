@@ -78,4 +78,12 @@ if(BUILD_TESTING)
     CONTROLLERS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_controller/config/controllers.yaml")
 endif()
 
+# 他のパッケージ（so_arm101_calibration など）が so_arm101_sts3215（Sts3215Bus / Sts3215WriteBus /
+# calibration など）を使えるようにする。公開ヘッダ（sts3215_system.hpp と so101_hardware_bridge.hpp）が
+# rclcpp / rclcpp_lifecycle / hardware_interface / std_msgs / sensor_msgs のヘッダを include するので、
+# 依存も export する（yaml-cpp はライブラリがリンクしている）。
+ament_export_include_directories(include)
+ament_export_libraries(so_arm101_sts3215)
+ament_export_dependencies(rclcpp rclcpp_lifecycle hardware_interface std_msgs sensor_msgs yaml-cpp)
+
 ament_package()
