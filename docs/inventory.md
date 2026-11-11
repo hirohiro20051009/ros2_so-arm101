@@ -1033,3 +1033,37 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 起動: W3.5 と W4 は同じ起動（RViz あり、`torque_limit:=500`、`write_W4.log`）。
 - W4 の戻し: RViz は使わず `send_joint_delta.py` で 1 関節ずつ「出発点 − 実測」を送る（elbow_flex は最後）。Ctrl-C の前に各関節が出発点から約 0.02 rad 以内であることを確認する。W4 の目標は elbow_flex を + に動かさない（リミット +1.69 まで 0.021 rad）。
 - 後始末の事実: バックグラウンド起動した launch は SIGINT が効かず、SIGTERM と PID 指定で停止した（最後の ps で残りなしを確認）。
+
+## 段階2b-3c: W3.5・W4 合格、W0〜W4 すべて合格（2026-11-11。ユーザー報告。ログ: `~/so_arm101_check/write_W4.log`、`use_rviz:=true torque_limit:=500`）
+
+### W3.5（elbow_flex を開く）
+- 起動: `write mode active ... startup_read_retries=0`。トルク ON で腕は動かず、値は出発点と同じ。
+- elbow_flex（各回とも 2 秒おき 3 回で同じ値。沈まない）:
+
+  | 送った量 | 目標 | 実測 |
+  |---|---|---|
+  | -0.10（出発点 +1.6694 から） | +1.5694 | +1.6203 |
+  | -0.10 | +1.5203 | +1.5620 |
+  | -0.05 | +1.5120 | +1.5497 |
+- **基準からの逸脱**: 出発点からの変化は **-0.120** で、手順書の基準（-0.15〜-0.20）に届かなかった。毎回、目標の約 0.04 rad 手前で止まるため。-0.05 を足して実際に動いたのは -0.012 だった。URDF リミットまで約 0.14 rad あり、モックで -0.10〜-0.15 は有効だったので、ユーザーの判断でここで W3.5 を終えた。
+- RViz のモデルは実機の姿勢とおおむね一致。リンク同士がやや重なって（めり込んで）見えた（見た目のみ。Plan は衝突判定で止められていない）。
+
+### W4（RViz の Plan & Execute、スケーリング 0.1）
+- Joints タブで shoulder_pan を +1° → Plan のアニメーションも実機も、上から見て時計回り（W2 の実機・URDF の FK と一致。pan の向きの最終確認は済み）。Execute は約 1 秒で SUCCEEDED。
+- その後、計 4 回の Execute（pan を -1° や -5° 程度など。各回の詳細な操作は記録できていない）。すべて SUCCEEDED。`Completed trajectory execution with status SUCCEEDED` は 5 回。`step limit:`・`FAULT`・`COMMUNICATION LOST` なし。
+- 事実: Joints タブのスライダーは整数の度で、目標の姿勢は全関節が整数の度になる（実行後の実機は pan +2.33°、lift -86.07°、elbow +90.29°、wrist_flex +29.54°。スライダーは 2、-86、90、30）。そのため動かしていない関節も目標が最大 0.5° 程度変わる。elbow_flex は約 88.5° → 90°（閉じる向き）となり、1 回の Execute で「カタン」と落ちる動きがあった（約 1.8°）。MoveIt と arm_controller は渡された目標どおりに動いている。**原理的な挙動なので、コード・設定での対策はしない**（手順書に注意として記載）。
+- 1 回目の Execute の後、動かしていない関節が 0.01 rad 未満動いた（微小）。
+- 戻し（`send_joint_delta.py`）: pan -0.12、elbow +0.09。出発点との差は pan 0.011、lift 0.009、elbow 0.002、wrist_flex 0.006 rad（すべて 0.02 以内）。elbow の目標は +1.6719 で出発点（+1.6694）をわずかに越えたが、URDF リミット +1.69 未満（実測 +1.6678）。
+- 停止: `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`。停止時に腕の動きなし。
+- 末尾: `deactivated. reads=131540 retried=0 failed_cycles=0 goal_writes=131540 monitors=2601 rate_limited=0 port_contention=0 startup_read_retries=0`。
+
+### 推測（未確認）: 開く向きと閉じる向きの差
+- 開く向き（自重に逆らう向き）では目標の約 0.04 rad（約 27 tick）手前で止まり、閉じる向きでは約 3 tick。トルク OFF でも手を離して止まっていられるほどギアの摩擦が大きいので、開く向きでは自重とギアの摩擦に逆らう分の力が足りずに止まり、閉じる向きでは自重で動く、とユーザーは考えている。W4 の「カタン」も、閉じる向きの目標で摩擦から外れて自重で動いたためと考えている。
+- `open_loop_control: true` のため、こうした手前で止まるずれに軌道の側は気づかない（status は SUCCEEDED になる）。
+
+### checksum mismatch（未解決）
+- W0 の 2 回のあと、今日の起動 6 回（W0_4、W1×2、W2、W3、W4）はすべて `startup_read_retries=0`。原因は未特定のまま。再試行と受信バイト列の記録は残す。
+
+### 状態
+- W0・W1・W2・W3・W3.5・W4 合格。W5（通信断）は任意で未実施（行うかはユーザーが決める）。
+- 段階2b の完了に向けて残り: `open_loop_control` が True のままであることの確認、書き込みモードで LeRobot を使っていないことの確認（`feetech_readonly_check.md` 2.5 節と同じ確認）。その後にタグ `stage2b-done` と、`bringup.launch.py` の `hardware` / `read_only` の既定値の計画（いずれも承認後）。
