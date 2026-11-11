@@ -39,6 +39,13 @@ struct Rig
   Rig()
   {
     for (int i = 0; i < 6; ++i) {servos.set_present(i + 1, kPresent[i]);}
+    // 実機の EEPROM は yaml のキャリブレーションと一致している（段階2c-1a: 不一致なら書き込みモードは拒否する）。
+    // 試験の homing_offset は正の値だけ（sign-magnitude でも同じ値）。
+    for (const auto & j : cal.joints) {
+      servos.set_eeprom(j.id, 31, j.eeprom.homing_offset, 2);
+      servos.set_eeprom(j.id, 9, j.eeprom.min_limit, 2);
+      servos.set_eeprom(j.id, 11, j.eeprom.max_limit, 2);
+    }
   }
 
   bool init(std::map<std::string, std::string> extra = {}, bool read_only = false)
@@ -351,6 +358,59 @@ TEST(ReadOnlyMode, MismatchOnlyWarnsAndNothingIsWritten)
   ASSERT_TRUE(r.init({}, true));
   ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
   ASSERT_EQ(r.activate(), CallbackReturn::SUCCESS);
+}
+
+// ---------------------------------------------------------------- EEPROM と yaml の不一致（段階2c-1a）
+// 書き込みモードは拒否する（トルクを ON にしない・何も書かない）。読み取り専用は WARN で継続する。
+TEST(WriteMode, RefusesWhenHomingOffsetDiffersFromYaml)
+{
+  Rig r;
+  r.servos.set_eeprom(3, 31, 123, 2);  // yaml は 122
+  ASSERT_TRUE(r.init());
+  EXPECT_EQ(r.configure(), CallbackReturn::ERROR);
+  EXPECT_TRUE(r.servos.writes().empty());
+}
+
+TEST(WriteMode, RefusesWhenMinOrMaxLimitDiffersFromYaml)
+{
+  Rig a;
+  a.servos.set_eeprom(1, 9, 744, 2);  // yaml は 743
+  ASSERT_TRUE(a.init());
+  EXPECT_EQ(a.configure(), CallbackReturn::ERROR);
+  EXPECT_TRUE(a.servos.writes().empty());
+
+  Rig b;
+  b.servos.set_eeprom(6, 11, 3386, 2);  // yaml は 3385
+  ASSERT_TRUE(b.init());
+  EXPECT_EQ(b.configure(), CallbackReturn::ERROR);
+  EXPECT_TRUE(b.servos.writes().empty());
+}
+
+TEST(WriteMode, CalibrationMismatchIsNotOverriddenByApplyServoConfig)
+{
+  Rig r;
+  r.servos.set_eeprom(3, 31, 123, 2);
+  ASSERT_TRUE(r.init({{"apply_servo_config", "true"}}));
+  EXPECT_EQ(r.configure(), CallbackReturn::ERROR);
+  EXPECT_TRUE(r.servos.writes().empty());
+}
+
+TEST(WriteMode, StartsWhenEepromMatchesYaml)
+{
+  Rig r;
+  ASSERT_TRUE(r.start());
+}
+
+TEST(ReadOnlyMode, CalibrationMismatchOnlyWarnsAndNothingIsWritten)
+{
+  Rig r;
+  r.servos.set_eeprom(3, 31, 123, 2);
+  r.servos.set_eeprom(1, 9, 744, 2);
+  r.servos.set_eeprom(6, 11, 3386, 2);
+  ASSERT_TRUE(r.init({}, true));
+  ASSERT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  ASSERT_EQ(r.activate(), CallbackReturn::SUCCESS);
+  EXPECT_TRUE(r.servos.writes().empty());
 }
 
 // ---------------------------------------------------------------- 終了の手順（トルク OFF → Lock=1）

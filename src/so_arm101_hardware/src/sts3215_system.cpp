@@ -197,6 +197,15 @@ bool Sts3215System::run_diagnostics()
     if (diff.str().empty()) {
       ++matched;
       RCLCPP_INFO(logger(), "%s: MATCH", line.str().c_str());
+    } else if (!read_only_) {
+      // 書き込みモード: 変換がずれたままトルクを ON にしない（途中で失敗したキャリブの残りなど）。
+      // 解除のスイッチは設けない。直すには restore で EEPROM を戻すか、yaml を実機に合わせる。
+      RCLCPP_ERROR(
+        logger(), "%s: MISMATCH%s -> refusing to start in write mode (torque is not enabled). "
+        "Restore the EEPROM from the backup (restore) or update the calibration yaml; "
+        "read-only mode (read_only:=true) still starts and only warns",
+        line.str().c_str(), diff.str().c_str());
+      fatal = true;
     } else {
       RCLCPP_WARN(
         logger(), "%s: MISMATCH%s -> 変換値が実機とずれる可能性。キャリブレーションを確認すること",

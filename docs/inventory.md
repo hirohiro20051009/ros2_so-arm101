@@ -1125,3 +1125,9 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - ユーザー指摘で直した 3 点: (1) `calibrate` を「測定（EEPROM に書かない。測定ファイルに保存）」と「適用（測定ファイルから `--write`）」に分けた。C2 は gripper だけ適用して yaml は更新せず、バックアップへ戻す。C3 は**同じ測定ファイル**で 6 関節（gripper を含む）を 1 回で適用し、yaml はそのとき 1 回だけ更新する。適用の前に今の EEPROM がバックアップと一致していることを確認する。(2) Lock は電源投入時に 1（実機で確認済み、上の「確定した事実」の表）。Lock=1 を確認できなかったときの対処は「サーボの電源を入れ直す」。(3) C3 で新座標の出発点の姿勢を測るとき、URDF の関節リミットまでの余裕（rad）も出し、範囲の外や余裕が小さい関節は C4 の前に報告する。
 - C0.5 で `--eeprom-wait-ms 0` などで読み戻しが一致しないと、失敗扱いで戻す処理が走り、終了コード 1 になる。想定どおり（手順書の合格基準に明記）。
 - 実機のコマンドとシリアルポートを開くコマンドは Claude は実行しない。
+
+## 段階2c-1a: 書き込みモードで EEPROM と yaml が不一致なら起動を拒否（2026-11-11）
+- 変更: `Sts3215System::run_diagnostics()`（`src/sts3215_system.cpp`）。`read_only:=false` のとき、Homing_Offset・Min/Max limit のどれかが yaml と違うと `RCLCPP_ERROR`（`refusing to start in write mode`、restore か yaml の更新を促す）を出して `fatal` にし、`on_configure` が ERROR を返す（トルクは ON にならず、何も書かない）。`apply_servo_config:=true` でも拒否は外れない。解除のスイッチなし。`read_only:=true` は従来どおり WARN で継続。
+- 試験（偽サーボ）: 追加 5 件（homing 不一致、min/max 不一致、apply_servo_config でも拒否、一致なら起動、読み取り専用は継続して書き込み 0 件）。試験の `Rig` は、偽サーボの EEPROM（Homing_Offset・Min/Max）を yaml の値に初期化するようにした（実機の状態と同じ。以前は 0 のままで、不一致を検査していなかった）。
+- 結果: `colcon build` 成功。`so_arm101_hardware` の `colcon test` は 84 件すべて通過。
+- 事実: `colcon test`（全体）で `apriltag_test`・`so_arm101_bringup`・`so_arm101_lerobot_bridge` に失敗（lint の copyright/flake8/pep257、pytest の収集エラー）。この変更を stash した状態でも同じ（106 件中 2 errors・14 failures）で、今回の変更とは無関係。未対応（段階の対象外）。
