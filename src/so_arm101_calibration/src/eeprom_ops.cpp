@@ -31,6 +31,18 @@ JointRegs read_joint_regs(Sts3215Bus & bus, uint8_t id, int retries)
   return j;
 }
 
+JointRegs read_joint_regs_confirmed(Sts3215Bus & bus, uint8_t id, int retries)
+{
+  // 独立に 2 回読み、2 回とも読めて同じ値のものだけを返す（古い応答が 1 回混ざっても「一致」にしない）
+  const JointRegs a = read_joint_regs(bus, id, retries);
+  const JointRegs b = read_joint_regs(bus, id, retries);
+  JointRegs j;
+  for (int i = 0; i < kNumCalibRegs; ++i) {
+    if (a.v[i] && b.v[i] && *a.v[i] == *b.v[i]) {j.v[i] = a.v[i];}
+  }
+  return j;
+}
+
 static Status read_u8_retry(Sts3215Bus & bus, uint8_t id, Register r, int retries, int * out)
 {
   Status s = Status::Ok;
@@ -65,12 +77,21 @@ StepResult write_calib_verified(CalibWriteBus & bus, uint8_t id, CalibReg r, uin
   }
   if (s != Status::Ok) {return {false, "write failed " + what + " [" + describe(bus, s) + "]"};}
   if (opt.wait_ms > 0) {std::this_thread::sleep_for(std::chrono::milliseconds(opt.wait_ms));}
+  // 読み戻しを独立に 2 回行い、2 回とも期待値のときだけ一致とする（古い応答が 1 回混ざっても、
+  // 実際の値が違うのに「一致」にならない。片方だけ一致は失敗＝呼び出し側が戻す）
   uint16_t back = 0;
   s = read_calib_reg(bus, id, r, opt.retries, &back);
   if (s != Status::Ok) {return {false, "read-back failed " + what + " [" + describe(bus, s) + "]"};}
   if (back != raw) {
     return {false, "read-back mismatch " + what + ": read " + std::to_string(back) + " after " +
            std::to_string(opt.wait_ms) + " ms (not retried)"};
+  }
+  uint16_t back2 = 0;
+  s = read_calib_reg(bus, id, r, opt.retries, &back2);
+  if (s != Status::Ok) {return {false, "second read-back failed " + what + " [" + describe(bus, s) + "]"};}
+  if (back2 != raw) {
+    return {false, "read-back mismatch " + what + ": the first read was " + std::to_string(back) +
+           " but the second read was " + std::to_string(back2) + " (the two reads must agree; not retried)"};
   }
   return {};
 }

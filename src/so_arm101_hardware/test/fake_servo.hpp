@@ -171,6 +171,13 @@ public:
     std::lock_guard<std::mutex> g(m_);
     drop_[{id, addr}] = count;
   }
+  /// (id, addr) への次の count 回の READ に、サーボの実際の値ではなく value（リトルエンディアン）を返す
+  /// （古い応答・化けた値が「正しいチェックサムの応答」として届く状況の再現。実際の値は変えない）。
+  void override_next_reads(uint8_t id, uint8_t addr, int count, int value)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    override_[{id, addr}] = {count, value};
+  }
   /// この ID は全ての応答の ERR バイトに値を入れる（0 で解除）。
   void set_err(uint8_t id, uint8_t err)
   {
@@ -457,6 +464,11 @@ private:
       if (!mem_.count(id)) {return;}
       apply_pending();
       for (int i = 0; i < len; ++i) {data.push_back(mem_[id][addr + i]);}
+      auto ov = override_.find({id, addr});
+      if (ov != override_.end() && ov->second.first > 0) {
+        --ov->second.first;
+        for (int i = 0; i < len; ++i) {data[i] = (ov->second.second >> (8 * i)) & 0xFF;}
+      }
       auto d = drop_.find({id, addr});
       if (d != drop_.end() && d->second > 0) {--d->second; return;}
       auto c = corrupt_.find({id, addr});
@@ -468,6 +480,7 @@ private:
   }
 
   std::vector<uint8_t> ids_;
+  std::map<std::pair<uint8_t, uint8_t>, std::pair<int, int>> override_;  // (id, addr) -> {残り回数, 値}
   std::map<uint8_t, int> reply_delay_us_;
   int frame_spacing_us_{0};
   int sync_slot_{0};

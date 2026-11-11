@@ -427,3 +427,53 @@ TEST(ProductionYaml, MatchesTheEepromReadAfterC3)
     EXPECT_EQ(e->raw(CalibReg::MaxPositionLimit), j.eeprom.max_limit) << j.name << " Max";
   }
 }
+
+// ---------------------------------------------------------------- 案 C: 読み戻しは独立に 2 回、2 回とも期待値のときだけ一致
+TEST(WriteVerified, ReadBackNeverMatchesOnAStaleReply)
+{
+  Rig r;
+  Options opt;
+  opt.wait_ms = 0;
+  const uint16_t before = static_cast<uint16_t>(r.servos.u16(1, 31));
+  const uint16_t neu = before + 7;
+  r.servos.ignore_writes_to(1, 31);                  // 書き込みは反映されない（実際の値は旧のまま）
+  r.servos.override_next_reads(1, 31, 1, neu);       // 1 回目の読み戻しだけ、新の値の「古い／化けた応答」が届く
+  const StepResult s = write_calib_verified(*r.bus, 1, CalibReg::HomingOffset, neu, opt);
+  EXPECT_FALSE(s.ok);
+  EXPECT_NE(s.msg.find("the two reads must agree"), std::string::npos) << s.msg;
+  EXPECT_EQ(r.servos.u16(1, 31), before);
+}
+
+TEST(WriteVerified, TwoAgreeingReadBacksPassAndCostExactlyTwoReads)
+{
+  Rig r;
+  Options opt;
+  opt.wait_ms = 0;
+  r.servos.set_u8(1, 55, 0);  // Lock=0（EEPROM に書ける）
+  const uint16_t neu = static_cast<uint16_t>(r.servos.u16(1, 31) + 7);
+  const auto before = r.servos.instruction_counts()[0x02];
+  const StepResult s = write_calib_verified(*r.bus, 1, CalibReg::HomingOffset, neu, opt);
+  EXPECT_TRUE(s.ok) << s.msg;
+  EXPECT_EQ(r.servos.u16(1, 31), neu);
+  EXPECT_EQ(r.servos.instruction_counts()[0x02] - before, 2u);
+}
+
+TEST(WriteVerified, SameValueRewriteStillPassesWithTwoReads)
+{
+  Rig r;  // --rewrite-same と同じ形: 同じ値を書く（旧も新も同じ）
+  Options opt;
+  opt.wait_ms = 0;
+  r.servos.set_u8(6, 55, 0);
+  const uint16_t same = static_cast<uint16_t>(r.servos.u16(6, 31));
+  EXPECT_TRUE(write_calib_verified(*r.bus, 6, CalibReg::HomingOffset, same, opt).ok);
+}
+
+TEST(WriteVerified, TheFinalStateTableShowsOnlyValuesThatTwoReadsAgreeOn)
+{
+  Rig r;
+  r.servos.override_next_reads(2, 9, 1, 1234);  // 1 回目だけ違う値 → 一致しない → 表示しない（nullopt）
+  const JointRegs j = read_joint_regs_confirmed(*r.bus, 2, 3);
+  EXPECT_FALSE(j.v[static_cast<int>(CalibReg::MinPositionLimit)].has_value());
+  EXPECT_TRUE(j.v[static_cast<int>(CalibReg::HomingOffset)].has_value());
+  EXPECT_TRUE(j.v[static_cast<int>(CalibReg::MaxPositionLimit)].has_value());
+}

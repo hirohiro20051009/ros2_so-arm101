@@ -2,7 +2,7 @@
 
 対象: `so_arm101_calib`（`so_arm101_calibration` パッケージ）。計画は `docs/stage2c_plan.md`。
 **実行するのはユーザーだけ**（Claude は実機を動かさない。EEPROM の読み出しもシリアルポートを開くので、実行しない）。
-C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測定 2 回。旧版は実施済み。改善したツールで C1c としてやり直す）→ 判断 → C2（gripper に適用して戻す）→ C3（全関節に適用）。C4（書き込みモードでの W 系の再確認）は C3 合格後に、`feetech_write_check.md` を直してから行う。**前の段階が合格するまで次へ進まない。**
+C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測定 2 回。旧版は実施済み。改善したツールで C1c としてやり直す）→ 判断 → C2（gripper に適用して戻す）→ C3（全関節に適用）。**C0.6**（読み戻しを 2 回一致にした `restore`/`apply` の確認。バス層の修正 案 C。C3 の後、C4 の前に 1 回）。C4（書き込みモードでの W 系の再確認）は C3 合格後に、`feetech_write_check.md` を直してから行う。**前の段階が合格するまで次へ進まない。**
 
 ## 共通の約束
 1. **ros2_control（launch）を止めてから使う**（シリアルポートを占有する）。実行前に確認:
@@ -93,6 +93,41 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 ### 報告してほしいもの
 - `calib_C05_dryrun.log`、実行した回の `calib_C05_w<W>.log` と `calib_C05_after_w<W>.log`（W は 50・20・10・5・0 のうち実行したもの）、`calib_C05_final.log`（全部通ったとき）、各ログの `exit=` の値。
 - 失敗して止めた場合は、その待ち時間（それより短い値は試していないこと）。
+
+## C0.6: 読み戻しを 2 回一致にした `restore`/`apply` の実機確認（バス層の修正 案 C。gripper だけ、同じ値。C0.5 と同じ形）
+**EEPROM に書く操作。新しいコードで実機に書く最初の機会なので、実行する前に、Claude に「これから C0.6 を実行する」と伝え、確認を得てから行う（Claude は実行しない）。** 前提: C0.5 が合格済み（実施済み）、`colcon build` 済み、バックアップがある、ros2_control を止めてある（共通の約束 1）。
+
+変わったこと: `write_calib_verified`（`apply`/`restore` が使う）は、書いた後の読み戻しを**独立に 2 回**行い、**2 回とも期待値のときだけ**一致とする（片方だけ一致は失敗＝今までどおり戻す／Lock=1 に戻す）。最終の状態表（`書き込み後の状態`）も、2 回読んで同じ値のものだけを表示する（違う・読めないものは `(read failed)`）。書き込みの回数・順序・待ち時間（既定 50 ms）は変わらない。読み取りの回数が増えるので、1 項目あたり数 ms 長くなる。
+
+目的: 実機で、(1) 2 回読んでも一致する（古い応答・化けで失敗しない）、(2) 終了コード 0 と `Lock: 1` が従来どおり、(3) 所要時間が大きく伸びない、の確認。**書く値はバックアップと同じ値なので、値は変わらない。腕は動かない（トルクに触れない）。**
+
+### 手順（`<日時>` は C0.5 と同じバックアップのファイル名）
+1. dry-run（何も書かない）:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --joints gripper --rewrite-same --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_dryrun.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+2. 書き込み（既定の待ち 50 ms。確認文字列を求められたら `WRITE-EEPROM`）。所要時間も取る:
+   ```bash
+   time ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --joints gripper --rewrite-same --write --port /dev/ttyACM0 \
+     2>&1 | tee -i ~/so_arm101_check/calib_C06_w50.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+3. 状態の確認（C0 の dry-run。`--joints` なし、`--rewrite-same` なし）:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_after.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+4. 手順 2・3 をもう 1 回（待ち 0 ms: `--eeprom-wait-ms 0` を足す。ログ名 `calib_C06_w0.log`・`calib_C06_after_w0.log`）。**0 ms は、C0.5 で「失敗しなかった」記録がある値。失敗しても不合格ではない**（待ちが短すぎる測定結果として報告し、そこで止める）。
+
+### 合格基準
+- 手順 2 が exit=0、`OK: バックアップの値に戻り、Lock=1 を確認した`、`gripper Lock: 1`、`書き込み後の状態` の gripper の 3 項目が `[バックアップ=実行前]`。`bus:` の行は**出ない**（失敗したときだけ出る）。
+- 手順 3 が exit=0、全レジスタ「同じ（書かない）」、`注意: ... アドレス n がバックアップと違う` なし。
+- 所要時間が C0.5 の同じ待ち時間の回と大きく違わない（目安: 数百 ms 以内の増加）。
+- 失敗した場合（exit=0 でない）: `read-back mismatch ... the first read was … but the second read was …`（2 回が一致しない）が出たら、**そのメッセージと `bus:` の行を全部報告する**（古い応答・化けの実機での初めての観測の可能性）。以降の手順（C1c、C4）へ進まず、「失敗したとき」に従う。
+
+### 報告してほしいもの
+- `calib_C06_dryrun.log`、`calib_C06_w50.log`（`time` の出力を含む）、`calib_C06_after.log`、実施したときは `calib_C06_w0.log`・`calib_C06_after_w0.log`、各ログの `exit=`。
 
 ## C1c: 測定を 2 回（改善したツールでの、2 回ともやり直し。EEPROM には書かない。Lock にも触れない）
 最初の C1（旧版のツール）は実施済み（2026-11-11）。結果は `docs/inventory.md`。**旧版で測った `measure_C1_1.json`・`measure_C1_2.json` は、書き込みに使わない**（`apply` が「旧形式」として拒否する。`compare` では読める）。

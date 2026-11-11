@@ -1592,3 +1592,13 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - 試験（偽サーボ）: 健全なバスでは全部 0（50 回の SYNC_READ）、競合の後の `drained_bytes` が残りの応答のバイト数と一致（5 フレーム × 8 = 40）、A を止める（`drain_quiet=0`）と競合が `id_mismatch`/`answered_first` に出る、後ろの ID が先に返ると `answered_first=1`（`id_mismatch=0`）、タイムアウトの後に遅れて着いた応答が次の要求の前の `flushed_requests`・`flushed_bytes`（8 バイト）に出る、`measure` の `記録:` の後に `bus:` の行が出て健全なら `drained_bytes=0 id_mismatch=0 answered_first=0`、`apply` は成功のとき出ず失敗のときだけ出る。偽サーボでのドライバの `deactivated.` の行の実物: `... startup_read_retries=0 bus: flushed_requests=0 flushed_bytes=0 drained_bytes=0 id_mismatch=0 answered_first=0 timeouts=0 bad_checksum=0`。
 - 確認: `colcon test`: `so_arm101_hardware` 99 件、`so_arm101_calibration` 67 件、失敗 0。
 - 手順書: `docs/feetech_write_check.md` の「ログの読み方」に `bus:` の行（健全なら 0 の項目、0 でないときの報告、`flushed_before_request` による切り分け）を追記。`docs/so_arm101_calibration_check.md` の `記録:` の説明に `bus:` の行を追記。C4 の手順書の全体は、段階5の前（案 C の後）に直す。
+
+## バス層の修正 段階4: 案 C（EEPROM の書き込みの読み戻しを、独立に 2 回とも期待値のときだけ一致）（2026-11-11。偽サーボのみ。**実機の書き込みはしていない**）
+- 変更（`so_arm101_calib` の書き込みの動作が変わる）:
+  - `write_calib_verified`（`apply`/`restore` が使う）: 待った後の読み戻しを独立に 2 回行い、2 回とも期待値のときだけ一致。1 回目が違えば従来どおり `read-back mismatch`、1 回目が一致で 2 回目が違えば `read-back mismatch … the first read was … but the second read was … (the two reads must agree; not retried)`。どちらも再試行せず、呼び出し側が従来どおり戻す（`apply`）／Lock=1 に戻す（`restore`）。通信エラーは従来どおり 1 回の読み取りごとに最大 `retries` 回再試行。
+  - 最終の状態表（`apply` の「書き込み後の状態」、`restore` の「書き込み後の状態」）は `read_joint_regs_confirmed`（独立に 2 回読み、2 回とも読めて同じ値のレジスタだけを表示。違う・読めないものは `(read failed)` 側）。`backup` は従来から 2 回読んでいる（変更なし）。
+  - ドライバ側（`verify_reg`）は変えていない（計画書 5 章の結論どおり。A・B で足りる）。書き込みの順序・回数・待ち時間・`apply`/`restore` の手順は変えていない。読み取りが、書き込み 1 項目につき 1 回増える。
+- 偽サーボの道具: `override_next_reads(id, addr, count, value)`（次の count 回の READ に実際の値でなく value を返す。古い／化けた応答が「正しいチェックサムの応答」で届く状況の再現）。
+- 試験: `WriteVerified.ReadBackNeverMatchesOnAStaleReply`（書き込みは反映されず実際の値は旧のまま、1 回目の読み戻しだけ新の値が届く → **失敗になる**。C が無ければ「一致」になっていた）、`TwoAgreeingReadBacksPassAndCostExactlyTwoReads`（正常なら成功し、読み取りは正確に 2 回）、`SameValueRewriteStillPassesWithTwoReads`（`--rewrite-same` の形）、`TheFinalStateTableShowsOnlyValuesThatTwoReadsAgreeOn`。既存の `apply`/`restore` の試験（失敗時の巻き戻し、通信エラーの再試行など）は変更なしで通る。
+- 実機の確認手順: `docs/so_arm101_calibration_check.md` に **C0.6** を追加（gripper への `--rewrite-same`、C0.5 と同じ形。待ち 50 ms と 0 ms、dry-run → 書き込み → 状態確認。合格基準と、失敗時に報告するもの）。**新しいコードで実機に書き込む前に、ユーザーの確認を取る（Claude は実行しない。まだ実施していない）**。
+- 確認: `colcon test`: `so_arm101_hardware` 99 件、`so_arm101_calibration` 71 件、失敗 0。

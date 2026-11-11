@@ -170,7 +170,7 @@ static int run_restore_impl(
   bool all_target = true, all_before = true;
   for (const auto & e : entries) {
     const auto * b = a.backup.find(e.id);
-    const JointRegs now = read_joint_regs(bus, e.id, a.opt.retries);
+    const JointRegs now = read_joint_regs_confirmed(bus, e.id, a.opt.retries);
     for (int i = 0; i < kNumCalibRegs; ++i) {
       const CalibReg r = static_cast<CalibReg>(i);
       const std::string c = classify(now.v[i], *e.before.v[i], b->raw(r));

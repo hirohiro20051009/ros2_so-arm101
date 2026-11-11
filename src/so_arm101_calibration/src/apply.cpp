@@ -276,7 +276,7 @@ static int run_apply_impl(
   out << "\n== 書き込み後の状態（旧 = バックアップの値、新 = 測定ファイルの値）\n";
   bool all_target = true, all_before = true;
   for (const auto & p : plans) {
-    const JointRegs now = read_joint_regs(bus, p.id, a.opt.retries);
+    const JointRegs now = read_joint_regs_confirmed(bus, p.id, a.opt.retries);
     for (int i = 0; i < kNumCalibRegs; ++i) {
       const std::string c = classify(now.v[i], p.old_[i], p.neu[i]);
       all_target = all_target && (c == "target" || c == "same");

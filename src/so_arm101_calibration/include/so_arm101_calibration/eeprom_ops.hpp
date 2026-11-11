@@ -51,6 +51,8 @@ struct JointRegs
 so_arm101_hardware::Status read_calib_reg(
   so_arm101_hardware::Sts3215Bus & bus, uint8_t id, CalibReg r, int retries, uint16_t * out);
 JointRegs read_joint_regs(so_arm101_hardware::Sts3215Bus & bus, uint8_t id, int retries);
+/// 独立に 2 回読み、2 回とも読めて同じ値のレジスタだけを返す（違う・読めないものは nullopt）。最終の状態表用。
+JointRegs read_joint_regs_confirmed(so_arm101_hardware::Sts3215Bus & bus, uint8_t id, int retries);
 /// Lock の現在値（読めなければ -1）。
 int read_lock(so_arm101_hardware::Sts3215Bus & bus, uint8_t id, int retries);
 
