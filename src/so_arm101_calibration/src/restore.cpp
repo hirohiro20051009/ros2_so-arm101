@@ -36,7 +36,7 @@ std::string join_ids(const std::vector<uint8_t> & ids, const std::vector<JointId
 }
 }  // namespace
 
-int run_restore(
+static int run_restore_impl(
   CalibWriteBus & bus, const RestoreArgs & a, const std::function<bool()> & confirm, std::ostream & out)
 {
   std::vector<uint8_t> sel = a.selected;
@@ -198,6 +198,15 @@ int run_restore(
   out << "  やり直すには（ros2_control を止めたまま）:\n    so_arm101_calib restore --backup " << a.backup_path
       << " --write\n  yaml は更新していない。この状態で書き込みモード（read_only:=false）の launch を起動しない\n";
   return (all_before && lock_unconfirmed.empty()) ? kExitFailedAllOld : kExitPartial;
+}
+
+/// 失敗（終了コードが ExitOk 以外）のとき、バス層のカウンタを 1 行出す（古い応答の取り違え・化けの切り分け用）。
+int run_restore(
+  CalibWriteBus & bus, const RestoreArgs & args, const std::function<bool()> & confirm, std::ostream & out)
+{
+  const int code = run_restore_impl(bus, args, confirm, out);
+  if (code != kExitOk) {out << bus.counters().to_string() << "\n";}
+  return code;
 }
 
 }  // namespace so_arm101_calibration

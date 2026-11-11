@@ -43,6 +43,14 @@ bool encode_sign_magnitude(int v, int sign_bit, uint16_t * encoded)
   return true;
 }
 
+std::string BusCounters::to_string() const
+{
+  return "bus: flushed_requests=" + std::to_string(flushed_requests) + " flushed_bytes=" +
+         std::to_string(flushed_bytes) + " drained_bytes=" + std::to_string(drained_bytes) + " id_mismatch=" +
+         std::to_string(id_mismatch) + " answered_first=" + std::to_string(answered_first) + " timeouts=" +
+         std::to_string(timeouts) + " bad_checksum=" + std::to_string(bad_checksum);
+}
+
 std::string describe_servo_error(uint8_t err)
 {
   static const char * names[] = {"voltage", "sensor", "temperature", "current", "angle", "overload"};
@@ -98,6 +106,10 @@ static std::string hex_bytes(const std::vector<uint8_t> & v)
 void Sts3215Bus::begin_request(const std::vector<uint8_t> & req)
 {
   flushed_before_request_ = port_.flush_input();
+  if (flushed_before_request_ > 0) {
+    ++counters_.flushed_requests;
+    counters_.flushed_bytes += flushed_before_request_;
+  }
   last_request_ = req;
   rx_bytes_.clear();
 }
@@ -111,6 +123,9 @@ Status Sts3215Bus::fail(Status s, const std::string & msg)
       " flushed_before_request=" + std::to_string(flushed_before_request_) + "]";
   }
   last_servo_error_ = 0;
+  if (s == Status::Timeout) {++counters_.timeouts;}
+  if (s == Status::BadChecksum) {++counters_.bad_checksum;}
+  if (s == Status::IdMismatch) {++counters_.id_mismatch;}
   if (!defer_settle_) {
     // 次の要求で再同期できるように。通信エラー・ID 違いのときは、これから届く古い応答（SYNC_READ の残りなど）を
     // 待って捨てる（捨てた「後」に届いて、次の読み取りに入るのを防ぐ）。それ以外は捨てるだけ。
@@ -124,9 +139,9 @@ Status Sts3215Bus::fail(Status s, const std::string & msg)
 void Sts3215Bus::settle(std::chrono::microseconds quiet)
 {
   if (quiet.count() > 0) {
-    port_.drain_until_quiet(quiet, drain_max_);
+    counters_.drained_bytes += port_.drain_until_quiet(quiet, drain_max_);
   } else {
-    port_.flush_input();
+    counters_.drained_bytes += port_.flush_input();
   }
 }
 
@@ -136,13 +151,18 @@ bool Sts3215Bus::discard_frame(std::chrono::microseconds timeout)
   int ff = 0, junk = 0;
   while (ff < 2) {
     if (port_.read_exact(&b, 1, timeout) != 1) {return false;}
+    ++counters_.drained_bytes;
     if (b == 0xFF) {++ff;} else {ff = 0; if (++junk > kMaxJunkBytes) {return false;}}
   }
   uint8_t head[2];
-  if (port_.read_exact(head, 2, timeout) != 2) {return false;}
+  const size_t got_head = port_.read_exact(head, 2, timeout);
+  counters_.drained_bytes += got_head;
+  if (got_head != 2) {return false;}
   if (head[1] < 2 || head[1] > 250) {return false;}
   uint8_t rest[256];
-  return port_.read_exact(rest, head[1], timeout) == head[1];
+  const size_t got_rest = port_.read_exact(rest, head[1], timeout);
+  counters_.drained_bytes += got_rest;
+  return got_rest == head[1];
 }
 
 Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vector<uint8_t> * data)
@@ -266,6 +286,8 @@ Status Sts3215Bus::sync_read(
         last_error_ = "no answer from id " + std::to_string(ids[i]) + " (id " +
           std::to_string(last_rx_id_) + " answered first)";
         s = Status::Timeout;
+        --counters_.id_mismatch;  // 呼び出し側には Timeout として返す（読み替えた回数は別に数える）
+        ++counters_.answered_first;
         consumed_upto = static_cast<size_t>(later - ids.begin());
       }
     }

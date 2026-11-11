@@ -204,3 +204,75 @@ TEST(BusStale, HealthyReadsAreNotSlowedByTheDrain)
   printf("[healthy] 300 sync_reads: drain_quiet=0 %.1f ms, drain_quiet=2ms %.1f ms\n", off, on);
   EXPECT_LT(on, off * 1.5 + 20.0);
 }
+
+// ---- 診断カウンタ（案 D）
+TEST(BusCounters, AHealthyBusHasZeroDrainedBytesAndZeroMismatches)
+{
+  Env e;
+  std::vector<std::vector<uint8_t>> out;
+  for (int i = 0; i < 50; ++i) {ASSERT_EQ(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::Ok);}
+  const auto & c = e.bus->counters();
+  EXPECT_EQ(c.drained_bytes, 0u);
+  EXPECT_EQ(c.id_mismatch, 0u);
+  EXPECT_EQ(c.answered_first, 0u);
+  EXPECT_EQ(c.timeouts, 0u);
+  EXPECT_EQ(c.bad_checksum, 0u);
+  EXPECT_EQ(c.flushed_bytes, 0u);
+  EXPECT_EQ(c.to_string(),
+    "bus: flushed_requests=0 flushed_bytes=0 drained_bytes=0 id_mismatch=0 answered_first=0 timeouts=0 bad_checksum=0");
+}
+
+TEST(BusCounters, DrainedBytesEqualTheRemainingRepliesAfterAFailedSyncRead)
+{
+  Env e;
+  e.arm_race();
+  std::vector<std::vector<uint8_t>> out;
+  ASSERT_EQ(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::BadChecksum);
+  ASSERT_EQ(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::Ok);
+  const auto & c = e.bus->counters();
+  EXPECT_EQ(c.bad_checksum, 1u);
+  EXPECT_EQ(c.drained_bytes, 5u * 8u);  // id 2〜6 の 5 フレーム × 8 バイト（FF FF ID LEN ERR D0 D1 CHK）
+  EXPECT_EQ(c.id_mismatch, 0u);
+  EXPECT_EQ(c.answered_first, 0u);
+}
+
+TEST(BusCounters, WithoutTheFixTheRaceShowsUpInIdMismatchOrAnsweredFirst)
+{
+  Env e;
+  e.bus->set_drain_quiet(std::chrono::microseconds(0));
+  e.arm_race();
+  std::vector<std::vector<uint8_t>> out;
+  ASSERT_EQ(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::BadChecksum);
+  EXPECT_NE(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::Ok);
+  const auto & c = e.bus->counters();
+  EXPECT_GT(c.id_mismatch + c.answered_first, 0u);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
+TEST(BusCounters, AnsweredFirstIsCountedAsNotAnIdMismatch)
+{
+  Env e;
+  e.servos.drop_read_replies(1, 56, 1);  // id 1 は応答しない。id 2 が先に返る
+  std::vector<std::vector<uint8_t>> out;
+  ASSERT_EQ(e.bus->sync_read(kIds, reg::kPresentPosition, &out), Status::Timeout);
+  const auto & c = e.bus->counters();
+  EXPECT_EQ(c.answered_first, 1u);
+  EXPECT_EQ(c.id_mismatch, 0u);
+  EXPECT_EQ(c.drained_bytes, 4u * 8u);  // id 3〜6 の残り（id 2 は読み替えで使った）
+}
+
+TEST(BusCounters, StaleBytesBeforeARequestAreCountedAsFlushed)
+{
+  Env e;
+  e.servos.set_reply_delay_us(1, 0);
+  std::vector<uint8_t> d;
+  // 応答のタイムアウト（2 ms）より遅れて着く応答は、次の要求の前の flush に入る
+  Sts3215Bus fast(e.port, std::chrono::milliseconds(2));
+  e.servos.delay_next_replies(1, 56, 1, 5000);
+  ASSERT_EQ(fast.read(1, reg::kPresentPosition, &d), Status::Timeout);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  ASSERT_EQ(fast.read(1, reg::kPresentPosition, &d), Status::Ok);
+  EXPECT_EQ(fast.counters().flushed_requests, 1u);
+  EXPECT_EQ(fast.counters().flushed_bytes, 8u);
+  EXPECT_EQ(fast.counters().timeouts, 1u);
+}

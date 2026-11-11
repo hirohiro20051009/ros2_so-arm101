@@ -88,6 +88,21 @@ int decode_sign_magnitude(uint16_t encoded, int sign_bit);
 /// decode の逆。|v| が sign_bit ビットに入らなければ false。
 bool encode_sign_magnitude(int v, int sign_bit, uint16_t * encoded);
 
+/// バス層の診断カウンタ（健全なバスでは drained_bytes・id_mismatch・answered_first は 0。修正の効果と、
+/// `checksum mismatch` の切り分け（要求の前に古いバイトがあったか）をログで見るためのもの）。
+struct BusCounters
+{
+  unsigned long flushed_requests{0};  // 要求の直前に、古いバイトがあって捨てた回数
+  unsigned long flushed_bytes{0};     // その合計バイト数
+  unsigned long drained_bytes{0};     // 失敗の後始末（残りの応答の読み捨て・静かになるまで待って捨てる・捨てるだけ）で捨てた合計バイト数
+  unsigned long id_mismatch{0};       // 呼び出し側に IdMismatch を返した回数
+  unsigned long answered_first{0};    // SYNC_READ で、後ろの ID が先に返ったので Timeout に読み替えた回数
+  unsigned long timeouts{0};
+  unsigned long bad_checksum{0};
+  /// "bus: flushed_requests=… flushed_bytes=… drained_bytes=… id_mismatch=… answered_first=… timeouts=… bad_checksum=…"
+  std::string to_string() const;
+};
+
 class Sts3215Bus
 {
 public:
@@ -112,6 +127,8 @@ public:
   /// SYNC_READ の残りの応答を読み切る処理も止める）。既定 2 ms。コードの既定値で持つ。
   void set_drain_quiet(std::chrono::microseconds quiet) {drain_quiet_ = quiet;}
   std::chrono::microseconds drain_quiet() const {return drain_quiet_;}
+
+  const BusCounters & counters() const {return counters_;}
 
   /// 直近の失敗の説明（ログ用）。
   const std::string & last_error() const {return last_error_;}
@@ -145,6 +162,7 @@ protected:
   std::chrono::microseconds timeout_;
   std::chrono::microseconds drain_quiet_{2000};   // 失敗の後に「静か」と見なす時間
   std::chrono::microseconds drain_max_{10000};    // 失敗の後始末の全体の上限（1 つの応答のタイムアウトと同じ）
+  BusCounters counters_;
   bool defer_settle_{false};  // SYNC_READ の途中: fail() は後始末をせず、sync_read が最後にまとめて行う
   std::string last_error_;
   int last_rx_id_{-1};  // 直近に受信したパケットの ID（IdMismatch の分類用）

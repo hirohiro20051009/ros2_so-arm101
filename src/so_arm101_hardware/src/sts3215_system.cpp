@@ -392,15 +392,16 @@ hardware_interface::CallbackReturn Sts3215System::on_deactivate(const rclcpp_lif
   invalidate_state();
   if (read_only_) {
     RCLCPP_INFO(
-      logger(), "deactivated (no register was written). reads=%lu retried=%lu failed_cycles=%lu", reads_,
-      retried_, failed_cycles_);
+      logger(), "deactivated (no register was written). reads=%lu retried=%lu failed_cycles=%lu %s", reads_,
+      retried_, failed_cycles_, bus_ ? bus_->counters().to_string().c_str() : "bus: n/a");
   } else {
     unsigned long limited = 0;
     for (auto v : limited_count_) {limited += v;}
     RCLCPP_INFO(
       logger(), "deactivated. reads=%lu retried=%lu failed_cycles=%lu goal_writes=%lu monitors=%lu "
-      "rate_limited=%lu port_contention=%lu startup_read_retries=%lu", reads_, retried_, failed_cycles_,
-      goal_writes_, monitors_, limited, port_.contention_count(), startup_retries_);
+      "rate_limited=%lu port_contention=%lu startup_read_retries=%lu %s", reads_, retried_, failed_cycles_,
+      goal_writes_, monitors_, limited, port_.contention_count(), startup_retries_,
+      bus_ ? bus_->counters().to_string().c_str() : "bus: n/a");
   }
   return hardware_interface::CallbackReturn::SUCCESS;
 }

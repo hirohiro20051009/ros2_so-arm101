@@ -199,6 +199,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `read of X failed (...); retrying n/2`（WARN） | 起動の読み戻しの通信エラー（checksum mismatch・フレーム不良・タイムアウト）。`[tx=… rx=… flushed_before_request=…]` に送った要求と受信したバイトが出る。再試行で直れば起動は続く | 行を全部報告。`startup_read_retries` の数も見る |
 | `cannot read back X (...)`、直前に `retrying` が 2 回 | 3 回とも通信エラー。トルクは ON にならない | 報告。`[activation failed] torque OFF and Lock=1 confirmed` を確認 |
 | `ros2_control_node` が exit code -6、直前に `terminate called after throwing an instance of 'std::runtime_error'` / `Failed to set the initial state of the component ... to active` | 起動に失敗したとき、controller_manager（Humble）が例外で終了する。Humble の仕様 | `[activation failed] torque OFF and Lock=1 confirmed (read back) on all joints` の行があれば安全面の問題はない。その行が無ければサーボの電源を切る |
+| `deactivated. ... bus: flushed_requests=… flushed_bytes=… drained_bytes=… id_mismatch=… answered_first=… timeouts=… bad_checksum=…`（バス層の診断。読み取り専用の `deactivated (no register was written)` の行にも出る） | `drained_bytes`・`id_mismatch`・`answered_first` は、**健全なバスでは 0**（通信エラーの後に、古い応答を捨てた／取り違えた数）。`flushed_requests`・`flushed_bytes` は、要求の直前に古いバイトがあって捨てた回数と量（0 が望ましい）。`timeouts`・`bad_checksum` は通信エラーの数（`retried` と対応）。0 でなければ、その数と、直前の WARN の `[tx=… rx=… flushed_before_request=…]` を報告する。切り分け: `checksum mismatch` のとき `flushed_before_request>0` なら要求の前に古いバイトがあった、0 なら配線・USB の化け | 報告。原因の比較は `drain_quiet_ms:=0`（従来の「捨てるだけ」）で行う（C4 の手順 6） |
 | `[deactivate] ... could NOT confirm ...` | 終了でトルク OFF／Lock=1 を確認できなかった | 腕を支えてサーボの電源を切る |
 
 ## 報告してほしいもの（段階ごと）

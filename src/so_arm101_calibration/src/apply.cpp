@@ -124,7 +124,7 @@ bool update_calibration_yaml(const std::string & yaml_path, const std::string & 
   return true;
 }
 
-int run_apply(
+static int run_apply_impl(
   CalibWriteBus & bus, const ApplyArgs & a, const std::function<bool()> & confirm, std::ostream & out)
 {
   std::vector<uint8_t> sel = a.selected;
@@ -332,6 +332,15 @@ int run_apply(
       << " --write\n  yaml は更新していない。この状態で書き込みモード（read_only:=false）の launch を起動しない"
          "（EEPROM と yaml が違えば起動を拒否する）\n";
   return (all_before && lock_unconfirmed.empty()) ? kExitFailedAllOld : kExitPartial;
+}
+
+/// 失敗（終了コードが ExitOk 以外）のとき、バス層のカウンタを 1 行出す（古い応答の取り違え・化けの切り分け用）。
+int run_apply(
+  CalibWriteBus & bus, const ApplyArgs & args, const std::function<bool()> & confirm, std::ostream & out)
+{
+  const int code = run_apply_impl(bus, args, confirm, out);
+  if (code != kExitOk) {out << bus.counters().to_string() << "\n";}
+  return code;
 }
 
 }  // namespace so_arm101_calibration

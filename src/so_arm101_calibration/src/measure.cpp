@@ -525,7 +525,8 @@ int run_measure(
   for (const auto & row : format_live_table(last)) {out << row << "\n";}
   out << std::fixed << std::setprecision(1) << "\n記録: 読み取り " << st.ticks << " 回（失敗 " << st.read_failures
       << " 回）、間隔 平均 " << st.mean_interval_ms << " ms / 最大 " << st.max_interval_ms << " ms、表示 " << st.live_frames
-      << " 回（合計 " << st.live_total_ms << " ms、最大 " << st.live_max_ms << " ms）\n";
+      << " 回（合計 " << st.live_total_ms << " ms、最大 " << st.live_max_ms << " ms）\n"
+      << "      " << bus.counters().to_string() << "\n";
   // 5. 結果
   MeasureFile m;
   m.created = now_string(false);

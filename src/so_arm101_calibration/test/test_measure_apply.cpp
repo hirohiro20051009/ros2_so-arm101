@@ -303,6 +303,18 @@ TEST(Measure, CommErrorsWhileRecordingAreToleratedWithDelayedReplies)
   EXPECT_EQ(ms.run(&m, &text), kExitOk) << text;
 }
 
+TEST(Measure, RecordLineShowsTheBusCounters)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  EXPECT_NE(text.find("bus: flushed_requests="), std::string::npos) << text;
+  // 健全なバス（偽サーボ）では、捨てたバイト・ID 違いは 0
+  EXPECT_NE(text.find("drained_bytes=0 id_mismatch=0 answered_first=0"), std::string::npos) << text;
+}
+
 TEST(Measure, RefusesWhenAServoDoesNotAnswerOrIsNotAnSts3215)
 {
   Rig r;
@@ -866,6 +878,14 @@ TEST(Compare, AnOldFormatFileIsReadWithAWarning)
 }
 
 // ---------------------------------------------------------------- apply
+TEST(Apply, TheBusCountersAreNotPrintedWhenEverythingSucceeds)
+{
+  ApplyRig t;
+  std::string text;
+  EXPECT_EQ(t.run(t.args(), &text), kExitOk) << text;
+  EXPECT_EQ(text.find("bus: flushed_requests="), std::string::npos) << text;
+}
+
 TEST(Apply, DryRunAndRefusedConfirmationWriteNothing)
 {
   ApplyRig t;
@@ -1012,6 +1032,7 @@ TEST(Apply, AFailureHalfwayRollsBackEveryJointWrittenInThisRun)
   t.r.servos.ignore_writes_to(3, 11);  // elbow_flex の Max が反映されない → 読み戻し不一致
   std::string text;
   EXPECT_EQ(t.run(t.args(), &text), kExitFailedAllOld) << text;
+  EXPECT_NE(text.find("bus: flushed_requests="), std::string::npos) << text;  // 失敗のときだけ、バス層のカウンタを出す
   EXPECT_TRUE(t.eeprom_is_backup());
   EXPECT_EQ(t.yaml_text(), before);
   for (int id = 1; id <= 6; ++id) {EXPECT_EQ(t.r.servos.u8(id, 55), 1) << id;}

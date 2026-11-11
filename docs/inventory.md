@@ -1585,3 +1585,10 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
   - 読み方（事実）: **周期に間に合わなくなる回数は、新旧で同じ**（全サーボが黙る本物のタイムアウト 2 回は、従来から 20 ms を超える。待ちを足していない）。競合では、従来は毎回失敗していたのが、新は毎回成功する代わりに 5〜9 ms かかる（20 ms の中）。失敗していないサイクルの `update` は影響なし。
   - 注意（**[推測]**）: 偽サーボは遅れの時間・間隔を模したもので、実機の USB の遅れ（数 ms の可能性）は未測定。実機の確認（7 章）で、`bus:` の行と `drain_quiet_ms:=0` との比較で見る。
 - 確認: `colcon build`、`colcon test --packages-select so_arm101_hardware so_arm101_calibration`: **`so_arm101_hardware` 94 件、`so_arm101_calibration` 65 件（gtest の xml の合計）、失敗 0**。`test_measure_apply` 全体の単独実行 15 回連続: 失敗 0（前回は 15 回中 3 回）。
+
+## バス層の修正 段階3: 案 D（診断カウンタとログの行）（2026-11-11。偽サーボのみ）
+- 変更: `BusCounters`（`flushed_requests`・`flushed_bytes`・`drained_bytes`・`id_mismatch`・`answered_first`・`timeouts`・`bad_checksum`）を `Sts3215Bus` に持たせ、`counters()` で参照、`to_string()` で `bus: flushed_requests=… …` の 1 行にした。数え方: `id_mismatch` は呼び出し側に `IdMismatch` を返した数（SYNC_READ で後ろの ID が先に返って `Timeout` に読み替えたものは `answered_first` に数え、`id_mismatch` からは引く）。`drained_bytes` は失敗の後始末（残りの応答の読み捨て・静かになるまで待って捨てる・`drain_quiet_ms=0` のときの捨てるだけ）で捨てた合計。
+- 出力: ドライバの `deactivated.` の行（書き込みモード・読み取り専用の両方）の末尾、`measure` の `記録:` の次の行、`apply`/`restore` の**失敗したとき（終了コードが 0 以外）だけ**の終わりの行。書式は 1 行で同じ。
+- 試験（偽サーボ）: 健全なバスでは全部 0（50 回の SYNC_READ）、競合の後の `drained_bytes` が残りの応答のバイト数と一致（5 フレーム × 8 = 40）、A を止める（`drain_quiet=0`）と競合が `id_mismatch`/`answered_first` に出る、後ろの ID が先に返ると `answered_first=1`（`id_mismatch=0`）、タイムアウトの後に遅れて着いた応答が次の要求の前の `flushed_requests`・`flushed_bytes`（8 バイト）に出る、`measure` の `記録:` の後に `bus:` の行が出て健全なら `drained_bytes=0 id_mismatch=0 answered_first=0`、`apply` は成功のとき出ず失敗のときだけ出る。偽サーボでのドライバの `deactivated.` の行の実物: `... startup_read_retries=0 bus: flushed_requests=0 flushed_bytes=0 drained_bytes=0 id_mismatch=0 answered_first=0 timeouts=0 bad_checksum=0`。
+- 確認: `colcon test`: `so_arm101_hardware` 99 件、`so_arm101_calibration` 67 件、失敗 0。
+- 手順書: `docs/feetech_write_check.md` の「ログの読み方」に `bus:` の行（健全なら 0 の項目、0 でないときの報告、`flushed_before_request` による切り分け）を追記。`docs/so_arm101_calibration_check.md` の `記録:` の説明に `bus:` の行を追記。C4 の手順書の全体は、段階5の前（案 C の後）に直す。
