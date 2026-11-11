@@ -1553,3 +1553,11 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - `docs/bus_layer_fix_plan.md` に、案 A（失敗したら静かになるまで待って捨てる）・B（SYNC_READ の残りの応答を読み切る）・C（EEPROM の読み戻しを 2 回一致）・D（取り違えの数を出す）、偽サーボの「応答を遅らせる」機能の設計、試験の計画、「誤って一致」の経路の検討、W0 の `checksum mismatch` との関係（この競合では説明できない）、`Measure.CommErrorsWhileRecordingAreTolerated` の見立て（A・B で安定する見込み。100 回連続で確認する）、実機での確認の手順（C4 と合わせる）、実装の順序を書いた。
 - 実機の頻度（事実）: 書き込みモードの運転で約 22.2 万回の読み取り、`measure` の記録で 9999 回の SYNC_READ に、失敗 0。競合が実機で起きた記録は無い。
 - 実装の時期: C3 の後、C4 の前（ユーザーの予定）。承認の後に、計画書の 8 章の順序で行う。
+
+## バス層の修正 段階1: 偽サーボの「応答を遅らせる」機能（2026-11-11。承認済み。試験の道具だけ。ドライバは変えていない）
+- 承認（ユーザー、2026-11-11）: 計画書 `docs/bus_layer_fix_plan.md` を 8 章の順序で実装する。条件: `drain_quiet_ms` などの新パラメータはコードの既定値で持つ（xacro・ros2_control のタグに書き足す必要が出たら、実装前に差分を示して承認を取る）／失敗時の待ちの周期への影響を偽サーボで測る／案 C は実機確認の手順を `so_arm101_calibration_check.md` に足し、実機への書き込みの前にユーザーの確認を取る／`Measure.CommErrorsWhileRecordingAreTolerated` は単独実行 100 回連続で判定／実機確認は C4 の手順として `feetech_write_check.md` に反映／段階ごとに別コミット。
+- 変更: `src/so_arm101_hardware/test/fake_servo.hpp` に、応答のスケジューラ（応答をキューに入れ、due 時刻に `loop` が `write`。要求のパースは遅れない）と `set_reply_delay_us(id, us)`・`set_frame_spacing_us(us)`・`delay_next_replies(id, addr, count, us)`・`reply_log()`・`clear_reply_log()` を足した。遅れが 0 でキューが空のときは従来どおりその場で `write`（既存の試験の挙動は変わらない）。
+- **計画書からの修正（事実）**: 1 本のバスなので、応答は追い越さない（先に予約された応答より前に出さない）ようにした。これが無いと、`frame_spacing`（80 µs）が要求の間隔（実測 約 60 µs）より長いとき、新しい要求の応答が古い応答を追い越し、競合が再現しなかった（試験で確認）。また、計画書の「id 2〜6 を 3 ms 遅らせる」は A の `quiet`（2 ms）より長く、A・B で捨てられない。競合の再現は **1.5 ms** にした（窓の中。窓の外は、限界の試験で別に固定する）。
+- 試験（`test/test_bus_stale.cpp`、`so_arm101_hardware`）: `FakeServoDelay.*` 3 件（遅れの時刻とログ、`frame_spacing` と順序、`delay_next_replies` が回数だけ効く）。この段階のコミットには、これだけを含める。
+- **今のコードで落ちることの確認（再現の記録。この段階ではコミットしない。段階2に含める）**: `BusStale.StaleRepliesAfterAFailedSyncReadAreDiscarded`（即時の再試行が `IdMismatch`）、`BusStale.SingleReadDoesNotAcceptAnOldFrameOfTheSameIdAfterAFailedSyncRead`（単独の READ が古い応答を受け取る）、`Measure.CommErrorsWhileRecordingAreToleratedWithDelayedReplies`（`no answer from id 1 (id 2 answered first)`）。5 回連続で、毎回同じ結果（決定的）。
+- 確認: `colcon build`、`colcon test`（`so_arm101_hardware` の全件 通過、`so_arm101_calibration` は既知の不安定な `Measure.CommErrorsWhileRecordingAreTolerated` の 1 件だけ失敗。段階2で直す対象）。

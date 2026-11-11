@@ -67,6 +67,9 @@ if(BUILD_TESTING)
   target_link_libraries(test_sts3215_bus so_arm101_sts3215 util)
 
   # 段階2b-3b: 書き込みバス、書き込みモードのドライバ（偽サーボ pty）、ソース走査
+  ament_add_gtest(test_bus_stale test/test_bus_stale.cpp)
+  target_link_libraries(test_bus_stale so_arm101_sts3215 util)
+
   ament_add_gtest(test_write_bus test/test_write_bus.cpp)
   target_link_libraries(test_write_bus so_arm101_sts3215 util)
   target_compile_definitions(test_write_bus PRIVATE PACKAGE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")

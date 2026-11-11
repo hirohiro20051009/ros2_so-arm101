@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -177,6 +178,44 @@ public:
     err_[id] = err;
   }
 
+  // --- 応答のタイミング（試験用。ドライバは変えない）---
+  /// この ID の全応答を、要求を受けた時刻から us だけ遅らせる（既定 0）。
+  void set_reply_delay_us(uint8_t id, int us)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    reply_delay_us_[id] = us;
+  }
+  /// SYNC_READ の応答を us 間隔で並べる（k 番目の応答は k*us 遅れる。既定 0）。
+  void set_frame_spacing_us(int us)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    frame_spacing_us_ = us;
+  }
+  /// (id, addr) への次の count 回の READ 応答だけを us 遅らせる（タイムアウトより遅れて着く応答の再現）。
+  void delay_next_replies(uint8_t id, uint8_t addr, int count, int us)
+  {
+    std::lock_guard<std::mutex> g(m_);
+    delay_next_[{id, addr}] = {count, us};
+  }
+  struct ReplyLogEntry
+  {
+    std::chrono::steady_clock::time_point at;  // write した時刻
+    uint8_t id;
+    uint8_t addr;   // READ の応答のときだけ有効（それ以外は 0xFF）
+    bool corrupt;
+    size_t bytes;
+  };
+  std::vector<ReplyLogEntry> reply_log()
+  {
+    std::lock_guard<std::mutex> g(m_);
+    return reply_log_;
+  }
+  void clear_reply_log()
+  {
+    std::lock_guard<std::mutex> g(m_);
+    reply_log_.clear();
+  }
+
   std::vector<WriteRecord> writes()
   {
     std::lock_guard<std::mutex> g(m_);
@@ -236,8 +275,9 @@ private:
   {
     std::vector<uint8_t> buf;
     while (!stop_) {
+      flush_due();
       pollfd p{master_, POLLIN, 0};
-      if (::poll(&p, 1, 20) <= 0) {continue;}
+      if (::poll(&p, 1, next_wait_ms()) <= 0) {continue;}
       uint8_t tmp[256];
       const ssize_t n = ::read(master_, tmp, sizeof(tmp));
       if (n <= 0) {continue;}
@@ -262,20 +302,73 @@ private:
     for (auto c : body) {s += c;}
     return static_cast<uint8_t>(~s & 0xFF);
   }
-  void reply(uint8_t id, const std::vector<uint8_t> & data, bool corrupt = false)
+  /// 応答をキューに入れる。due 時刻（要求を受けた時刻 + 遅れ）が来たら loop が write する。
+  /// 遅れが 0 のときは、従来どおりその場で write する。
+  void reply(
+    uint8_t id, const std::vector<uint8_t> & data, bool corrupt = false, int extra_delay_us = 0,
+    uint8_t addr = 0xFF, bool in_sync = false)
   {
     if (silent_) {return;}
     uint8_t err;
+    int delay_us;
     {
       std::lock_guard<std::mutex> g(m_);
       err = err_.count(id) ? err_[id] : 0;
+      delay_us = (reply_delay_us_.count(id) ? reply_delay_us_[id] : 0) + extra_delay_us;
+      if (in_sync) {delay_us += frame_spacing_us_ * sync_slot_++;}
     }
     std::vector<uint8_t> body{id, static_cast<uint8_t>(data.size() + 2), err};
     body.insert(body.end(), data.begin(), data.end());
     std::vector<uint8_t> out{0xFF, 0xFF};
     out.insert(out.end(), body.begin(), body.end());
     out.push_back(static_cast<uint8_t>(chk(body) ^ (corrupt ? 0x01 : 0x00)));
+    std::lock_guard<std::mutex> g(m_);
+    // 1 本のバスなので、応答は追い越さない（先に予約された応答より前には出さない）
+    auto due = request_time_ + std::chrono::microseconds(delay_us);
+    if (!queue_.empty() && due < last_due_) {due = last_due_;}
+    if (delay_us == 0 && queue_.empty()) {
+      write_out(id, addr, corrupt, out);
+    } else {
+      last_due_ = due;
+      queue_.push_back({due, seq_++, id, addr, corrupt, out});
+    }
+  }
+  struct Queued
+  {
+    std::chrono::steady_clock::time_point due;
+    uint64_t seq;
+    uint8_t id;
+    uint8_t addr;
+    bool corrupt;
+    std::vector<uint8_t> bytes;
+  };
+  void write_out(uint8_t id, uint8_t addr, bool corrupt, const std::vector<uint8_t> & out)  // m_ を持っていること
+  {
     ::write(master_, out.data(), out.size());
+    reply_log_.push_back({std::chrono::steady_clock::now(), id, addr, corrupt, out.size()});
+  }
+  void flush_due()
+  {
+    std::lock_guard<std::mutex> g(m_);
+    while (!queue_.empty()) {
+      auto it = std::min_element(
+        queue_.begin(), queue_.end(), [](const Queued & a, const Queued & b) {
+          return a.due != b.due ? a.due < b.due : a.seq < b.seq;
+        });
+      if (it->due > std::chrono::steady_clock::now()) {break;}
+      write_out(it->id, it->addr, it->corrupt, it->bytes);
+      queue_.erase(it);
+    }
+  }
+  int next_wait_ms()
+  {
+    std::lock_guard<std::mutex> g(m_);
+    if (queue_.empty()) {return 20;}
+    auto d = queue_.front().due;
+    for (const auto & q : queue_) {d = std::min(d, q.due);}
+    const auto us = std::chrono::duration_cast<std::chrono::microseconds>(d - std::chrono::steady_clock::now()).count();
+    if (us <= 0) {return 0;}
+    return static_cast<int>(std::min<long>(20, (us + 999) / 1000));
   }
   /// 戻り値: 0=普通に応答 / 1=応答を捨てる / 2=応答を壊す / 3=応答しない（サーボが落ちている）
   int do_write(uint8_t inst, uint8_t id, uint8_t addr, const std::vector<uint8_t> & data)
@@ -328,6 +421,8 @@ private:
     {
       std::vector<uint8_t> body(pkt.begin() + 2, pkt.end() - 1);
       std::lock_guard<std::mutex> g(m_);
+      request_time_ = std::chrono::steady_clock::now();
+      sync_slot_ = 0;
       ++counts_[inst];
       if (chk(body) != pkt.back()) {++bad_requests_;}
     }
@@ -336,7 +431,7 @@ private:
     } else if (inst == 0x02) {
       read_reply(id, pkt[5], pkt[6]);
     } else if (inst == 0x82) {
-      for (size_t i = 7; i < pkt.size() - 1; ++i) {read_reply(pkt[i], pkt[5], pkt[6]);}
+      for (size_t i = 7; i < pkt.size() - 1; ++i) {read_reply(pkt[i], pkt[5], pkt[6], true);}
     } else if (inst == 0x03) {
       const int mode = do_write(inst, id, pkt[5], std::vector<uint8_t>(pkt.begin() + 6, pkt.end() - 1));
       bool known;
@@ -352,10 +447,11 @@ private:
       }
     }
   }
-  void read_reply(uint8_t id, uint8_t addr, uint8_t len)
+  void read_reply(uint8_t id, uint8_t addr, uint8_t len, bool in_sync = false)
   {
     std::vector<uint8_t> data;
     bool corrupt = false;
+    int extra_us = 0;
     {
       std::lock_guard<std::mutex> g(m_);
       if (!mem_.count(id)) {return;}
@@ -365,11 +461,22 @@ private:
       if (d != drop_.end() && d->second > 0) {--d->second; return;}
       auto c = corrupt_.find({id, addr});
       if (c != corrupt_.end() && c->second > 0) {--c->second; corrupt = true;}
+      auto dn = delay_next_.find({id, addr});
+      if (dn != delay_next_.end() && dn->second.first > 0) {--dn->second.first; extra_us = dn->second.second;}
     }
-    reply(id, data, corrupt);
+    reply(id, data, corrupt, extra_us, addr, in_sync);
   }
 
   std::vector<uint8_t> ids_;
+  std::map<uint8_t, int> reply_delay_us_;
+  int frame_spacing_us_{0};
+  int sync_slot_{0};
+  std::map<std::pair<uint8_t, uint8_t>, std::pair<int, int>> delay_next_;  // (id, addr) -> {残り回数, us}
+  std::chrono::steady_clock::time_point request_time_{};
+  std::vector<Queued> queue_;
+  uint64_t seq_{0};
+  std::chrono::steady_clock::time_point last_due_{};
+  std::vector<ReplyLogEntry> reply_log_;
   std::map<uint8_t, std::array<uint8_t, 256>> mem_;
   std::map<uint8_t, bool> is_gripper_;
   std::map<uint8_t, uint8_t> err_;
