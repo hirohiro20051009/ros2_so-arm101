@@ -101,33 +101,76 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 
 目的: 実機で、(1) 2 回読んでも一致する（古い応答・化けで失敗しない）、(2) 終了コード 0 と `Lock: 1` が従来どおり、(3) 所要時間が大きく伸びない、の確認。**書く値はバックアップと同じ値なので、値は変わらない。腕は動かない（トルクに触れない）。**
 
-### 手順（`<日時>` は C0.5 と同じバックアップのファイル名）
-1. dry-run（何も書かない）:
+### 手順
+以降、**手順 0 で取る新しいバックアップ `~/so_arm101_check/eeprom_backup_before_C0.6.json` を `<B>` と呼ぶ**（C0.5 のバックアップではなく、これを `restore` に使う。C3 の後の現在の値だから）。
+
+0. **バックアップを新しい名前で取り、C3 の後の記録と一致することを確かめる**（読むだけ。EEPROM には書かない。既にそのファイルがあれば `ls` で見て、別名にする）:
    ```bash
-   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+   ls ~/so_arm101_check/eeprom_backup_before_C0.6.json 2>/dev/null && echo "既にある。別名にする" || \
+   ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
+     --out ~/so_arm101_check/eeprom_backup_before_C0.6.json \
+     2>&1 | tee -i ~/so_arm101_check/calib_C06_backup.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   比べる（全関節の Homing_Offset/Min/Max と、アドレス 0〜39 の全バイト）:
+   ```bash
+   python3 - <<'PY'
+   import json, os
+   h = os.path.expanduser("~/so_arm101_check/")
+   a = json.load(open(h + "eeprom_after_C3.json")); b = json.load(open(h + "eeprom_backup_before_C0.6.json"))
+   A = {j["id"]: j for j in a["joints"]}; B = {j["id"]: j for j in b["joints"]}
+   ok = sorted(A) == sorted(B)
+   for i in sorted(A):
+       for k in ("homing_offset", "min_limit", "max_limit", "bytes"):
+           if i not in B or A[i][k] != B[i][k]:
+               ok = False; print("DIFF", A[i]["name"], k, A[i][k], B.get(i, {}).get(k))
+   print("MATCH" if ok else "MISMATCH")
+   PY
+   ```
+   - 合格: `backup` が exit=0、`MATCH`。**`MISMATCH`（`DIFF` の行が出る）なら、ここで止めて `DIFF` の行と `calib_C06_backup.log` を報告する**（C3 の後に EEPROM が変わっている。以降は進まない）。
+1. **dry-run（何も書かない）。書く前に、gripper の値を確かめる**:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_before_C0.6.json \
      --joints gripper --rewrite-same --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_dryrun.log; echo "exit=${PIPESTATUS[0]}"
    ```
-2. 書き込み（既定の待ち 50 ms。確認文字列を求められたら `WRITE-EEPROM`）。所要時間も取る:
+   - 確認: gripper の **Homing_Offset / Min_Position_Limit / Max_Position_Limit が 547 / 1454 / 2944**（今の値と同じ。`eeprom_after_C3.json` の gripper と同じ）であること。バックアップの値と今の値が同じで、`[バックアップ=実行前]` の扱いになること。**1 つでも違えば、書かずに止めて、dry-run のログを報告する。**
+2. **書き込み**（既定の待ち 50 ms。確認文字列を求められたら `WRITE-EEPROM`）。所要時間も取る:
    ```bash
-   time ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+   time ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_before_C0.6.json \
      --joints gripper --rewrite-same --write --port /dev/ttyACM0 \
      2>&1 | tee -i ~/so_arm101_check/calib_C06_w50.log; echo "exit=${PIPESTATUS[0]}"
    ```
-3. 状態の確認（C0 の dry-run。`--joints` なし、`--rewrite-same` なし）:
+3. **状態の確認**（dry-run。`--joints` なし、`--rewrite-same` なし）:
    ```bash
-   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+   ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_before_C0.6.json \
      --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_after.log; echo "exit=${PIPESTATUS[0]}"
    ```
 4. 手順 2・3 をもう 1 回（待ち 0 ms: `--eeprom-wait-ms 0` を足す。ログ名 `calib_C06_w0.log`・`calib_C06_after_w0.log`）。**0 ms は、C0.5 で「失敗しなかった」記録がある値。失敗しても不合格ではない**（待ちが短すぎる測定結果として報告し、そこで止める）。
 
 ### 合格基準
+- 手順 0 が `MATCH`、手順 1 の gripper が 547 / 1454 / 2944。
 - 手順 2 が exit=0、`OK: バックアップの値に戻り、Lock=1 を確認した`、`gripper Lock: 1`、`書き込み後の状態` の gripper の 3 項目が `[バックアップ=実行前]`。`bus:` の行は**出ない**（失敗したときだけ出る）。
 - 手順 3 が exit=0、全レジスタ「同じ（書かない）」、`注意: ... アドレス n がバックアップと違う` なし。
 - 所要時間が C0.5 の同じ待ち時間の回と大きく違わない（目安: 数百 ms 以内の増加）。
-- 失敗した場合（exit=0 でない）: `read-back mismatch ... the first read was … but the second read was …`（2 回が一致しない）が出たら、**そのメッセージと `bus:` の行を全部報告する**（古い応答・化けの実機での初めての観測の可能性）。以降の手順（C1c、C4）へ進まず、「失敗したとき」に従う。
+- 失敗した場合（exit=0 でない）: `read-back mismatch ... the first read was … but the second read was …`（2 回が一致しない）が出たら、**そのメッセージと `bus:` の行を全部報告する**（古い応答・化けの実機での初めての観測の可能性）。以降の手順（C1c、C4）へ進まない。
+
+### 戻す方法と、終了コードごとの対応
+書いた値はバックアップと同じなので、通常は戻すものが無い。**どの終了コードでも、まず、出力の最後の状態表（`書き込み後の状態`）と `bus:` の行を保存してから**、次のとおりにする。戻すコマンド（手順 0 のファイル `<B>` を使う。**全関節を対象に、書く前に dry-run で差を見る**）:
+```bash
+ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_before_C0.6.json \
+  --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_restore_dryrun.log; echo "exit=${PIPESTATUS[0]}"
+ros2 run so_arm101_calibration so_arm101_calib restore --backup ~/so_arm101_check/eeprom_backup_before_C0.6.json \
+  --write --port /dev/ttyACM0 2>&1 | tee -i ~/so_arm101_check/calib_C06_restore.log; echo "exit=${PIPESTATUS[0]}"
+```
+| exit | 意味 | 対応 |
+|---|---|---|
+| 0 | 全成功 | 何もしない。手順 3 の状態確認へ進む |
+| 1 | 失敗したが、全関節が実行前の値で Lock=1 に戻っている | 値は変わっていない。戻す必要は無い。**以降へ進まず**、エラーのメッセージと `bus:` の行を報告する |
+| 2 | 一部が実行前でも目標でもない／Lock=1 を確認できない | **サーボの電源を入れ直す**（Lock は電源投入時に 1 になる）→ 上の dry-run で差を見る → 差があれば `restore --write`（上のコマンド）→ もう一度 dry-run で「全レジスタ同じ」を確認。それでも違えば止めて報告する。書き込みモード（`read_only:=false`）の launch は起動しない |
+| 3 | 前提の確認の失敗（何も書いていない） | 書かれていない。メッセージ（ポート・モデル・Lock・トルクなど）を報告する。原因を直して手順 1 からやり直す |
+| 4 | 入力・検査の不合格、確認文字列の不一致（何も書いていない） | 書かれていない。メッセージを報告する（確認文字列の打ち間違いなら、手順 2 からやり直してよい） |
 
 ### 報告してほしいもの
-- `calib_C06_dryrun.log`、`calib_C06_w50.log`（`time` の出力を含む）、`calib_C06_after.log`、実施したときは `calib_C06_w0.log`・`calib_C06_after_w0.log`、各ログの `exit=`。
+- `calib_C06_backup.log`、手順 0 の比較の出力（`MATCH`／`DIFF`）、`calib_C06_dryrun.log`（gripper の 3 つの値）、`calib_C06_w50.log`（`time` の出力を含む）、`calib_C06_after.log`、実施したときは `calib_C06_w0.log`・`calib_C06_after_w0.log`、各ログの `exit=`。
 
 ## C1c: 測定を 2 回（改善したツールでの、2 回ともやり直し。EEPROM には書かない。Lock にも触れない）
 最初の C1（旧版のツール）は実施済み（2026-11-11）。結果は `docs/inventory.md`。**旧版で測った `measure_C1_1.json`・`measure_C1_2.json` は、書き込みに使わない**（`apply` が「旧形式」として拒否する。`compare` では読める）。

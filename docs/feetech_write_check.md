@@ -26,12 +26,12 @@
 
 | 順 | ステップ | 腕・トルク | 何をするか | 報告してほしいもの |
 |---|---|---|---|---|
-| 1 | **C0.6**（案 C の確認。`docs/so_arm101_calibration_check.md`） | トルク OFF。EEPROM に書く（gripper、同じ値） | 手順どおり。**実行前に Claude に伝えて確認を得る** | 各ログと `exit=`、`time` の出力、失敗時は `bus:` の行 |
+| 1 | **C0.6**（案 C の確認。`docs/so_arm101_calibration_check.md`） | トルク OFF。EEPROM に書く（gripper、同じ値） | 手順 0（新しいバックアップ `eeprom_backup_before_C0.6.json` を取り、`eeprom_after_C3.json` と全関節が一致することを確かめる）→ 1（dry-run で gripper が 547/1454/2944 を確かめる）→ 2・3（書く・状態確認）→ 4（待ち 0 ms）。戻す方法と終了コードごとの対応は C0.6 の節。**実行前に Claude に伝えて確認を得る** | 手順 0 の `MATCH`/`DIFF`、dry-run の gripper の 3 値、各ログと `exit=`、`time` の出力、失敗時は `bus:` の行 |
 | 2 | **読み取り専用の運転 10 分**（バス層の修正の健全性） | トルク OFF。腕は触らない | 下の「2. 読み取り専用 10 分」 | `deactivated (no register was written)` の行の全文（`reads`・`retried`・`failed_cycles`・`bus:`）、経過時間 |
 | 3 | **読み値のばらつきの確認**（出発点） | トルク OFF | 腕をたたみ切った姿勢に作り直して、読み取り専用の起動を 3 回（各 5 秒）。`[diag]` と `/joint_states` の elbow_flex を比べる | 3 回の elbow_flex の読み値（出発点 +1.69009 との差） |
 | 4 | **W0 を 5 回**（起動と停止の繰り返し） | トルク ON（保持のみ）。腕を両手で支える | 下の「4. W0 を 5 回」 | 各回の `startup_read_retries`・`deactivated.` の行（`bus:` を含む）、`checksum mismatch` が出たら `rx=` と `flushed_before_request=` の行を全部 |
-| 5 | **W1 → W2 → W3 → W3.5 → W4**（本文の各段階どおり） | 各段階の支え方どおり | 各段階の合格基準を満たしてから次へ。W4 は OMPL、目標は elbow_flex を + に動かさない | 各段階の抜き出し（報告してほしいもの）＋ `deactivated.` の `retried`・`failed_cycles`・`monitors`・`rate_limited`・`port_contention`・`bus:` |
-| 6 | **RViz の重なり・問題2・`allowed_start_tolerance` の確認**（`inventory.md` の「未確認として残すもの」） | W4 と同じ起動で | W4 の最初の Execute の前に、MotionPlanning の現在の状態で upper_arm_link と wrist_link の重なりを見る。Plan & Execute が実機で通るか（`allowed_start_tolerance` に収まるか） | 重なりの有無、Plan & Execute の結果（成功／中止の表示） |
+| 5 | **W1 → W2 → W3 → W3.5 → W4**（本文の各段階どおり。**W4 は 10 分**） | 各段階の支え方どおり | 各段階の合格基準を満たしてから次へ。W4 は OMPL、目標は elbow_flex を + に動かさない | 各段階の抜き出し（報告してほしいもの）＋ `deactivated.` の `retried`・`failed_cycles`・`monitors`・`rate_limited`・`port_contention`・`bus:` |
+| 6 | **RViz の重なり・問題2・`allowed_start_tolerance` の確認、範囲をわずかに超えた出発点からの計画の確認**（`inventory.md` の「未確認として残すもの」） | W4 と同じ起動で | 下の「6. 範囲を超えた出発点からの計画」（W3.5 の前、elbow が開いていない状態で行う）。その後、W4 の最初の Execute の前に、MotionPlanning の現在の状態で upper_arm_link と wrist_link の重なりを見る。Plan & Execute が実機で通るか | 下の「6」の報告項目、重なりの有無、Plan & Execute の結果（成功／中止の表示） |
 | 7 | **`measure` の記録**（任意。EEPROM には書かない。トルク OFF、ros2_control を止める） | トルク OFF | C1c と同じ手順（`docs/so_arm101_calibration_check.md`） | `記録:` の行と `bus:` の行（失敗 0、間隔 約 21.7 ms、`drained_bytes=0 id_mismatch=0 answered_first=0`） |
 | 8 | **`drain_quiet_ms:=0` との比較**（問題が出たときだけ） | 問題の出た段階と同じ | **今は実施できない**: 起動引数 `drain_quiet_ms` が launch・xacro に無い（ドライバはコードの既定値 2 で動く）。引数を足すには `bringup.launch.py`・`so101_new_calib.urdf.xacro`・`so101_new_calib.ros2_control.xacro` の差分が要り、**ユーザーの承認が要る**（差分は Claude が示す）。承認されたら、`drain_quiet_ms:=0` を足した同じ起動で、同じ運転の `retried`・`failed_cycles`・`bus:` を比べる | 比較の表（0 と 2 の `retried`・`failed_cycles`・`bus:`） |
 
@@ -51,6 +51,51 @@ W0 の手順（本文の「W0. 保持のみ」）を**起動と停止を 5 回�
 - 各回の記録: `startup_read_retries`、`[diag]` の行、`deactivated.` の行（`bus:` を含む）。
 - 合格: 5 回とも起動し、腕が動かず、`startup_read_retries=0`、`bus:` の `id_mismatch=0 answered_first=0 drained_bytes=0`。`checksum mismatch` が出たら、`flushed_before_request` が 0 より大きいか（要求の前に古いバイトがあった）0 か（配線・USB の化け）を見て、**`rx=` と `flushed_before_request=` の行を全部報告**する（W0 の過去の失敗の原因の切り分け。`docs/bus_layer_fix_plan.md` の 6 章）。
 - 5 回の後に、読み取り専用で状態を確認する（本文の W0 の最後と同じ。`torque_enable=0 lock=1`）。
+
+### 6. 範囲をわずかに超えた出発点（elbow_flex +1.69009）からの計画
+出発点の elbow_flex は URDF のリミット +1.69 を約 0.00009 rad 超えている。OMPL が `FixStartStateBounds` で扱えるかを、**実機で最初に**確認する（モックでは成功を確認済み。Pilz は開始状態の範囲外で拒否することを mock で確認済みなので、**Pilz は使わない**）。
+- **書き込みモードで起動する**（W3.5 と同じ起動。RViz あり）。**`send_joint_delta.py` を送る前、elbow_flex が開いていない（出発点の）状態で行う。** 腕の支え方は W3 と同じ（目標が開く向きだけなので、前腕の下に触れずに構える）:
+  ```bash
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
+    torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_C4_step6.log
+  ```
+- 起動直後に別の端末で、実測を控える: `ros2 topic echo /joint_states --once`（elbow_flex が +1.69 付近であること）。
+- RViz の MotionPlanning:
+  1. Planning タブで **Planner を OMPL**（Pipeline は ompl）にする。**Pilz を選ばない**。Velocity / Acceleration Scaling は 0.1。
+  2. **Goal State を `<current>` に選び直す**。Joints タブで **elbow_flex のスライダーだけ**を、**開く向きに小さく（例: −5°）**動かす（スライダーは整数の度。他の関節のスライダーは触らない。出発点付近でリミットに近い向きへは動かさない）。
+  3. **Plan** を押す。Plan のアニメーションで、動かしていない関節が動いていないか、elbow_flex が開く向きだけであることを見る。
+  4. 成功したら **Execute**。1 回で、動きが止まるまで待つ。**閉じる向きに変わる関節があれば Execute しない**（報告して止める）。
+- Plan が失敗する・開始状態の不正で拒否される場合は、Execute せずに、ログを報告する。続けるなら（Claude と相談のうえ）`send_joint_delta.py elbow_flex -0.10 --seconds 4` で先に開いてから W3.5 へ進む。
+- 報告:
+  - **Plan の成否**（RViz の表示。失敗なら、その表示の文言）。
+  - **Execute の成否**（成功／中止／実行中の異常）。
+  - move_group のログで、start state や bounds に関する行（`start state`・`out of bounds`・`bounds`・`FixStartStateBounds`・`INVALID_ROBOT_STATE`・`outside`・`tolerance`）:
+    ```bash
+    grep -a -i "start state\|bounds\|FixStartState\|INVALID_ROBOT_STATE\|outside\|tolerance" ~/so_arm101_check/write_C4_step6.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-300
+    ```
+  - **実行後の `/joint_states`**（`ros2 topic echo /joint_states --once`。出発点との差も）。
+- そのまま W3.5・W4 へ続ける場合は、**開いた姿勢で Ctrl-C しない**（W4 の止め方に従う）。
+
+### 合格の基準（C4 全体の判定。3 つに分ける）
+各ステップのログの `deactivated.` の行（`retried`・`failed_cycles`・`monitors`・`rate_limited`・`port_contention`・`bus:`）と、`grep` の抜き出しで判定する。**どれか 1 つでも「不合格」に当たれば不合格。「不合格」に当たらず「要観察」に当たれば要観察。どちらにも当たらなければ合格。**
+
+**不合格（止めて原因を調べる。次のステップへ進まない）**
+- `failed_cycles>0`
+- `rate_limited>0`
+- `port_contention>0`
+- `COMMUNICATION LOST`、または `activation failed`
+- `MISMATCH`（calib の読み戻し・バックアップの比較）
+- `could NOT confirm`（トルク OFF／Lock=1 を確認できなかった。**腕を支えてサーボの電源を切る**）
+- （既存の `FAULT:` も同じく不合格）
+
+**要観察（記録して続ける）**
+- `retried>0` で、再試行で回復したもの（`failed_cycles=0`）
+- `checksum mismatch`（**`rx=` と `flushed_before_request=` の行を全部記録する**。`flushed_before_request>0` か 0 かを見る）
+- `bus:` のカウンタが 0 でないもの（`flushed_requests`・`flushed_bytes`・`drained_bytes`・`id_mismatch`・`answered_first`・`timeouts`・`bad_checksum`。**直前の WARN の `rx=` と `flushed_before_request=` の行を記録する**）
+- 要観察が出たステップは、同じ条件でもう 1 回行って、再現するかを見る。再現したら Claude と相談する（順 8 の比較）。
+
+**合格**
+- 上のどちらにも当たらない（`retried=0`、`failed_cycles=0`、`rate_limited=0`、`port_contention=0`、`bus:` の全カウンタが 0、`reads` の数が従来と同じ（約 50 Hz））。
 
 ### 実機でエラーを起こす試験はしない
 バスのバイトを壊す・止めるのは危険なので、実機ではしない。エラー時の挙動は偽サーボの試験で確認済み（`docs/inventory.md` の「バス層の修正」の段階 1〜4）。
@@ -196,6 +241,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 
 ## W4. MoveIt（RViz）から。速度スケーリング 0.1
 
+- **所要時間: 10 分**（C4 では、読み取り専用の 10 分と合わせて十分とする。10 分の間に、W4 の小さな目標の Plan & Execute を数回行ってよい。10 分を超えたら、止め方に進む）。
 - **腕の支え方**: W3 と同じ（前腕の下を支える）。最初の動作は**必ず W3.5 で作った少し開いた姿勢から**。
 - 起動: W3.5 の起動のまま（RViz あり、`torque_limit:=500` 付き）。
 - RViz の MotionPlanning で、**Velocity Scaling と Acceleration Scaling を 0.1**（既定）のまま、小さな目標（現在位置から 0.1〜0.2 rad 程度）を Plan & Execute。1 回ごとに動きが止まってから次へ。

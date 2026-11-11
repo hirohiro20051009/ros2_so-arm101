@@ -1606,3 +1606,8 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 ## バス層の修正 段階5の準備: C4 の手順書（2026-11-11。C4 はまだ実施していない）
 - `docs/feetech_write_check.md` の先頭に「C4 の全体の順序」の表と、「2. 読み取り専用 10 分」「4. W0 を 5 回」の手順を追加した（順: C0.6 → 読み取り専用 10 分 → 読み値のばらつき（3 回）→ W0 ×5 → W1〜W4 → RViz の重なり・問題2・`allowed_start_tolerance` → 任意の `measure` → 問題が出たときの `drain_quiet_ms:=0` の比較）。各ステップで報告してほしいものを表にした。合格の基準は計画書 7 章どおり（`retried=0`、`failed_cycles=0`、`bus:` の `id_mismatch`・`answered_first`・`drained_bytes` が 0、`reads` の数が従来と同じ）。
 - **未承認の変更（実施していない）**: `drain_quiet_ms:=0` を起動引数で渡すには、`bringup.launch.py`（引数の宣言と `mappings`）、`so101_new_calib.urdf.xacro`（`xacro:arg` と呼び出し）、`so101_new_calib.ros2_control.xacro`（マクロの引数と `<param name="drain_quiet_ms">`）の 3 か所の差分が要る。条件（xacro・ros2_control のタグに書き足す必要があるなら、実装前に差分を示して承認を取る）により、差分を示して承認を待つ。承認までは、ドライバはコードの既定値 2 ms で動き、C4 の順 8 は実施できない。
+
+## C4 手順書の修正（承認済みの指示による。コードは変更なし）
+- `drain_quiet_ms` の起動引数（`bringup.launch.py`・xacro 2 つ）は**保留**。C4 の順 8 は「問題が出たときに承認を取ってから」のまま。
+- `so_arm101_calibration_check.md` C0.6: 手順 0（`backup --out eeprom_backup_before_C0.6.json` と、`eeprom_after_C3.json` との全関節・全バイトの比較コマンド）、dry-run で gripper が 547/1454/2944 であることの確認、戻す方法（`restore --backup <手順 0 のファイル> --write`）と終了コード 0〜4 ごとの対応を追加。以降の手順は手順 0 のファイルを使う。
+- `feetech_write_check.md`: 合格の基準を不合格／要観察／合格の 3 つに分けた。順 6 に「範囲をわずかに超えた出発点（elbow +1.69009）からの OMPL の計画」の具体的手順（書き込みモードで起動、send_joint_delta の前に elbow_flex だけ −5° で Plan→Execute、報告項目、Pilz は使わない）を追加。W4 は 10 分に短縮。順 1 の説明を更新。
