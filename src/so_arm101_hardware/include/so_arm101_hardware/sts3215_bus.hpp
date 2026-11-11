@@ -108,6 +108,11 @@ public:
     const std::vector<uint8_t> & ids, Register r, std::vector<std::vector<uint8_t>> * out,
     uint8_t * failed_id = nullptr);
 
+  /// 通信エラーの後、バスが静かになるまで待ってから受信バッファを捨てる時間（0 で従来どおり「捨てるだけ」。
+  /// SYNC_READ の残りの応答を読み切る処理も止める）。既定 2 ms。コードの既定値で持つ。
+  void set_drain_quiet(std::chrono::microseconds quiet) {drain_quiet_ = quiet;}
+  std::chrono::microseconds drain_quiet() const {return drain_quiet_;}
+
   /// 直近の失敗の説明（ログ用）。
   const std::string & last_error() const {return last_error_;}
   /// 直近の ServoError で受け取った ERR バイト（それ以外では 0）。
@@ -131,9 +136,16 @@ protected:
   Status fail(Status s, const std::string & msg);
   /// 要求の直前に受信バッファを捨てる。要求の控えと捨てたバイト数を診断用に残す。
   void begin_request(const std::vector<uint8_t> & req);
+  /// 失敗の後始末: drain_quiet_ > 0 なら静かになるまで待って捨てる。0 なら捨てるだけ。
+  void settle(std::chrono::microseconds quiet);
+  /// 1 フレーム（FF FF ID LEN ...）を読み捨てる。timeout 内に 1 フレーム揃ったら true。
+  bool discard_frame(std::chrono::microseconds timeout);
 
   SerialPort & port_;
   std::chrono::microseconds timeout_;
+  std::chrono::microseconds drain_quiet_{2000};   // 失敗の後に「静か」と見なす時間
+  std::chrono::microseconds drain_max_{10000};    // 失敗の後始末の全体の上限（1 つの応答のタイムアウトと同じ）
+  bool defer_settle_{false};  // SYNC_READ の途中: fail() は後始末をせず、sync_read が最後にまとめて行う
   std::string last_error_;
   int last_rx_id_{-1};  // 直近に受信したパケットの ID（IdMismatch の分類用）
   uint8_t last_servo_error_{0};

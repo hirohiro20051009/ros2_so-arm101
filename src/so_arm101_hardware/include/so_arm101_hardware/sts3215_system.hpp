@@ -66,6 +66,8 @@ public:
   std::string fault_reason() const;
   unsigned long port_contention() const {return port_.contention_count();}
   unsigned long limited_total() const;
+  unsigned long retried_total() const;        // 周期の読み取りを再試行した回数（試験・測定用）
+  unsigned long failed_cycles_total() const;  // 再試行しても失敗した周期の数（同上）
 
 private:
   /// 診断で読んだ、関節ごとの値（起動で使う）。
@@ -101,6 +103,7 @@ private:
   std::string serial_port_;
   std::string calibration_file_;
   int timeout_ms_{10};
+  int drain_quiet_ms_{2};  // ハードウェアパラメータ drain_quiet_ms（既定 2。0 で従来どおり）
   int max_consecutive_failures_{10};
   int acceleration_{kDefaultAcceleration};
   int torque_limit_{kDefaultTorqueLimit};

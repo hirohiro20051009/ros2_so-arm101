@@ -640,3 +640,81 @@ TEST(DesignLimits, StepLimitCoversTheWorstCaseTrajectoryStep)
   EXPECT_GE(kDefaultMaxJointSpeed * kDefaultLimitWindow + 1e-9, needed)
     << "max_joint_speed*limit_window_s must cover 1.2 * max_velocity * 2 / update_rate (" << needed << " rad)";
 }
+
+// ---- バス層の修正（docs/bus_layer_fix_plan.md）: 失敗時の待ち（最大 10 ms）が制御周期（約 20 ms）に与える影響の測定
+// 1 サイクル = read + write。毎サイクルに故障を注入し、所要時間と「20 ms を超えたサイクルの数」を出す。
+namespace
+{
+struct CycleStats
+{
+  double mean_ms{0}, max_ms{0};
+  int over_20ms{0}, retried{0}, failed_cycles{0};
+};
+
+CycleStats measure_cycles(int quiet_ms, int scenario, int n = 100)
+{
+  Rig r;
+  EXPECT_TRUE(r.init({{"timeout_ms", "10"}, {"drain_quiet_ms", std::to_string(quiet_ms)}}));
+  EXPECT_EQ(r.configure(), CallbackReturn::SUCCESS);
+  EXPECT_EQ(r.activate(), CallbackReturn::SUCCESS);
+  if (scenario == 1) {  // 競合: id 1 が壊れ、id 2〜6 が失敗の後（1.5 ms 後）に届く。即時の再試行で成功する
+    for (uint8_t id = 2; id <= 6; ++id) {r.servos.set_reply_delay_us(id, 1500);}
+    r.servos.set_frame_spacing_us(80);
+  }
+  CycleStats st;
+  double sum = 0;
+  for (int i = 0; i < n; ++i) {
+    if (scenario == 1) {r.servos.corrupt_read_replies(1, 56, 1);}
+    if (scenario == 2) {r.servos.drop_read_replies(1, 56, 1);}   // 1 回目がタイムアウト、再試行で成功
+    if (scenario == 3) {r.servos.drop_read_replies(1, 56, 2);}   // id 1 だけ 2 回応答しない（他は届く）
+    const bool silent = (scenario == 4 && i % 2 == 1);          // 全サーボが黙る（本物のタイムアウト 2 回）
+    if (silent) {r.servos.set_silent(true);}
+    r.t += 0.02;
+    const rclcpp::Time now(static_cast<int64_t>(r.t * 1e9), RCL_ROS_TIME);
+    const auto period = rclcpp::Duration::from_seconds(0.02);
+    const auto t0 = std::chrono::steady_clock::now();
+    r.sys->read(now, period);
+    r.sys->write(now, period);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    if (silent) {r.servos.set_silent(false);}
+    sum += ms;
+    st.max_ms = std::max(st.max_ms, ms);
+    if (ms > 20.0) {++st.over_20ms;}
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));  // 次の周期まで（残りの応答・SYNC_WRITE を受け切る）
+    r.servos.clear_reply_log();
+  }
+  st.mean_ms = sum / n;
+  st.retried = static_cast<int>(r.sys->retried_total());
+  st.failed_cycles = static_cast<int>(r.sys->failed_cycles_total());
+  return st;
+}
+}  // namespace
+
+TEST(BusFixCycleImpact, FailureWaitDoesNotBreakTheCycleBudgetBeyondTheExistingTimeouts)
+{
+  const char * names[] = {"normal", "race(corrupt+stale)", "id1 drop x1", "id1 drop x2", "all silent (odd)"};
+  for (int sc = 0; sc < 5; ++sc) {
+    const auto off = measure_cycles(0, sc);
+    const auto on = measure_cycles(2, sc);
+    printf(
+      "[cycle] %-22s drain_quiet_ms=0: mean=%.2f max=%.2f over20=%d retried=%d failed=%d | "
+      "drain_quiet_ms=2: mean=%.2f max=%.2f over20=%d retried=%d failed=%d\n",
+      names[sc], off.mean_ms, off.max_ms, off.over_20ms, off.retried, off.failed_cycles,
+      on.mean_ms, on.max_ms, on.over_20ms, on.retried, on.failed_cycles);
+    if (sc == 0) {  // 正常な経路は変わらない
+      EXPECT_EQ(on.over_20ms, 0);
+      EXPECT_EQ(on.retried, 0);
+      EXPECT_LT(on.mean_ms, off.mean_ms + 1.0);
+    }
+    if (sc == 1) {  // 競合: A・B ありなら、毎回の再試行が成功して周期を失わない
+      EXPECT_EQ(on.failed_cycles, 0);
+      EXPECT_EQ(on.over_20ms, 0);
+      EXPECT_LT(on.max_ms, 10.0);
+    }
+    if (sc == 2) {EXPECT_EQ(on.failed_cycles, 0);}
+    if (sc == 4) {  // 本物のタイムアウト: 待ちを足さない（従来と同じ所要時間）
+      EXPECT_LT(on.max_ms, off.max_ms + 1.5);
+      EXPECT_EQ(on.over_20ms, off.over_20ms);
+    }
+  }
+}

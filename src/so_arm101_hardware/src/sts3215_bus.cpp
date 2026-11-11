@@ -111,8 +111,38 @@ Status Sts3215Bus::fail(Status s, const std::string & msg)
       " flushed_before_request=" + std::to_string(flushed_before_request_) + "]";
   }
   last_servo_error_ = 0;
-  port_.flush_input();  // 次の要求で再同期できるように
+  if (!defer_settle_) {
+    // 次の要求で再同期できるように。通信エラー・ID 違いのときは、これから届く古い応答（SYNC_READ の残りなど）を
+    // 待って捨てる（捨てた「後」に届いて、次の読み取りに入るのを防ぐ）。それ以外は捨てるだけ。
+    // 何も受け取らずにタイムアウトしたとき（バスは黙っている）は、待っても何も来ないので捨てるだけ。
+    const bool silent_bus = (s == Status::Timeout && rx_bytes_.empty());
+    settle((is_comm_error(s) || s == Status::IdMismatch) && !silent_bus ? drain_quiet_ : std::chrono::microseconds(0));
+  }
   return s;
+}
+
+void Sts3215Bus::settle(std::chrono::microseconds quiet)
+{
+  if (quiet.count() > 0) {
+    port_.drain_until_quiet(quiet, drain_max_);
+  } else {
+    port_.flush_input();
+  }
+}
+
+bool Sts3215Bus::discard_frame(std::chrono::microseconds timeout)
+{
+  uint8_t b = 0;
+  int ff = 0, junk = 0;
+  while (ff < 2) {
+    if (port_.read_exact(&b, 1, timeout) != 1) {return false;}
+    if (b == 0xFF) {++ff;} else {ff = 0; if (++junk > kMaxJunkBytes) {return false;}}
+  }
+  uint8_t head[2];
+  if (port_.read_exact(head, 2, timeout) != 2) {return false;}
+  if (head[1] < 2 || head[1] > 250) {return false;}
+  uint8_t rest[256];
+  return port_.read_exact(rest, head[1], timeout) == head[1];
 }
 
 Status Sts3215Bus::receive_status(uint8_t expect_id, size_t data_len, std::vector<uint8_t> * data)
@@ -219,19 +249,46 @@ Status Sts3215Bus::sync_read(
   begin_request(req);
   if (!port_.write_all(req.data(), req.size())) {return fail(Status::PortError, "write failed");}
   out->assign(ids.size(), {});
+  struct Defer  // 途中の失敗では後始末をせず、最後に 1 回だけ行う
+  {
+    bool & f;
+    explicit Defer(bool & x) : f(x) {f = true;}
+    ~Defer() {f = false;}
+  } defer(defer_settle_);
   for (size_t i = 0; i < ids.size(); ++i) {
     last_rx_id_ = -1;
     Status s = receive_status(ids[i], r.length, &(*out)[i]);
-    if (s == Status::IdMismatch &&
-      std::find(ids.begin() + i + 1, ids.end(), static_cast<uint8_t>(last_rx_id_)) != ids.end())
-    {
-      // 後ろの ID が先に返った＝この ID は応答していない
-      last_error_ = "no answer from id " + std::to_string(ids[i]) + " (id " +
-        std::to_string(last_rx_id_) + " answered first)";
-      s = Status::Timeout;
+    size_t consumed_upto = i;  // ids[0..consumed_upto] の応答は、受け取った（または、待ったが来ない）
+    if (s == Status::IdMismatch) {
+      const auto later = std::find(ids.begin() + i + 1, ids.end(), static_cast<uint8_t>(last_rx_id_));
+      if (later != ids.end()) {
+        // 後ろの ID が先に返った＝この ID は応答していない
+        last_error_ = "no answer from id " + std::to_string(ids[i]) + " (id " +
+          std::to_string(last_rx_id_) + " answered first)";
+        s = Status::Timeout;
+        consumed_upto = static_cast<size_t>(later - ids.begin());
+      }
     }
     if (s != Status::Ok) {
       if (failed_id) {*failed_id = ids[i];}
+      // 案 B: 残りの ID の応答がこれから届く。読み切ってから（案 A）静かになるまで待って捨てる
+      auto quiet = drain_quiet_;
+      if (s == Status::Timeout && rx_bytes_.empty() && consumed_upto == i) {
+        // タイムアウトの間（既定 10 ms）に 1 バイトも来なかった＝バスは黙っている。残りの応答も、これから届く
+        // 古い応答も無い（あれば、10 ms の間に届いている）ので、待たずに捨てるだけ（待つと周期が延びる）。
+        quiet = std::chrono::microseconds(0);
+      } else if (drain_quiet_.count() > 0 && (is_comm_error(s) || s == Status::IdMismatch || s == Status::ServoError)) {
+        bool all = true;
+        const auto budget_end = std::chrono::steady_clock::now() + drain_max_;
+        for (size_t k = consumed_upto + 1; k < ids.size(); ++k) {
+          if (std::chrono::steady_clock::now() >= budget_end || !discard_frame(drain_quiet_)) {all = false; break;}
+        }
+        if (all) {quiet = std::min(quiet, std::chrono::microseconds(500));}
+      } else if (!(is_comm_error(s) || s == Status::IdMismatch)) {
+        quiet = std::chrono::microseconds(0);
+      }
+      defer_settle_ = false;
+      settle(quiet);
       return s;
     }
   }

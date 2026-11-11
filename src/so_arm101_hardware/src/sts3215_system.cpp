@@ -55,6 +55,8 @@ hardware_interface::CallbackReturn Sts3215System::on_init(const hardware_interfa
   }
   try {
     timeout_ms_ = std::stoi(param(info_, "timeout_ms", "10"));
+    // 通信エラーの後に「バスが静か」と見なす時間（ms）。コードの既定値 2。0 で従来どおり（捨てるだけ）
+    drain_quiet_ms_ = std::stoi(param(info_, "drain_quiet_ms", "2"));
     max_consecutive_failures_ = std::stoi(param(info_, "max_consecutive_failures", "10"));
     acceleration_ = std::stoi(param(info_, "acceleration", std::to_string(kDefaultAcceleration)));
     torque_limit_ = std::stoi(param(info_, "torque_limit", std::to_string(kDefaultTorqueLimit)));
@@ -66,8 +68,8 @@ hardware_interface::CallbackReturn Sts3215System::on_init(const hardware_interfa
     RCLCPP_ERROR(logger(), "invalid numeric hardware param: %s", e.what());
     return hardware_interface::CallbackReturn::ERROR;
   }
-  if (timeout_ms_ < 1 || max_consecutive_failures_ < 1) {
-    RCLCPP_ERROR(logger(), "timeout_ms and max_consecutive_failures must be >= 1");
+  if (drain_quiet_ms_ < 0 || drain_quiet_ms_ > 10 || timeout_ms_ < 1 || max_consecutive_failures_ < 1) {
+    RCLCPP_ERROR(logger(), "timeout_ms and max_consecutive_failures must be >= 1, drain_quiet_ms 0..10");
     return hardware_interface::CallbackReturn::ERROR;
   }
   if (acceleration_ < 1 || acceleration_ > kMaxAccelerationValue) {
@@ -327,6 +329,7 @@ hardware_interface::CallbackReturn Sts3215System::on_configure(const rclcpp_life
     write_bus_ = wb.get();
     bus_ = std::move(wb);
   }
+  bus_->set_drain_quiet(std::chrono::milliseconds(drain_quiet_ms_));
   if (!run_diagnostics() || !run_servo_config_diagnostics()) {
     port_.close();
     bus_.reset();
@@ -437,6 +440,18 @@ unsigned long Sts3215System::limited_total() const
   unsigned long n = 0;
   for (auto v : limited_count_) {n += v;}
   return n;
+}
+
+unsigned long Sts3215System::retried_total() const
+{
+  std::lock_guard<std::mutex> lock(mu_);
+  return retried_;
+}
+
+unsigned long Sts3215System::failed_cycles_total() const
+{
+  std::lock_guard<std::mutex> lock(mu_);
+  return failed_cycles_;
 }
 
 hardware_interface::return_type Sts3215System::read(const rclcpp::Time & time, const rclcpp::Duration & period)

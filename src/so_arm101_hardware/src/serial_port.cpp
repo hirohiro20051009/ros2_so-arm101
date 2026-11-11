@@ -1,4 +1,5 @@
 // Copyright 2026 so_arm101 authors. MIT License.
+#include <algorithm>
 #include "so_arm101_hardware/serial_port.hpp"
 
 #include <fcntl.h>
@@ -136,6 +137,37 @@ size_t SerialPort::flush_input()
   if (::ioctl(fd_, FIONREAD, &pending) != 0 || pending < 0) {pending = 0;}
   ::tcflush(fd_, TCIFLUSH);
   return static_cast<size_t>(pending);
+}
+
+size_t SerialPort::drain_until_quiet(std::chrono::microseconds quiet, std::chrono::microseconds max_total)
+{
+  if (fd_ < 0) {return 0;}
+  size_t total = 0;
+  const auto deadline = std::chrono::steady_clock::now() + max_total;
+  for (;;) {
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {break;}
+    const auto wait = std::min(quiet, std::chrono::duration_cast<std::chrono::microseconds>(deadline - now));
+    timespec ts{};
+    ts.tv_sec = wait.count() / 1000000;
+    ts.tv_nsec = (wait.count() % 1000000) * 1000;
+    pollfd p{fd_, POLLIN, 0};
+    const int rc = ::ppoll(&p, 1, &ts, nullptr);
+    if (rc < 0) {
+      if (errno == EINTR) {continue;}
+      break;
+    }
+    if (rc == 0) {break;}  // quiet の間、何も来なかった
+    uint8_t tmp[256];
+    const ssize_t n = ::read(fd_, tmp, sizeof(tmp));
+    if (n > 0) {
+      total += static_cast<size_t>(n);
+    } else if (n == 0 || (errno != EAGAIN && errno != EINTR)) {
+      break;
+    }
+  }
+  ::tcflush(fd_, TCIFLUSH);
+  return total;
 }
 
 }  // namespace so_arm101_hardware

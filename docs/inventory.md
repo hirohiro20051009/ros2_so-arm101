@@ -1561,3 +1561,27 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - 試験（`test/test_bus_stale.cpp`、`so_arm101_hardware`）: `FakeServoDelay.*` 3 件（遅れの時刻とログ、`frame_spacing` と順序、`delay_next_replies` が回数だけ効く）。この段階のコミットには、これだけを含める。
 - **今のコードで落ちることの確認（再現の記録。この段階ではコミットしない。段階2に含める）**: `BusStale.StaleRepliesAfterAFailedSyncReadAreDiscarded`（即時の再試行が `IdMismatch`）、`BusStale.SingleReadDoesNotAcceptAnOldFrameOfTheSameIdAfterAFailedSyncRead`（単独の READ が古い応答を受け取る）、`Measure.CommErrorsWhileRecordingAreToleratedWithDelayedReplies`（`no answer from id 1 (id 2 answered first)`）。5 回連続で、毎回同じ結果（決定的）。
 - 確認: `colcon build`、`colcon test`（`so_arm101_hardware` の全件 通過、`so_arm101_calibration` は既知の不安定な `Measure.CommErrorsWhileRecordingAreTolerated` の 1 件だけ失敗。段階2で直す対象）。
+
+## バス層の修正 段階2: 案 A・B（失敗の後に静かになるまで待って捨てる／SYNC_READ の残りを読み切る）（2026-11-11。偽サーボのみ。実機は使っていない）
+- 変更:
+  - `SerialPort::drain_until_quiet(quiet, max_total)`（`ppoll`。バイトが来るたびに窓を数え直し、`quiet` の間 1 バイトも来なければ終わる。全体は `max_total`＝10 ms で打ち切り）。
+  - `Sts3215Bus`: `set_drain_quiet()`（既定 **2 ms**。**コードの既定値**。0 で従来どおり＝捨てるだけ＋残りを読み切る処理も止める）。`fail()` は、通信エラー・`IdMismatch` のとき `drain_until_quiet` で後始末する（それ以外は捨てるだけ）。`sync_read` は途中の失敗では後始末をせず、最後に 1 回: 案 B（受け取っていない ID の数だけ `discard_frame` で読み切る。各 2 ms、全体 10 ms）→ 案 A（全部読めたら窓を 0.5 ms に短縮、読めなければ 2 ms）。後ろの ID が先に返った場合は、その ID より後の数を読み切る。
+  - **追加（周期への影響の測定で見つけた改善）**: タイムアウトの間に **1 バイトも来なかった**（バスが黙っている）ときは、待たずに捨てるだけにした。これが無いと、全サーボが黙るとき 1 回の失敗が 10 → 14 ms に延びた（2 回の再試行で 20 → 28 ms）。
+  - ドライバ（`Sts3215System`）: ハードウェアパラメータ `drain_quiet_ms`（**コードの既定値 2**。範囲 0〜10。範囲外は起動拒否）。**xacro・ros2_control のタグは変えていない**（書き足していない。書かなくても動く。書けば `drain_quiet_ms:=0` で比べられる）。`retried_total()`・`failed_cycles_total()` のアクセサを足した（試験・測定用）。
+- 試験の結果（偽サーボ）:
+  - 段階1で再現した 3 件（`BusStale.StaleRepliesAfterAFailedSyncReadAreDiscarded`、`BusStale.SingleReadDoesNotAcceptAnOldFrameOf…`、`Measure.CommErrorsWhileRecordingAreToleratedWithDelayedReplies`）が通る。
+  - 足した試験: `DrainQuietZeroKeepsTheOldBehaviourAndTheRaceStillShowsUp`（0 で競合が再現する）、`FailureInTheMiddleOfASyncReadAlsoDiscardsTheLaterIds`、`ASilentIdInTheMiddleDoesNotPoisonTheNextRead`、`HealthyReadsAreNotSlowedByTheDrain`（正常な 300 回の SYNC_READ: 0 の場合 16.3 ms、2 ms の場合 15.2 ms。差なし）、`ImmediateRetryAfterTimeoutWithLateRepliesIsAKnownLimit`（**限界の固定**: タイムアウトの後 約 14 ms に着く応答は窓の外で、単独の READ が古い値を受け取る。修正の前後で同じ結果）。
+  - **`Measure.CommErrorsWhileRecordingAreTolerated` の安定の判定**: ビルド済みバイナリの単独実行を**連続 100 回: 失敗 0 回**（前回は 40 回中 31 回失敗）。決定的な版（`…WithDelayedReplies`）も 100 回: 0 回。`test_bus_stale` も 100 回: 0 回。試験は無効にしていない。
+- **失敗時の待ちが周期（20 ms）に与える影響（偽サーボで測定。`BusFixCycleImpact`。毎サイクルに故障を注入、100 サイクル、`timeout_ms=10`。read+write の所要時間、ms）**:
+
+  | 故障 | `drain_quiet_ms=0`（従来） | `drain_quiet_ms=2`（新） |
+  |---|---|---|
+  | なし | 平均 0.12 / 最大 0.23 / 20 ms 超 0 | 平均 0.12 / 最大 0.26 / 0 |
+  | 競合（id 1 が壊れ、他が失敗の後に届く） | 平均 2.2 / 最大 3.6 / 超 0、**失敗サイクル 100（毎回、取り違えで再試行も失敗）** | 平均 5.7 / 最大 8.6 / 超 0、**失敗サイクル 0** |
+  | id 1 が 1 回だけ無応答 | 平均 0.19 / 最大 0.42 / 超 0 | 平均 0.75 / 最大 0.94 / 超 0 |
+  | id 1 が 2 回無応答（他は届く） | 平均 0.13 / 超 0、失敗 100 | 平均 1.3 / 最大 4.5 / 超 0、失敗 100（同じ） |
+  | 全サーボが黙る（奇数サイクル）＝本物のタイムアウト 2 回 | 平均 10.2 / 最大 20.3 / **20 ms 超 50（失敗サイクル 50）** | 平均 10.2 / 最大 20.3 / **超 50（同じ）** |
+
+  - 読み方（事実）: **周期に間に合わなくなる回数は、新旧で同じ**（全サーボが黙る本物のタイムアウト 2 回は、従来から 20 ms を超える。待ちを足していない）。競合では、従来は毎回失敗していたのが、新は毎回成功する代わりに 5〜9 ms かかる（20 ms の中）。失敗していないサイクルの `update` は影響なし。
+  - 注意（**[推測]**）: 偽サーボは遅れの時間・間隔を模したもので、実機の USB の遅れ（数 ms の可能性）は未測定。実機の確認（7 章）で、`bus:` の行と `drain_quiet_ms:=0` との比較で見る。
+- 確認: `colcon build`、`colcon test --packages-select so_arm101_hardware so_arm101_calibration`: **`so_arm101_hardware` 94 件、`so_arm101_calibration` 65 件（gtest の xml の合計）、失敗 0**。`test_measure_apply` 全体の単独実行 15 回連続: 失敗 0（前回は 15 回中 3 回）。

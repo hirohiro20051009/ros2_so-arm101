@@ -289,6 +289,20 @@ TEST(Measure, CommErrorsWhileRecordingAreTolerated)
   EXPECT_EQ(ms.run(&m, &text), kExitOk) << text;
 }
 
+// 上の試験の決定的な版（docs/bus_layer_fix_plan.md の 4 章の 5）。id 1 の応答を 3 回壊し、id 2〜6 の応答を
+// 1.5 ms 遅らせる（失敗の「後」に着く）。pty のスケジューリングの偶然に頼らず、古い応答が必ず残る。
+TEST(Measure, CommErrorsWhileRecordingAreToleratedWithDelayedReplies)
+{
+  Rig r;
+  Measure ms(r);
+  r.servos.corrupt_read_replies(1, 56, 3);
+  for (uint8_t id = 2; id <= 6; ++id) {r.servos.set_reply_delay_us(id, 1500);}
+  r.servos.set_frame_spacing_us(80);
+  MeasureFile m;
+  std::string text;
+  EXPECT_EQ(ms.run(&m, &text), kExitOk) << text;
+}
+
 TEST(Measure, RefusesWhenAServoDoesNotAnswerOrIsNotAnSts3215)
 {
   Rig r;
