@@ -1507,3 +1507,20 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 ### 未確認として残すもの（C4 で確かめる）
 - **実行側の `allowed_start_tolerance`（MoveIt の既定 0.01 rad。設定していない）に収まるか**: 軌道の最初の点（出発点 +1.69009）と、現在の実測の差。mock の計画では最初の点が出発点と同じだった（実行の確認はしていない）。
 - **新座標の出発点から、OMPL で Plan & Execute できるか**（実機）。mock の move_group では、`FixStartStateBounds` の範囲内で計画に成功した（実行はしていない）。
+
+## モックの MoveIt の判定のやり直し（新座標の出発点。2026-11-11。実機は使っていない）
+- 目的: `feetech_write_check.md` の W3.5 の「モックの判定」を、C3 の後の出発点（pan −0.09820、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833、gripper +0.01523）でやり直す（承認済み）。
+- 方法: `bringup.launch.py mock:=true use_rviz:=false`（mock_components。シリアルポートは開かない）。バックグラウンドで SIGINT が無視されて止められなかった前回の反省で、SIGINT を既定に戻してから `exec` する小さな Python ラッパーで起動し、`kill -INT` で止めた。`/check_state_validity`（衝突）、`/compute_fk`（`gripper_frame_link`、`base_link` 基準）、`/plan_kinematic_path`（OMPL、速度・加速度スケール 0.1。計画のみで実行はしない）を呼んだ。
+- 結果（事実）:
+
+  | 姿勢 | 衝突 | 先端 z [m] | 出発点との差 [m] | OMPL の計画（出発点から） |
+  |---|---|---|---|---|
+  | 出発点 elbow +1.69009 | なし（有効） | +0.0219 | 0 | - |
+  | elbow +1.59009（−0.10） | なし | +0.0474 | +0.0255 | 成功（22 点） |
+  | elbow +1.54009（−0.15） | なし | +0.0605 | +0.0386 | 成功（26 点） |
+  | elbow +1.49009（−0.20） | なし | +0.0739 | +0.0520 | 成功（30 点） |
+  | elbow +1.39009（−0.30） | なし | +0.1013 | +0.0794 | 成功（36 点） |
+  - 旧校正の座標の出発点での判定（W3.5 の記録）は +0.026 / +0.039 / +0.053 / +0.081 m で、ほぼ同じ。出発点の高さは旧座標で +0.0304 m、新座標で +0.0219 m（約 0.009 m の違い。lift が +0.028 rad 違うため）。
+  - 参考（閉じる向き。他の関節は出発点のまま）: elbow +1.69009〜+1.73 は有効、**+1.74 で upper_arm_link と wrist_link が接触（深さ 0.00001 m）**。接触の始まりは +1.73〜+1.74 の間（前回の調査では +1.70〜+1.74 の間までしか絞れていなかった）。実機のたたみ切り（+1.69 前後）とのあいだは約 0.04 rad。
+- `feetech_write_check.md` の「モックの判定」の行を、この結果に直した。
+- 後始末: 止めた後の `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` と `ros2 node list` は、どちらも空（`ros2 daemon` の再起動は不要だった）。
