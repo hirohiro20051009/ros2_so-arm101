@@ -1018,3 +1018,18 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 照合: W2 の観察（+ の指令で上から見て時計回り）と**一致**する（base_link の +z が上向きであるという前提。URDF の base_link は通常の向き）。W4 で RViz の表示と見比べて最終確認する。
 - 同じ FK の符号を、W3 の観察とも照合した: lift +0.1 で先端の z が下がる（-0.0082 → -0.0167 m）、elbow −0.1 と wrist_flex −0.1 で先端の z が上がる（-0.0082 → +0.0128、-0.0007 m）。いずれも W3 の観察と一致。
 - URDF の関節リミット: elbow_flex ±1.69、shoulder_lift ±1.74533、wrist_flex ±1.65806、shoulder_pan ±1.91986。W3 の開始時の elbow +1.6771 は elbow の URDF 上限（1.69）の 0.013 rad 手前（問題2の記録と同じ、リミット近傍）。校正範囲（約 +1.707）は URDF 上限より広い。
+
+## 問題2への注記（2026-11-11。上の元の記録は変更していない）
+- 事実（モック。`mock:=true use_rviz:=false` の `/check_state_validity`、group=arm、実機は使っていない）:
+  - 問題2の値（shoulder_lift −1.749、elbow_flex 1.700、wrist_flex 1.313、pan 0、roll 0）: **無効**、contacts は `upper_arm_link` ↔ `wrist_link`（元の記録と一致。再現した）。
+  - 同じ姿勢を URDF のリミット内に丸めた値（−1.745 / 1.69 / 1.313）: **有効**。SRDF の home（−1.57 / 1.57 / 0.8）: 有効。
+- 推測（未確認）: 問題2の「衝突」は、関節リミットを超えた値（lift −1.749、elbow 1.700）が原因だった可能性がある。元の記録は「リミット超過は中止の原因ではない」としているが、上の結果はそれと食い違う。リミット内の値で再現するかは、問題2の実機での姿勢を再確認しないと断定できない。
+- 変更なし: URDF・SRDF のリミットや home の値は変えていない（変更が必要と考えたら計画を出して承認を取る）。
+
+## 段階2b-3c: W3.5 の最終案（2026-11-11 承認。手順書 `docs/feetech_write_check.md` に反映）
+- W3.5/W4 の出発点と W4 後の戻し先: 調整後の値（pan -0.08362、lift -1.51134、elbow +1.66938、wrist_flex +0.50941、roll -0.07135、gripper +0.01645。`~/so_arm101_check/start_pose.log`）。lift は +0.022 rad、wrist_flex は約 -0.43 rad 調整した（トルク OFF で手で動かした）。
+- モック判定（すべて有効）: 出発点、elbow -0.10 / -0.15 / -0.20 / -0.30。先端 z（FK、base_link 基準）の出発点からの差: +0.026 / +0.039 / +0.053 / +0.081 m（出発点の z は +0.0304 m）。
+- W3.5: elbow_flex に -0.10 を 2 回（--seconds 4、各回の後に実測確認）。出発点から -0.15〜-0.20 で終了、届かなければ最大 -0.05 を 1 回だけ追加、-0.25 を超える指令は送らない。lift は動かさない。
+- 起動: W3.5 と W4 は同じ起動（RViz あり、`torque_limit:=500`、`write_W4.log`）。
+- W4 の戻し: RViz は使わず `send_joint_delta.py` で 1 関節ずつ「出発点 − 実測」を送る（elbow_flex は最後）。Ctrl-C の前に各関節が出発点から約 0.02 rad 以内であることを確認する。W4 の目標は elbow_flex を + に動かさない（リミット +1.69 まで 0.021 rad）。
+- 後始末の事実: バックグラウンド起動した launch は SIGINT が効かず、SIGTERM と PID 指定で停止した（最後の ps で残りなしを確認）。

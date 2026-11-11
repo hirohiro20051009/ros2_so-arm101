@@ -119,31 +119,57 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **止め方**: 元の折りたたみ姿勢（開始時の値）に戻っている → **前腕に触れて重さを受ける** → **Ctrl-C**（脱力で腕が沈む）。
 - 合格: 沈まない／指令の向きに動く／`FAULT` なし／`rate_limited` が 0。
 
-## W3.5. W4 の前に: 折りたたみ姿勢から少し開いた姿勢にする
+## W3.5. W4 の前に: 出発点から elbow_flex だけを少し開く
 
-理由: home の折りたたみ姿勢は衝突判定で Plan & Execute が中止される既知の問題がある（`inventory.md` の問題2）。RViz を使う前に、腕を少し開いておく。
-**W3 に合格してから行う。**
+理由: home の折りたたみ姿勢は衝突判定で Plan & Execute が中止される既知の問題がある（`inventory.md` の問題2）。RViz を使う前に、elbow_flex だけを少し開く。
+**W3 に合格してから行う。** shoulder_lift は動かさない。他の関節も動かさない。
 
-- **どの関節をどの向きにどれだけ動かすかは、W3 で確かめた向き（開く／閉じる）の結果を見てから決める。** ここでは決め打ちしない。目安は、W3 で「開く向き」と確認できた関節（例: `elbow_flex`）を 0.1 rad ずつ、1 回ごとに止まってから、数回まで。
-- **腕の支え方**: W3 と同じ（前腕の下を支える）。
-- 起動は W4 と同じ（RViz あり。ここでは RViz を操作しない）。**W3.5 と W4 は同じ起動のまま続けて行う**（開いた姿勢で Ctrl-C しないため）。ログは `write_W4.log`:
+- **出発点（W3.5 と W4 の基準。トルク OFF で手で調整した姿勢を、読み取り専用の起動で測った値。`~/so_arm101_check/start_pose.log`）**。W4 の後に戻して Ctrl-C する姿勢もこれ:
+
+  | 関節 | 出発点の値 [rad] |
+  |---|---|
+  | shoulder_pan | -0.08362 |
+  | shoulder_lift | -1.51134 |
+  | elbow_flex | +1.66938 |
+  | wrist_flex | +0.50941 |
+  | wrist_roll | -0.07135 |
+  | gripper | +0.01645 |
+
+- モックの MoveIt（`/check_state_validity`、2026-11-11）の判定: 出発点と、そこから elbow_flex を -0.10 / -0.15 / -0.20 / -0.30 にした姿勢は**すべて有効**。gripper 先端の高さは出発点から +0.026 / +0.039 / +0.053 / +0.081 m。
+- **腕の支え方**: W3 と同じ（動かすあいだは前腕の下に触れずに構える。止めるときは触れて受ける）。
+- 起動（**W3.5 と W4 は同じ起動のまま続けて行う**。開いた姿勢で Ctrl-C しないため）。W4 は初めての MoveIt の実行なので `torque_limit:=500`（pan と wrist_roll に効く。lift / elbow_flex / wrist_flex は常に 1000）を付ける。RViz あり、ここでは RViz を操作しない。ログは `write_W4.log`:
   ```bash
   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
-    2>&1 | tee -i ~/so_arm101_check/write_W4.log
+    torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_W4.log
   ```
-- 別の端末で（W3 と同じ `send_joint_delta.py`。向きは W3 の結果に合わせる）:
+- 別の端末で、elbow_flex に **-0.10 を 2 回**（1 回ごとに動きが止まってから `/joint_states` で実測を確認してから次へ）:
   ```bash
-  python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.1 --seconds 4    # 向きは W3 の結果で決める
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.1 --seconds 4
+  ros2 topic echo /joint_states --once    # elbow_flex の実測。出発点 +1.66938 との差を計算する
   ```
+- 開く向き（自重に逆らう向き）は、目標の手前（elbow_flex で約 0.04 rad）で止まることが W3 で分かっている。実測の変化量で判断する:
+  - 2 回目の後、出発点からの変化が **-0.15 〜 -0.20** → 終わり（先端は約 +0.04 〜 +0.05 m 上がる）。
+  - -0.15 に届かない → 足りない量（**最大 -0.05**）を **1 回だけ**足す。
+  - **出発点から -0.25 を超えて開く指令は送らない**（モックで確認済みなのは -0.30 まで。余裕を見ている）。
 - 開いた姿勢で動きが止まっていること、`FAULT` が無いことを確認してから W4 へ。
 
 ## W4. MoveIt（RViz）から。速度スケーリング 0.1
 
 - **腕の支え方**: W3 と同じ（前腕の下を支える）。最初の動作は**必ず W3.5 で作った少し開いた姿勢から**。
-- 起動: W3.5 の起動のまま（RViz あり）。
+- 起動: W3.5 の起動のまま（RViz あり、`torque_limit:=500` 付き）。
 - RViz の MotionPlanning で、**Velocity Scaling と Acceleration Scaling を 0.1**（既定）のまま、小さな目標（現在位置から 0.1〜0.2 rad 程度）を Plan & Execute。1 回ごとに動きが止まってから次へ。
-- 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。
-- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 順に: ① 動きが止まっていることを確認 → ② RViz で、W3.5 で作った開いた姿勢へ戻す（W4 で動かした後は W3.5 の姿勢からずれているため）→ ③ `send_joint_delta.py` で W3.5 の逆（0.1 rad ずつ）を送って折りたたみ姿勢へ戻す → ④ 前腕を支える（戻せないときも手で支える）→ ⑤ **launch の端末で Ctrl-C**。
+- **目標の作り方の注意**: 出発点の elbow_flex は URDF のリミット（+1.69）まで **0.021 rad** しかない。**W4 の目標は elbow_flex を + に動かさない（現在より大きくしない）ものにする。** shoulder_lift も出発点付近でリミットに近い向き（−側）へは動かさない。
+- 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。pan の向き（+ で上から見て時計回り）が RViz の表示と実機で一致するか。
+- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 戻す先は**出発点の値**（W3.5 の表）。戻しは RViz を使わず、`send_joint_delta.py` で 1 関節ずつ行う（理由: RViz では関節ごとの目標値を数値で指定する操作が分かりにくく、計画の衝突判定で中止される可能性もある。`send_joint_delta.py` は差分を直接指定でき、1 回ごとに実測で確認できる）。
+  1. 動きが止まっていることを確認。
+  2. `ros2 topic echo /joint_states --once` で各関節の実測を読む。
+  3. 動かした関節ごとに、**「出発点 − 現在の実測値」**を計算して送る（`send_joint_delta.py` は現在の実測値から目標を計算するため）。1 回の |delta| は 0.5 rad 以下。超える場合は分けて送る。順番は pan → wrist_roll → wrist_flex → shoulder_lift（動かしていれば）→ **elbow_flex を最後**。
+     ```bash
+     python3 ~/ros2_so-arm101/tools/send_joint_delta.py <関節名> <出発点 - 実測> --seconds 4
+     ```
+  4. elbow_flex は「出発点 (+1.66938) − 現在値」を 1 回で送る（目標が +1.66938 なので URDF リミット +1.69 まで 0.021 rad の余裕がある。折りたたむ向きは差が約 3 tick）。
+  5. 再び `/joint_states` を読み、**各関節が出発点から約 0.02 rad 以内**であることを確認する。
+  6. 前腕を支える（戻せないときも手で支える）→ **launch の端末で Ctrl-C**。
 - 合格: W3 と同じ基準＋ログ末尾 `rate_limited=0`（arm）。
 
 ## W5（任意・最後に 1 回）. 通信断
