@@ -943,3 +943,25 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 ### 状態
 - W0: **合格**。W1 に進む。
 - 未確認のまま: Acceleration=50 の単位と効き方、通信断の保持（W5、任意）、checksum mismatch の原因。
+
+## W1 合格（2026-11-11、`write_W1.log`、`torque_limit:=500`）
+### 経過（事実。ユーザー報告とログの確認）
+- 1 回目の起動で wrist_roll +0.2 を送った後、誤って Ctrl-C した（折りたたみ姿勢のままで腕は落ちていない）。同じファイル名で起動し直したため、1 回目のログは上書きされて残っていない。
+- 2 回目の起動（`write_W1.log`）: `write mode active ... startup_read_retries=0`。起動時の `[diag]` は pan・roll・gripper が `torque_limit=500`（gripper は元から 500）、lift・elbow・wrist_flex は 1000。
+- wrist_roll: -0.4（+0.1220 → 目標 -0.2780、実測 -0.2739）→ +0.2（実測 -0.0760。W1 開始前の -0.0775 に戻った）。result status 4（SUCCEEDED）。指令の向きに回り、異音・振動なし。
+- gripper: +0.3（閉→開、実測 0.3044）→ -0.3（閉。指の間に約 1 mm 残って止まり、押し付け続けることはなかった）。
+- `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`。
+- `deactivated. reads=22106 retried=0 failed_cycles=0 goal_writes=22106 monitors=437 rate_limited=0 port_contention=0 startup_read_retries=0`。
+- `FAULT`・`COMMUNICATION LOST`・`step limit`・`retrying` の行は無し。
+- **判定: 合格**（指令の向きに動く、位置が合う、異音・振動なし、`rate_limited=0`、`port_contention=0`）。
+
+### 手順書との違い（gripper の `ramping` の WARN）
+- 事実（コード）: `write_goal_positions` は、gripper の GripperActionController（`position_controllers/GripperActionController`）が出す目標をそのまま受け、1 周期の変化量が `max_step_raw_` を超えるときだけ削って WARN を出す。gripper の `max_step_raw_` は `floor(6 rad/s × 0.08 s ÷ tick)`。gripper の校正範囲は 1900〜3385（1485 tick）で 100 ≙ 100°（1.745 rad）、1 tick ≈ 0.001175 rad なので、上限は **408 tick ≈ 0.48 rad**。起動ログの `step limit: 312 ticks` は arm（angle 関節）の値。
+- 事実（計算）: `send_joint_delta.py` の gripper ±0.3 rad は約 255 tick で、上限（408 tick）に届かない。よって WARN は出ず `rate_limited=0` になるのが正しい。上限に掛かるのは 0.48 rad より大きな一歩（ツールの上限 0.5 rad = 約 425 tick の場合）だけ。
+- 訂正: 計画 v3 の「gripper の WARN は動作のたびに出る想定」と、手順書 W1 の「`ramping` の WARN が出るのは正常」は誤り（上限が gripper の小さな動きより大きいため）。手順書を修正した（W1 の記述、合格基準、「ログの読み方」）。コードの変更は不要（安全側の上限であり、動作は意図どおり）。
+
+### checksum mismatch
+- W0_4 と W1（2 回とも）の起動で `startup_read_retries=0`。失敗は 2・3 回目の 2 回のまま。原因は未特定（受信バイト列は未取得）。
+
+### 状態
+- W1: **合格**。W2 に進む。

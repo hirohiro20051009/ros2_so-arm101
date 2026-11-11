@@ -77,10 +77,10 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
   python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper 0.3 --seconds 3
   python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper -0.3 --seconds 3
   ```
-  （このツールは |delta|≤0.5 rad、速度≤0.1 rad/s を超える指定を拒否する。gripper は階段状の目標で、ドライバが段階的に追従する。起動ログに `step limit: 'gripper' ... ramping` の WARN が出るのは正常）
+  （このツールは |delta|≤0.5 rad、速度≤0.1 rad/s を超える指定を拒否する。gripper は GripperActionController が目標へ一気に飛ぶ指令（階段状）を出す。ただし gripper の 1 周期の上限は約 408 tick（≈ 0.48 rad。校正範囲 1485 tick が 100 ≙ 1.745 rad なので 1 tick ≈ 0.001175 rad）で、0.3 rad は約 255 tick なので**上限に掛からず、`step limit: 'gripper' ... ramping` の WARN は出ない**（W1 の実測: 出なかった）。出るのは約 0.48 rad より大きな一歩のときだけ。出ても正常で、`rate_limited` に数える）
 - 見ること: 指令どおりの向きに動く／止まる位置が指令の位置と合う（目視と `ros2 topic echo /joint_states --once`）／動作中に異音・振動が無い／`FAULT` が無い。
 - **止め方**: 動きが止まっていることを確認 → 折りたたみ姿勢 → 前腕を支える → **Ctrl-C**。
-- 合格: 上記 / ログ末尾の `rate_limited` が wrist_roll で 0（gripper のぶんは出る）/ `port_contention=0`。
+- 合格: 上記 / ログ末尾の `rate_limited=0`（0.3 rad の gripper は上限に掛からないので全体で 0 になる。`step limit` の WARN が出たら、関節名と大きさを報告）/ `port_contention=0`。
 
 ## W2. shoulder_pan
 
@@ -159,7 +159,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `FAULT: ... protection error ...`（ERR バイト） | サーボ側の保護（過負荷・温度・電圧など）。**プロセスの再起動まで再開しない** | 支えて Ctrl-C。サーボが冷えるまで待つ。無理な姿勢・負荷が無いか確認 |
 | `FAULT: commands were invalid ... for 50 cycles` | NaN／範囲外の指令が 1 秒続いた。送信停止（トルクは保持） | 支えて Ctrl-C（脱力で腕が落ちる）。指令の出元を確認 |
 | `COMMUNICATION LOST` | 通信断。**サーボは最後の目標でトルク ON のまま。ドライバから OFF にできない** | 腕を支えて、サーボの電源を切る |
-| `step limit: 'X' requested +N ticks ... limited` | 1 周期の変化量の上限（312 tick ≈ 0.48 rad）を超える指令を削った。gripper の `ramping` は正常 | arm 関節で出たら報告 |
+| `step limit: 'X' requested +N ticks ... limited` | 1 周期の変化量の上限（arm: 312 tick ≈ 0.48 rad、gripper: 約 408 tick ≈ 0.48 rad）を超える指令を削った。gripper の `ramping` は、大きな一歩のときだけ出る（正常） | arm 関節で出たら報告 |
 | `activation failed: ...` | 起動の手順のどこかで失敗。トルクは ON にならない（または OFF に戻した） | ログを報告 |
 | `read of X failed (...); retrying n/2`（WARN） | 起動の読み戻しの通信エラー（checksum mismatch・フレーム不良・タイムアウト）。`[tx=… rx=… flushed_before_request=…]` に送った要求と受信したバイトが出る。再試行で直れば起動は続く | 行を全部報告。`startup_read_retries` の数も見る |
 | `cannot read back X (...)`、直前に `retrying` が 2 回 | 3 回とも通信エラー。トルクは ON にならない | 報告。`[activation failed] torque OFF and Lock=1 confirmed` を確認 |
