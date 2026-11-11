@@ -965,3 +965,25 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 
 ### 状態
 - W1: **合格**。W2 に進む。
+
+## W2 合格（2026-11-11、`write_W2.log`、`torque_limit:=500`）
+### 結果（事実。ユーザー報告とログの確認）
+- `write mode active ... startup_read_retries=0`。
+- shoulder_pan: +0.2（-0.0790 → 目標 +0.1210、実測 +0.1158）→ -0.4（目標 -0.2842、実測 -0.2785）→ +0.2（目標 -0.0785、実測 -0.0790）。3 回とも result status 4（SUCCEEDED）。実測は目標より 約 0.005 rad（約 3 tick）手前で止まり、往復で元（-0.0790）に戻った。
+- `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`。
+- `deactivated. reads=16200 retried=0 failed_cycles=0 goal_writes=16200 monitors=320 rate_limited=0 port_contention=0 startup_read_retries=0`。
+- `unexpected jump`・`step limit`・`FAULT`・`COMMUNICATION LOST`・`retrying` の行は無し。
+- **判定: 合格**（W1 と同じ基準: 指令の向きに動く、位置が合う、`rate_limited=0`、`port_contention=0`、`unexpected jump` なし）。
+
+### 観察
+- 事実（ユーザー報告）: `+` の指令で、上から見て**時計回り**に回った。URDF の軸の向きと合っているかは未確認。**W4 で RViz の表示と見比べる**。
+- 事実（ユーザー報告）: 低速（0.05〜0.067 rad/s）でやや階段状の動き（カクカク感）があった。
+- 事実（計算）: angle 関節の 1 tick は 2π/4095 ≈ 0.001534 rad。0.05〜0.067 rad/s を 50 Hz の周期で割ると 1 周期あたり 0.001〜0.0013 rad で、**1 tick 未満**（約 0.65〜0.87 tick）。
+- 推測（未確認）: 1 周期の目標の変化が 1 tick 未満で、整数の tick に丸めるため、目標が数周期ごとに 1 tick ずつ進む。サーボの不感帯・静止摩擦・機構の剛性と重なって階段状に見えた。Acceleration=50 の効き方も未確認。
+- 今後: W4（速度スケーリング 0.1 の MoveIt 軌道）と比べる。改善が必要なら、計画を出して承認を得てから（コードは変えない）。
+
+### checksum mismatch
+- W2 の起動も `startup_read_retries=0`。失敗は 2・3 回目の 2 回のまま。原因は未特定。
+
+### 状態
+- W2: **合格**。W3 に進む（W3 は重力を受ける関節。前腕の下を支える）。
