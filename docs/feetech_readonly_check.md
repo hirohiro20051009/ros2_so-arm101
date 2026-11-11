@@ -179,7 +179,7 @@ P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツ�
    ```bash
    ~/miniforge3/envs/ros2_lerobot/bin/python ~/ros2_so-arm101/tools/lerobot_readonly_state.py --seconds 5 --out ~/so_arm101_check/lerobot_P2a.csv
    ```
-4. 腕に触れずに、手順 2 の feetech を起動して記録・比較する（出力名は `feetech_P2a.csv`。launch のログも `tee ~/so_arm101_check/feetech_launch_P2a.log` で保存する）:
+4. 腕に触れずに、手順 2 の feetech を起動して記録・比較する（出力名は `feetech_P2a.csv`。launch のログも `tee -i ~/so_arm101_check/feetech_launch_P2a.log` で保存する）:
    ```bash
    python3 ~/ros2_so-arm101/tools/record_joint_states.py --seconds 5 --out ~/so_arm101_check/feetech_P2a.csv
    python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot_P2a.csv ~/so_arm101_check/feetech_P2a.csv
