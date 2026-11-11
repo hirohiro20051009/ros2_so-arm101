@@ -1107,3 +1107,5 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
   - 停止後: `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` は出力なし、`ros2 node list` も出力なし。
 - 手順書: `feetech_*_check.md` の起動コマンドはすべて `hardware:=` を明示しており、意味が変わる箇所なし。`feetech_write_check.md` に既定の説明を 1 段落追記。
 - 実機は動かしていない。
+- 補足（2b-4、2026-11-11）: mock:=true のとき hardware の値は使われないことの確認。根拠は `src/so_arm101_moveit_config/config/so101_new_calib.ros2_control.xacro` の分岐（`use_fake_hardware` が真なら `mock_components/GenericSystem` のみ。feetech・lerobot の分岐は `unless use_fake_hardware` の内側）。`xacro so101_new_calib.urdf.xacro use_fake_hardware:=… hardware:=…` の 4 通りの出力: true/feetech → GenericSystem、true/lerobot → GenericSystem（serial_port・calibration_file・read_only も出ない）、false/feetech → Sts3215System、false/lerobot → So101HardwareBridge。bridge ノードの条件式（`mock=='false' and hardware=='lerobot'`）も mock=true では常に偽。
+- 注意（変更なし）: xacro マクロ自身の `hardware` の既定は `lerobot` のまま（moveit_config の xacro なので触っていない）。`bringup.launch.py` は常に `hardware` を渡すので影響しない。xacro を直接呼ぶ場合に限り、実機（`use_fake_hardware:=false`）では `hardware:=` の明示が要る。段階2c の archive で扱う（承認制）。
