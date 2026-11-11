@@ -132,6 +132,10 @@ int run_apply(
   }
   const bool all_joints = sel.size() == a.all.size();
   // 1. 入力の検査（何も書かない）
+  if (const std::string why = measure_not_applicable_reason(a.measure); !why.empty()) {
+    out << "ERROR: " << why << "。何も書かない\n";
+    return kExitInput;
+  }
   if (a.opt.wait_ms < 0 || a.opt.wait_ms > kMaxWaitMs || a.opt.retries < 0 || a.opt.retries > 10) {
     out << "ERROR: --eeprom-wait-ms は 0〜" << kMaxWaitMs << "、retries は 0〜10\n";
     return kExitInput;

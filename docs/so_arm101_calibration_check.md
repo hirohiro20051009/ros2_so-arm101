@@ -1,8 +1,8 @@
-# 実機確認手順: サーボキャリブ（段階2c）— C0・C0.5
+# 実機確認手順: サーボキャリブ（段階2c）— C0〜C3
 
 対象: `so_arm101_calib`（`so_arm101_calibration` パッケージ）。計画は `docs/stage2c_plan.md`。
 **実行するのはユーザーだけ**（Claude は実機を動かさない。EEPROM の読み出しもシリアルポートを開くので、実行しない）。
-C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測定 2 回）→ 判断 → C2（gripper に適用して戻す）→ C3（全関節に適用）。C4（書き込みモードでの W 系の再確認）は C3 合格後に、`feetech_write_check.md` を直してから行う。**前の段階が合格するまで次へ進まない。**
+C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測定 2 回。旧版は実施済み。改善したツールで C1b としてやり直す）→ 判断 → C2（gripper に適用して戻す）→ C3（全関節に適用）。C4（書き込みモードでの W 系の再確認）は C3 合格後に、`feetech_write_check.md` を直してから行う。**前の段階が合格するまで次へ進まない。**
 
 ## 共通の約束
 1. **ros2_control（launch）を止めてから使う**（シリアルポートを占有する）。実行前に確認:
@@ -24,7 +24,7 @@ C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測�
 | 1 | 失敗したが、全関節が実行前の値で Lock=1 に戻っている |
 | 2 | 失敗し、一部が実行前でも目標でもない／目標のまま残った、または Lock=1 を確認できない（表に旧/新/不明が出る。`restore` のコマンド例が出る） |
 | 3 | 前提の失敗（ポートを開けない、トルクが入っている、機種番号が違う、読めない）。何も書いていない |
-| 4 | 入力・検査の不合格（ファイルが壊れている、確認文字列の不一致など）。何も書いていない |
+| 4 | 入力・検査の不合格（ファイルが壊れている、**`apply` に旧形式（schema_version 1）の測定ファイルを渡した**、確認文字列の不一致など）。何も書いていない |
 
 ## C0: バックアップを取る（読み取り専用。何も書かない）
 ```bash
@@ -94,66 +94,82 @@ C0 が合格し、バックアップがあることが前提。対象は **gripp
 - `calib_C05_dryrun.log`、実行した回の `calib_C05_w<W>.log` と `calib_C05_after_w<W>.log`（W は 50・20・10・5・0 のうち実行したもの）、`calib_C05_final.log`（全部通ったとき）、各ログの `exit=` の値。
 - 失敗して止めた場合は、その待ち時間（それより短い値は試していないこと）。
 
-## C1: 測定を 2 回（EEPROM には書かない。Lock にも触れない）
-`measure` が書くのは **`Torque_Enable=0` だけ**（トルクが入っている関節があるときだけ。腕が脱力して落ちるので、**腕を手で支えてから** Enter を押す）。EEPROM と Lock は書かない。
+## C1b: 測定を 2 回（改善したツールでのやり直し。EEPROM には書かない。Lock にも触れない）
+最初の C1（旧版のツール）は実施済み（2026-11-11）。結果は `docs/inventory.md`。**旧版で測った `measure_C1_1.json`・`measure_C1_2.json` は、書き込みに使わない**（`apply` が「旧形式」として拒否する。`compare` では読める）。改善した点: ① `compare` の再現性を生のエンコーダ値で比べる、② Enter は 2 回（中央の姿勢で Enter → そのまま記録開始 → 終わったら Enter）、③ 記録中に「前回の端まで あと N tick」をその場で表示する。C2・C3 は、この C1b の測定ファイルを使う。
+`measure` が書くのは **`Torque_Enable=0` だけ**（トルクが入っている関節があるときだけ）。EEPROM と Lock は書かない。C0.5 のあとはトルクは OFF のはずなので、何も書かずに進む。
 ```bash
 ros2 run so_arm101_calibration so_arm101_calib measure --port /dev/ttyACM0 \
-  --backup ~/so_arm101_check/eeprom_backup_<日時>.json --out ~/so_arm101_check/measure_C1_1.json \
-  2>&1 | tee -i ~/so_arm101_check/calib_C1_1.log; echo "exit=${PIPESTATUS[0]}"
+  --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json --out ~/so_arm101_check/measure_C1b_1.json \
+  2>&1 | tee -i ~/so_arm101_check/calib_C1b_1.log; echo "exit=${PIPESTATUS[0]}"
 ```
-`<日時>` は `20261111-163729`。C0.5 のあとはトルクは OFF のはずで、その場合は何も書かずに進む（`Torque_Enable=0` の書き込みは起きない）。
-画面の指示に従う（**Enter はトルクが OFF なら 3 回（中央・記録開始・記録終了）、トルクが入っていれば 4 回**。余計な Enter は押さない。記録中の Enter は、どれも「記録を終える」になる）:
-1. （トルクが入っているとき）腕を支えて Enter → 脱力。
-2. **中央の姿勢**（各関節の可動範囲のほぼ中央。LeRobot のキャリブと同じ「真ん中」）にして、動かさずに Enter。Enter の後、約 0.2〜0.3 秒（20 ms 間隔で 11 回）読み、各関節の揺れが 4 tick（約 0.35°）以内であること（超えると `ERROR: … 中央の測定中に動いた` で止まる。何も書かれていない。やり直す）。**Enter を押す手で姿勢を崩さない**。腕を支えているときは、Enter の後に 1〜2 秒は動かさない（片手で支えたまま押すか、自重で崩れないなら手を離す）。この Enter を押した後に、次の「記録開始」の指示が出るまでは動かしてよい。
-3. 「記録開始」の指示で Enter を押すと記録が始まる（`.` が出る。1 秒に約 2 個）。**全関節（gripper と wrist_roll を含む）を端から端まで**、順に動かす。wrist_roll は約 3801 tick（ほぼ 1 周）。**中央の姿勢から ±約 180° を超えて回さない**（超えると範囲が判定できず、検査で NG になる）。終わったら Enter。**途中で Enter や Ctrl-C を押すと、そこで記録が終わる／中止する**（Ctrl-C では何も保存されない）。各関節は、機械的に止まる端で止める（無理に押し込まない）。脱力しているので、動かしていない関節は自重で垂れる（動かし終わった関節も、垂れて範囲が増えることはあるが、それは実際の可動の範囲内）。
-- 表（center / measured / new_h / min / max / span / samples / 検査）が出る。**検査がすべて OK**で、測定ファイルが保存される。NG の関節があるときは、保存はされるが `apply` は受け付けない（理由が出る。やり直す）。
-- 同じ手順で 2 回目: `--out ~/so_arm101_check/measure_C1_2.json`、ログ `calib_C1_2.log`（コマンドの末尾の `echo "exit=…"` も同じ）。**中央の姿勢はできるだけ同じ**にする。
+### 流れ（Enter はトルク OFF なら **2 回**、トルクが入っていれば 3 回）
+0. （トルクが入っているときだけ）`腕を手で支えて Enter` → 脱力。**腕を支えてから** Enter を押す。
+1. **中央の姿勢**（各関節の可動範囲のほぼ中央。LeRobot のキャリブと同じ「真ん中」）にして、**動かさずに Enter**（1 回目）。
+2. `中央を測定中（約 0.3 秒。動かさない）…` と出る。**この間は動かさない**（各関節の揺れが 4 tick＝約 0.35° を超えると `ERROR: … 中央の測定中に動いた` で止まる。何も書かれていない。やり直す）。Enter を押す手で姿勢を崩さない。腕を支えているときは、Enter の後も `中央の測定 OK、記録中` が出るまで動かさない。この間に押した Enter は捨てられる（記録がすぐ終わることはない）。
+3. **`中央の測定 OK、記録中。動かし始めてよい` と出てから**、全関節（gripper と wrist_roll を含む）を端から端まで、順に**押し切る**。wrist_roll は約 3801 tick（ほぼ 1 周）。**中央の姿勢から ±約 180° を超えて回さない**（超えると範囲が判定できず、検査で NG になる）。機械的に止まる端で止め、無理に押し込まない。脱力しているので、動かしていない関節は自重で垂れる。
+4. 全部の端まで届いたら **Enter（2 回目）で記録を終える**。記録中に Enter を押すと、必ずそこで終わる（早すぎると幅が足りず検査で NG になる。Ctrl-C なら何も保存されずに中止）。
+
+### 記録中の表示の見方
+端末に 7 行が約 0.2 秒ごとに書き換わる（ログには出ない。ログには 1 秒ごとに 1 関節 1 行が `[N s] …` で残る）:
+```
+joint             今    min    max    幅  min 側: 前回の端まで max 側: 前回の端まで
+shoulder_pan   -1299  -1300   1247  2547  届いた(+43)          あと 205
+```
+- `今`・`min`・`max`・`幅` は、**中央の姿勢からの差（tick）**。
+- `前回の端まで`: 今の yaml の生の範囲（前回の端）まで、あと何 tick か。**min 側も max 側も同じ向きで読む**。`あと N` = あと N tick で前回の端。`届いた` = 前回の端と同じ位置。`届いた(+N)` = 前回の端より N tick 先まで押した。`*` は直近 1 秒に更新された（まだ押している最中）。
+- 見方: **`あと N` が大きいままの端は、まだ押し切れていない**。`届いた` か `届いた(+N)` になり、`*` が消えれば、その端は押し切って止まっている。前回の端より手前（`あと N`）で止まる関節があっても、それ自体は異常ではない（前回が押しすぎだった可能性もある）。0 rad の位置（angle 関節は範囲の中点）は押し切り方で動くので、各関節を同じ強さで端まで押し切ること。
+- wrist_roll の前回の範囲は 4095 をまたぐ（生の値で約 1328〜5129）が、表示は mod 4096 で折り返した差を使うので、そのまま読める。
+- 記録の最後に `記録: 読み取り N 回（失敗 0 回）、間隔 平均 約 20 ms …、表示 K 回` が出る。**読み取りの失敗が多い／間隔が 20 ms から大きく外れるときは報告する**。
+
+### 結果と 2 回目
+- 表（center / measured / new_h / min / max / span / samples / 検査）が出る。**検査がすべて OK**で、測定ファイルが保存される。NG の関節があるときは、保存はされるが終了コードは 4 で、`apply` は受け付けない（理由が出る。`--out` を変えてやり直す）。
+- 同じ手順で 2 回目: `--out ~/so_arm101_check/measure_C1b_2.json`、ログ `calib_C1b_2.log`。**中央の姿勢はできるだけ同じ**にする（中央の姿勢の違いは、新しい再現性の表では結果に効かないが、同じにしておく）。
 - 比較（ポートは開かない）:
   ```bash
   ros2 run so_arm101_calibration so_arm101_calib compare \
-    --a ~/so_arm101_check/measure_C1_1.json --b ~/so_arm101_check/measure_C1_2.json \
-    2>&1 | tee -i ~/so_arm101_check/calib_C1_compare.log; echo "exit=${PIPESTATUS[0]}"
+    --a ~/so_arm101_check/measure_C1b_1.json --b ~/so_arm101_check/measure_C1b_2.json \
+    2>&1 | tee -i ~/so_arm101_check/calib_C1b_compare.log; echo "exit=${PIPESTATUS[0]}"
   ```
-  - 「再現性」: **生のエンコーダ値（actual。Homing_Offset に依存しない）で比べる**。関節ごとに `d_amin`・`d_amax`（範囲の両端の差。tick）、`d_span`（幅の差）、`d_zero`（0 rad の物理位置＝範囲の中点の差。tick と rad。angle 関節だけ）。`d_cent` は中央の姿勢の差で、**参考であって結果には効かない**（最大の差にも入れない）。「最大の差」は `d_amin`・`d_amax`・`d_zero` から出す。**gripper** は端がそのまま 0%・100% になるので、`d_amin`・`d_amax`・`d_span` だけを見る（`d_zero` は「-」）。0 と 4095 をまたぐ関節（wrist_roll）も mod 4096 で折り返して比べる。（旧版は新しい座標で比べていたため、中央の姿勢の違いが「最大の差 70 tick」のように出ていた。誤解を招くので直した。）
+  - 「再現性」: **生のエンコーダ値（actual。Homing_Offset に依存しない）で比べる**。関節ごとに `d_amin`・`d_amax`（範囲の両端の差。tick）、`d_span`（幅の差）、`d_zero`（0 rad の物理位置＝範囲の中点の差。tick と rad。angle 関節だけ）。`d_cent` は中央の姿勢の差で、**参考であって結果には効かない**（最大の差にも入れない）。「最大の差」は `d_amin`・`d_amax`・`d_zero` から出す。**gripper** は端がそのまま 0%・100% になるので、`d_amin`・`d_amax`・`d_span` だけを見る（`d_zero` は「-」）。0 と 4095 をまたぐ関節（wrist_roll）も mod 4096 で折り返して比べる。
   - 「今の yaml との差」（A と B のそれぞれ）: min / max / center の差（tick と rad）、Homing_Offset の差、**`zero_shift`（0 rad の物理位置の移動量。tick と rad）**。`zero_shift` が 0 に近いほど、今の URDF・出発点の姿勢・SRDF の数値の意味が変わらない。
-- 検査に落ちる関節があると、測定ファイルは保存されるが終了コードは 4 になる。やり直すときは `--out` を変える（上書きしない）。
-- 合格基準（C1 自体）: 2 回とも終了コード 0、全関節の検査が OK、トルク以外に書いていない（腕が脱力する以外に変化がない）。再現性と yaml との差には**合否の基準を置かない**（次の判断で人が見る）。
-- 報告してほしいもの: `calib_C1_1.log`、`calib_C1_2.log`、`calib_C1_compare.log`、2 つの測定ファイル。
+  - 前回（旧版の C1）の参考値: `zero_shift` は全関節で ±14 tick 以内（最大 0.0215 rad）。A と B の `d_zero` は pan 16、lift 2、elbow 6、wrist_flex 7、wrist_roll 0 tick。pan は 2 回目が min を 30 tick 先まで押して 0 rad が 16 tick 動いた（端の押し切り方が 0 rad に効く）。**今回は表示を見ながら、各関節を同じ強さで押し切って、この差が縮むか見る**（合否の基準は置かない）。
+- 合格基準（C1b 自体）: 2 回とも終了コード 0、全関節の検査が OK、トルク以外に書いていない（腕が脱力する以外に変化がない）、測定ファイルが `schema_version` 2。再現性と yaml との差には**合否の基準を置かない**（次の判断で人が見る）。
+- 報告してほしいもの: `calib_C1b_1.log`、`calib_C1b_2.log`、`calib_C1b_compare.log`、2 つの測定ファイル（`measure_C1b_1.json`、`measure_C1b_2.json`）。記録中の表示で気づいたこと（押し切れたか、表示の見にくさ）。
 
-## 判断の区切り（C1 の後。C2 には自動では進まない）
-`calib_C1_compare.log` を見て、ユーザーが決める:
+## 判断の区切り（C1b の後。C2 には自動では進まない）
+`calib_C1b_compare.log` を見て、ユーザーが決める（前回の C1 では選択肢 1 を選んだ。測定ファイルは C1b のものから選ぶ。旧形式の測定ファイルは使えない）:
 1. **新しい値を書く**（どの測定ファイルを使うかを選ぶ。以降の C2・C3 は同じファイルを使う）
 2. **今の値をそのまま書き直す**（測定ファイルは使わない。C0.5 と同じ経路の確認だけ。EEPROM は変わらない）
 3. **書かない**（キャリブは今のまま。2c の残りは LeRobot 経路の archive だけ）
-- 見る点: 再現性（2 回の差が大きい関節はないか）、`zero_shift`（0 rad がどれだけ動くか）、wrist_roll の範囲、検査の結果。
+- 見る点: 再現性（`d_amin`・`d_amax`・`d_zero` の 2 回の差が大きい関節はないか。`d_cent` は見なくてよい）、`zero_shift`（0 rad がどれだけ動くか）、wrist_roll の範囲、検査の結果。
 
 ## C2: gripper だけに新しい値を書く（yaml は更新しない）→ バックアップへ戻す
 **EEPROM に新しい値を書く最初の操作。実行する前に Claude に伝えて承認を得る。** C0.5 が合格していること。
 1. dry-run（何も書かない。書く予定の値が出る）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/<選んだ測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
-     --joints gripper 2>&1 | tee -i ~/so_arm101_check/calib_C2_dryrun.log
+     --measure ~/so_arm101_check/<選んだ C1b の測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --joints gripper 2>&1 | tee -i ~/so_arm101_check/calib_C2_dryrun.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `今の EEPROM とバックアップの照合` が `OK 全関節がバックアップと一致`、`書き込む値` の gripper の Homing_Offset / Min / Max が測定ファイルの値であること。
-2. 書き込み（`--eeprom-wait-ms` は C0.5 で決めた値）:
+2. 書き込み（`--eeprom-wait-ms` は既定の 50。C0.5 では同じ値の書き込みで待ち時間の必要量を決められなかったので、ここで初めて値が変わる書き込みを 50 ms で行い、各項目の読み戻しの一致を確認する）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/<選んだ測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
-     --joints gripper --write --eeprom-wait-ms <C0.5 で決めた値> 2>&1 | tee -i ~/so_arm101_check/calib_C2_apply.log
+     --measure ~/so_arm101_check/<選んだ C1b の測定ファイル>.json --backup ~/so_arm101_check/eeprom_backup_<日時>.json \
+     --joints gripper --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_apply.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。
 3. **サーボの電源を入れ直す**（外部電源を切って入れる）。値が残ることを確認（読み取り専用）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
-     --out ~/so_arm101_check/eeprom_after_C2.json 2>&1 | tee -i ~/so_arm101_check/calib_C2_after.log
+     --out ~/so_arm101_check/eeprom_after_C2.json 2>&1 | tee -i ~/so_arm101_check/calib_C2_after.log; echo "exit=${PIPESTATUS[0]}"
    ```
    gripper の Homing_Offset / Min / Max が新しい値のまま、他の関節は変わっていないこと。
 4. **バックアップへ戻す**:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib restore --port /dev/ttyACM0 \
      --backup ~/so_arm101_check/eeprom_backup_<日時>.json --joints gripper --write \
-     --eeprom-wait-ms <C0.5 で決めた値> 2>&1 | tee -i ~/so_arm101_check/calib_C2_restore.log
+     --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_restore.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `OK: バックアップの値に戻り、Lock=1 を確認した`。続けて同じ `restore`（`--write` なし）の dry-run で、全部「同じ（書かない）」。
 - 合格基準: 手順 2 と 4 が終了コード 0。手順 3 で電源を入れ直した後も値が残る。手順 4 の後、全関節がバックアップと一致。
@@ -161,23 +177,23 @@ ros2 run so_arm101_calibration so_arm101_calib measure --port /dev/ttyACM0 \
 - 報告してほしいもの: `calib_C2_dryrun.log`、`calib_C2_apply.log`、`calib_C2_after.log`、`calib_C2_restore.log`。
 
 ## C3: 全関節（gripper を含む 6 関節）を 1 回で書く（yaml はそのとき 1 回だけ更新）
-**実行する前に Claude に伝えて承認を得る。** C2 が合格していること。**C2 と同じ測定ファイル**を使う。
+**実行する前に Claude に伝えて承認を得る。** C2 が合格していること。**C2 と同じ C1b の測定ファイル**を使う（旧形式の測定ファイルは `apply` が拒否する）。
 1. dry-run: C2 の手順 1 から `--joints gripper` を外す。`全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する: <yaml のパス>` と出ること（パスは launch が読む `…/share/so_arm101_hardware/config/follower_calibration.yaml`。`colcon build --symlink-install` ならソースの yaml に解決される）。
 2. 書き込み: C2 の手順 2 から `--joints gripper` を外し、ログ名を `calib_C3_apply.log` に。成功すると、`yaml を更新した:` が出る。終了コード 0。
 3. **サーボの電源を入れ直す。** 読み取り専用で起動して診断を確認する（腕は触らない。トルク OFF のまま）:
    ```bash
-   ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_readonly.log
+   ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_readonly.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、全関節 `torque_enable=0`。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
 4. 同じ起動のまま、腕を**出発点の姿勢**（トルク OFF で手を離しても止まる姿勢。手で作る）にして、新しい座標での値を読む:
    ```bash
-   ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_start_pose.log
+   ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_start_pose.log; echo "exit=${PIPESTATUS[0]}"
    ```
    停止は Ctrl-C だけ。後始末（ps と `ros2 node list`。残っていたら `ros2 daemon stop; ros2 daemon start`）。
 5. **URDF の関節リミットとの余裕**（オフライン。URDF・SRDF は読むだけ）:
    ```bash
    python3 tools/pose_margin.py --pose start=<pan>,<lift>,<elbow>,<wrist_flex>,<wrist_roll>,<gripper> \
-     2>&1 | tee -i ~/so_arm101_check/calib_C3_margin.log
+     2>&1 | tee -i ~/so_arm101_check/calib_C3_margin.log; echo "exit=${PIPESTATUS[0]}"
    ```
    （値は手順 4 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。必要なら `--pose home=…` を足す。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。
 - 合格基準: 手順 2 が終了コード 0、手順 3 が 6/6 MATCH（2 行とも）、手順 4・5 のログが取れている。

@@ -71,11 +71,19 @@ uint64_t measure_checksum(const MeasureFile & m)
         h *= 1099511628211ULL;
       }
     };
+  if (m.schema_version >= 2) {mix(m.schema_version);}
   for (const auto & j : m.joints) {
     mix(j.id); mix(j.actual_center); mix(j.measured_homing_offset); mix(j.new_homing_offset);
     mix(j.actual_min); mix(j.actual_max); mix(j.new_min); mix(j.new_max); mix(j.samples);
   }
   return h;
+}
+
+std::string measure_not_applicable_reason(const MeasureFile & m)
+{
+  if (m.schema_version >= kMeasureSchema) {return "";}
+  return "旧形式（schema_version " + std::to_string(m.schema_version) +
+         "）の測定ファイル。旧版のツールで測ったもので、apply には使えない。改善したツールで C1 をやり直す";
 }
 
 static std::string esc(const std::string & s)
@@ -126,7 +134,9 @@ bool parse_measure(const std::string & text, MeasureFile * out, std::string * er
     if (!root.IsMap()) {return fail("top level is not a map");}
     MeasureFile m;
     m.schema_version = root["schema_version"].as<int>();
-    if (m.schema_version != kMeasureSchema) {return fail("unsupported schema_version");}
+    if (m.schema_version < kMeasureSchemaOldest || m.schema_version > kMeasureSchema) {
+      return fail("unsupported schema_version " + std::to_string(m.schema_version));
+    }
     m.created = root["created"].as<std::string>();
     m.tool = root["tool"].as<std::string>();
     m.port = root["port"].as<std::string>();
@@ -525,7 +535,7 @@ int run_measure(
   // 5. 結果
   MeasureFile m;
   m.created = now_string(false);
-  m.tool = "so_arm101_calib 0.1.0";
+  m.tool = "so_arm101_calib 0.2.0";
   bool all_valid = true;
   out << "\n== 測定結果（新座標。Homing_Offset = actual_center − 2047）\n";
   out << std::left << std::setw(15) << "joint" << std::right << std::setw(8) << "center" << std::setw(9) << "measured"
@@ -566,6 +576,10 @@ void compare_measures(
   int angle_ticks, std::ostream & out)
 {
   const double rad_per_tick = 2.0 * M_PI / angle_ticks;  // 360/angle_ticks 度 = 2π/angle_ticks rad
+  for (const auto * m : {&a, &b}) {
+    const std::string why = measure_not_applicable_reason(*m);
+    if (!why.empty()) {out << "注意: " << (m == &a ? "A" : "B") << " は" << why << "（compare は読める）\n";}
+  }
   // 再現性は、生のエンコーダ値（actual。Homing_Offset に依存しない）で比べる。新しい座標（new_min など）は中央の姿勢で
   // 決まる Homing_Offset を含むので、中央の姿勢の違いが差として出てしまい、比べる量として不適切。
   //   d_amin / d_amax : 範囲の両端の差（mod 4096 で折り返して ±2048 に収める。wrist_roll のように 0/4095 をまたぐ関節も同じ）

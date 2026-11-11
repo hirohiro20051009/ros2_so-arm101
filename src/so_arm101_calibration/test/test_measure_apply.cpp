@@ -571,7 +571,25 @@ TEST(MeasureFileIo, RoundTripAndCorruptionAreDetected)
   EXPECT_FALSE(parse_measure(replace("\"actual_min\": 700", "\"actual_min\": 701"), &out, &err));  // 他に冗長な項目が無い → チェックサム
   EXPECT_NE(err.find("checksum"), std::string::npos) << err;
   EXPECT_FALSE(parse_measure(replace("\"valid\": true", "\"valid\": false"), &out, &err));
-  EXPECT_FALSE(parse_measure(replace("\"schema_version\": 1", "\"schema_version\": 3"), &out, &err));
+  EXPECT_FALSE(parse_measure(replace("\"schema_version\": 2", "\"schema_version\": 3"), &out, &err));
+  EXPECT_NE(err.find("unsupported schema_version"), std::string::npos) << err;
+  EXPECT_FALSE(parse_measure(replace("\"schema_version\": 2", "\"schema_version\": 0"), &out, &err));
+  // schema_version は 2 以上ならチェックサムに入る: 2 を 1 に書き換えると検出される
+  EXPECT_FALSE(parse_measure(replace("\"schema_version\": 2", "\"schema_version\": 1"), &out, &err));
+  EXPECT_NE(err.find("checksum"), std::string::npos) << err;
+  // 旧形式（1）のファイルは読める。ただし 1 を 2 に書き換えて新形式に見せかけることはできない
+  MeasureFile old = m;
+  old.schema_version = 1;
+  const std::string old_text = measure_to_json(old);
+  MeasureFile old_back;
+  ASSERT_TRUE(parse_measure(old_text, &old_back, &err)) << err;
+  EXPECT_EQ(old_back.schema_version, 1);
+  EXPECT_FALSE(measure_not_applicable_reason(old_back).empty());
+  EXPECT_TRUE(measure_not_applicable_reason(m).empty());
+  std::string forged = old_text;
+  forged.replace(forged.find("\"schema_version\": 1"), 19, "\"schema_version\": 2");
+  EXPECT_FALSE(parse_measure(forged, &out, &err));
+  EXPECT_NE(err.find("checksum"), std::string::npos) << err;
 }
 
 namespace
@@ -704,6 +722,20 @@ TEST(Compare, GripperShowsOnlyTheEndsAndNoZeroPosition)
   EXPECT_NE(t.find("最大の差（d_amin / d_amax / d_zero。d_cent は含めない）: 10.0 tick"), std::string::npos) << t;
 }
 
+TEST(Compare, AnOldFormatFileIsReadWithAWarning)
+{
+  Rig r;
+  Measure ms(r);
+  MeasureFile a, b;
+  ASSERT_EQ(ms.run(&a), kExitOk);
+  b = a;
+  b.schema_version = 1;
+  const std::string t = compare_text(r, a, b);
+  EXPECT_NE(t.find("注意: B は旧形式"), std::string::npos) << t;
+  EXPECT_EQ(t.find("注意: A は"), std::string::npos) << t;
+  EXPECT_NE(t.find("d_amin"), std::string::npos);  // 表は出る
+}
+
 // ---------------------------------------------------------------- apply
 TEST(Apply, DryRunAndRefusedConfirmationWriteNothing)
 {
@@ -715,6 +747,19 @@ TEST(Apply, DryRunAndRefusedConfirmationWriteNothing)
   EXPECT_EQ(t.run(t.args(true), &text, false), kExitInput);
   EXPECT_TRUE(t.r.servos.writes().empty());
   EXPECT_TRUE(t.eeprom_is_backup());
+}
+
+TEST(Apply, AnOldFormatMeasureFileIsRefusedAndNothingIsWritten)
+{
+  ApplyRig x;
+  x.m.schema_version = 1;
+  std::string text;
+  EXPECT_EQ(x.run(x.args(true), &text), kExitInput) << text;
+  EXPECT_NE(text.find("旧形式"), std::string::npos) << text;
+  EXPECT_TRUE(x.r.servos.writes().empty());
+  EXPECT_TRUE(x.eeprom_is_backup());
+  // dry-run でも同じ（旧形式は書く予定も出さない）
+  EXPECT_EQ(x.run(x.args(false), &text), kExitInput) << text;
 }
 
 TEST(Apply, RefusesWhenTheEepromDiffersFromTheBackup)

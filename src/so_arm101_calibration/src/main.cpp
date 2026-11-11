@@ -194,6 +194,10 @@ int main(int argc, char ** argv)
       std::cerr << "ERROR: 測定ファイルを読めない/壊れている: " << err << "。何も書かない（ポートも開かない）\n";
       return kExitInput;
     }
+    if (const std::string why = measure_not_applicable_reason(measure); !why.empty()) {
+      std::cerr << "ERROR: " << why << "。何も書かない（ポートも開かない）\n";
+      return kExitInput;
+    }
   }
   if (a.cmd == "restore" || a.cmd == "apply") {
     if (backup_path.empty()) {

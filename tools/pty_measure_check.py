@@ -131,6 +131,14 @@ while time.time() < end:
     if done:
         break
 pump(0.2)
+if mode == 'new':
+    # 測った新しい形式（schema 2）のファイルを、偽サーボに対して apply の dry-run（何も書かない）に通す
+    res = subprocess.run(['bash', '-c', f'source {setup}; {exe} apply --port {port} --calibration {yaml_path} '
+                          f'--measure {os.path.join(work, "measure_out.json")} --backup {backup}'],
+                         capture_output=True, text=True)
+    print('--- apply の dry-run（schema 2）: exit =', res.returncode)
+    print('\n'.join(l for l in res.stdout.splitlines() if 'dry-run' in l or 'ERROR' in l or '旧形式' in l))
+    print('書き込み回数（writes.jsonl の行数）:', sum(1 for _ in open(os.path.join(state, 'writes.jsonl'))))
 fake.terminate()
 
 log = pipe_buf.decode(errors='replace')

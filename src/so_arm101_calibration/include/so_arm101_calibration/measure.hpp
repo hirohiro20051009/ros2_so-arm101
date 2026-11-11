@@ -23,7 +23,10 @@
 namespace so_arm101_calibration
 {
 
-constexpr int kMeasureSchema = 1;
+/// 測定ファイルの形式。2 = 記録を中央の測定の直後に始める方式（2c-3b）で測ったもの。項目は 1 と同じ。
+/// 1（旧版のツールで測ったもの）は読めるが（compare 用）、apply には使えない。
+constexpr int kMeasureSchema = 2;
+constexpr int kMeasureSchemaOldest = 1;
 constexpr int kHalfTurn = 2047;     // int((4096 − 1) / 2)
 constexpr int kMinSpanTicks = 200;  // 幅の下限（既定）。動かさなかった関節の検出
 
@@ -54,7 +57,10 @@ struct MeasureFile
 /// 検査して valid / problems を設定する（|Homing_Offset| ≤ 2047、0 ≤ min < max ≤ 4095、幅 ≥ min_span）。
 void check_measured_joint(MeasuredJoint * j, int min_span = kMinSpanTicks);
 
+/// チェックサム。schema_version が 2 以上のときは schema_version も含める（1 を 2 に書き換えても検出できる）。
 uint64_t measure_checksum(const MeasureFile & m);
+/// apply に使えない理由（空なら使える）。旧形式（schema_version < 2）は使えない。
+std::string measure_not_applicable_reason(const MeasureFile & m);
 std::string measure_to_json(const MeasureFile & m);
 bool parse_measure(const std::string & text, MeasureFile * out, std::string * err);
 bool load_measure_file(const std::string & path, MeasureFile * out, std::string * err);

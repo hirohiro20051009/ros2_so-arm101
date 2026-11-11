@@ -1229,3 +1229,12 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 
   読み取りの回数と間隔は、表示を足しても変わらない。
 - 事実: `colcon test` は、ビルド直後など CPU が忙しいときに `Measure.CommErrorsWhileRecordingAreTolerated` が不安定に落ちることがある（今回の変更を stash した状態でも、8 回中 2 回落ちた＝変更とは無関係。単独では 40 回すべて通る）。原因は未調査。
+
+### 2c-3c: 測定ファイルの schema 2、手順書（C1b・判断の区切り・C2・C3）
+- 測定ファイルの形式を `schema_version` 2 にした（項目は 1 と同じ。ツール名は `so_arm101_calib 0.2.0`）。チェックサムは、schema が 2 以上のときだけ `schema_version` も含める（v1 のファイルの検証は変わらず、v1 を v2 に書き換えると検出される）。
+- `parse_measure` は 1 と 2 を読む。`apply` は 1 を終了コード 4 で拒否する（`main` で、ポートを開く前。`run_apply` でも検査）。`compare` は 1 を読み、「旧形式。apply には使えない」と警告する。
+- 実ファイル（読み取りのみ。存在しないポートを指定して、ポートが開かれないことも確認）: 旧版の `measure_C1_1.json` を `apply` に渡すと終了コード 4、`旧形式（schema_version 1）…何も書かない（ポートも開かない）`。同じファイルの `compare` は警告つきで終了コード 0。
+- 偽サーボ + pty（`tools/pty_measure_check.py`）: 新しい `measure` が `schema_version` 2・`so_arm101_calib 0.2.0` のファイルを保存し、それを `apply` の dry-run に通すと終了コード 0、書き込み 0（`writes.jsonl` の行数 0）。記録 4 秒で、読み取り 203 回（間隔 平均 20.4 ms）、表示 20 回（合計 0.8 ms）。
+- 試験: `so_arm101_calibration` 60 件、`so_arm101_hardware` 84 件が通過（`colcon build` も成功）。追加: v2 の往復、schema の改ざん（2→1、1→2、0、3）の検出、v1 の読み込み、`measure_not_applicable_reason`、`compare` の旧形式の警告、`apply` の旧形式の拒否（書き込み 0、dry-run も拒否）。
+- 手順書: C1 を C1b（ファイル名 `measure_C1b_*.json`、ログ `calib_C1b_*.log`。Enter 2 回の流れ、記録中の表示の見方、読み取りの統計の見方、前回の参考値）に書き直した。判断の区切りは `d_amin`・`d_amax`・`d_zero` を見る。C2・C3 は C1b の測定ファイルを使い、`--eeprom-wait-ms` は 50。終了コードの表に旧形式を追記。C2・C3 のコマンドにも `; echo "exit=${PIPESTATUS[0]}"` を付けた。
+- **別件（未対応。承認が要る）**: `Sts3215Bus` は要求の直前に入力を捨てるが（`sts3215_bus.cpp:100`）、直前の失敗した SYNC_READ の残りの応答が、捨てた後に届くと取り違える（試験で `timeout: no answer from id 1 (id 4 answered first)`）。`Measure.CommErrorsWhileRecordingAreTolerated` が不安定に落ちる原因とみられる。実機でも、通信エラー後の再試行で起こりうる（確率は低いとみられる。推測）。直す案: 再試行の前に、残りの応答が出尽くす時間（1 Mbps で 6 関節ぶんの数 ms）待ってから入力を捨てる。`so_arm101_hardware` の変更になるので、承認の後にする。

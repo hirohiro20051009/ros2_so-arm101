@@ -81,3 +81,11 @@
 
 ## 9. 完了後
 LeRobot 経路と bridge を `archive/stage2c_lerobot/` へ移す（`git mv`、1 回ごとに colcon build と commit、`REASON.md`）。対象: `so_arm101_lerobot_bridge`、`So101HardwareBridge`（plugin xml を含む）、`tools/convert_lerobot_calibration.py`・`lerobot_readonly_state.py`・`compare_joint_states.py`、bringup の `hardware:=lerobot` と bridge の include。`gen_conversion_golden.py` は LeRobot を import するので移すか残すかをそのとき決める。xacro の `hardware` の既定（`lerobot`）は MoveIt 設定なので、変更箇所と理由を示して承認を取る。
+
+
+## 追記（2026-11-11）: C1 の判断とツールの改善（2c-3a〜3c）
+C1（旧版）の結果、判断は「新しい値を書く」。ただし先にツールを改善し、C1 をやり直す（C1b）。経緯と結果は `docs/inventory.md`、手順は `docs/so_arm101_calibration_check.md`。
+- `compare` の再現性は、生のエンコーダ値（`actual_min`/`actual_max`）で比べる（`d_amin`・`d_amax`・`d_zero`。`d_cent` は参考）。gripper は端だけ。
+- `measure` の Enter は 2 回（中央の姿勢で Enter → そのまま記録開始 → Enter で終了。トルクが入っていれば腕を支える Enter が先に 1 回）。記録中に「前回の端まで あと N tick」を表示（端末は `/dev/tty`、ログは 1 秒ごと）。読み取りの間隔は表示を足しても変わらない。
+- 測定ファイルは `schema_version` 2（項目は 1 と同じ。2 以上ではチェックサムに schema も含める）。1（旧版）は `compare` で読めるが、`apply` は終了コード 4 で拒否する。
+- C2・C3 は C1b の測定ファイルを使う。`--eeprom-wait-ms` は既定の 50 のまま（C0.5 の同じ値の書き込みでは必要量を決められなかった）。
