@@ -1345,3 +1345,54 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - 試験（偽サーボ）: `format_gap` の境界（0、1、10、11、負）、表の幅が 72 桁以内、min 側・max 側で同じ表記、最後の表と端末の表で同じ表記、既存の表示の試験が通ること。pty で、表示だけの差であること（標準出力に記録中は何も出ない、読み取りの回数と間隔が同じ）を確認する。
 - 手順書: C1c の「表示の見方」に `ほぼ あと N`（あと 10 tick 以内）を足す。
 - 時期: C3 の後（C4 の前でもよい。バス層の変更とは独立）。実機での再確認はしない（ユーザーの判断）。
+
+## 段階2c 実機確認: C2（gripper だけ新しい値を書く → 電源を入れ直す → バックアップへ戻す）合格（2026-11-11）
+- 実施: ユーザー（Claude は実機に触れていない）。合格はユーザーの判断。内容は `~/so_arm101_check/` のログで確認した（読み取りのみ）。**値が変わる EEPROM の書き込みは、これが実機で初めて。**
+- `calib_C2_dryrun.log`: 照合 OK（全関節がバックアップと一致）、書き込む値は gripper だけ（Homing_Offset 107→547、Min 1900→1454、Max 3385→2944）、`yaml は更新しない`、終了コード 0。
+- `calib_C2_apply.log`: 3 項目とも [新]、gripper Lock: 1、`OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。**値が変わる書き込みで、待ち 50 ms の読み戻しが一致した（初めての実測）。** 待ち時間の下限（20 / 10 / 5 / 0 ms で値が変わる書き込みが通るか）は未測定。既定は 50 ms のまま。
+- `calib_C2_after.log`: **12 V を入れ直した後**（USB はつないだまま。ポート名は `/dev/ttyACM0` のまま）、gripper は 547 / 1454 / 2944 のまま、他の 5 関節は元のまま（pan 135/743/3452、lift 112/842/3216、elbow 122/862/3088、wrist_flex 89/889/3185、wrist_roll 1164/164/3965）。6 関節とも 2 回読んで一致。`eeprom_after_C2.json` を保存して読み直し、一致を確認した。終了コードは、ユーザーがコピーを取り損ねて記録がない（保存と読み直しの一致の表示で代える）。**EEPROM の値が電源を切っても残ることを実機で確認した。**
+- `calib_C2_restore.log`: gripper の 3 項目を「書く」で元に戻し、[バックアップ]、Lock: 1、`OK: バックアップの値に戻り、Lock=1 を確認した`、終了コード 0。
+- `calib_C2_restore_check.log`（全関節の dry-run）: 18 レジスタすべて「同じ（書かない）」、終了コード 0。
+- **確認済み**: **USB をつないだまま 12 V を入れ直してよい**（手順書の「未確認」を「確認済み」に直した）。
+- 次: C3（全関節を `measure_C1c_1.json` で 1 回で書き、yaml を 1 回だけ更新する）。実行の前に、下の「C3 の準備」を確認する。
+
+## C3 の準備（調べた事実と、決めること。2026-11-11。コードは変えていない）
+### yaml の更新先（事実）
+- `apply` は、既定で `ament_index` の `so_arm101_hardware` の share を引き、`…/share/so_arm101_hardware/config/follower_calibration.yaml` を使う（`main.cpp` の `cal_path`）。ドライバ（launch）も同じ場所を読む（`bringup.launch.py:89-91` の `calibration_file`。2b-4 のログの `calibration=` の行）。
+- 今のワークスペースは **`colcon build --symlink-install`**: `install/so_arm101_hardware/share/so_arm101_hardware/config/follower_calibration.yaml` は **`src/so_arm101_hardware/config/follower_calibration.yaml`（git 管理）へのシンボリックリンク**（`readlink -f` で確認）。
+- `update_calibration_yaml`（`apply.cpp`）は、`fs::canonical` でリンクを解決し、**実体（src 側）に `.new` を書いて読み直し、rename で置き換える**。リンクはそのまま有効。したがって**更新されるのは src 側の 1 ファイルだけで、install 側は同じものを指している**（そろえる手順は要らない。`colcon build` も要らない）。`--symlink-install` でないビルド（install 側がコピー）だと、install 側だけ古いままになる（今の環境では該当しない）。
+- 書き込みの途中で失敗したときは、yaml は更新されない（6 関節すべてを書いて読み戻しと Lock=1 を確認した後の 1 回だけ）。yaml だけ更新できなかったときは、EEPROM は新しいまま、yaml は古いまま（書き込みモードは起動を拒否）。退避先は `~/so_arm101_check/follower_calibration_new_<日時>.yaml`。
+
+### yaml の出所の記録（`source`）と、更新で変わるもの（事実）
+- `render_calibration_yaml`（`apply.cpp`）は yaml を**作り直す**。`source` は次になる:
+  ```yaml
+  source:
+    kind: ros_calibrated
+    measure_file: <--measure に渡したパス>   # シェルが ~ を展開した絶対パス
+    backup_file: <--backup に渡したパス>
+    applied_at: <実行時刻、秒まで>
+    applied_by: so_arm101_calib 0.1.0
+  ```
+  - **今の yaml の `source`（`converted_from_lerobot_json`、`file`、`file_date`、`converted_at`、`converted_by`）は消える**（git の履歴に残る）。ファイル冒頭のコメントも、ツールが出す 3 行に置き換わる。`schema_version`、`bus`、`conversion`（`angle_ticks: 4095`）、各関節の `id`・`kind`・`direction` は、今の値を引き継ぐ。
+  - 各関節の `center`（angle のみ）・`min`・`max`・`eeprom.homing_offset / min_limit / max_limit` は、測定ファイルの値になる（`center` は新座標の `new_center`。`eeprom.*` は書いた値と同じ）。
+- **気づいた点（要判断）**: `applied_by` は、コードに `so_arm101_calib 0.1.0` と固定されている（`apply.cpp:68`）。今のツールは 0.2.0（測定ファイルの `tool` は 0.2.0）。このまま C3 を行うと、yaml の出所に古い版が入る（動作には無関係。出所の記録の不正確さだけ）。直すなら 1 行（0.1.0 → 0.2.0）で、`colcon build` と試験が要る（実機は不要）。
+- **気づいた点（要判断）**: `measure_file`・`backup_file` は、リポジトリの外（`~/so_arm101_check/`）を指す。yaml の出所をたどれるように、C3 の後に測定ファイル・バックアップ・`compare` のログをリポジトリへ複製する案（例: `calibration_records/2026-11-11/`。各 2 KB 程度）。実行するかはユーザーが決める。
+
+### 更新前の yaml の控え
+- 更新前の yaml は **git の履歴にある**（作業ツリーは clean。最後のコミットは `1e9e968`）。`apply` は yaml の控えを自分では作らない（失敗時の退避先だけ）。
+- C3 の前に、念のため、リポジトリの外に複製を作った: `~/so_arm101_check/follower_calibration_before_C3.yaml`（sha256 `822dad7d46dd276ca8bd453645eb5f09e4f29dfaee63bbcbcfdf35b4841998a1`。`src/` 側と一致）。
+- C3 の後に元に戻す手順: **EEPROM は `restore --backup …163729.json --write`（全関節。違う項目だけ書く）、yaml は、コミット前なら `git checkout -- src/so_arm101_hardware/config/follower_calibration.yaml`、コミット後なら `git revert <そのコミット>`**（履歴は書き換えない）。`restore` は yaml を更新しない。どちらも戻して、全関節 dry-run が「同じ」で、読み取り専用の起動で 6/6 MATCH になるまで、書き込みモードは起動しない。**yaml をコミットする時期は、C3 の手順 3〜5（読み取りのログ）が合格してから**（失敗したら `git checkout` で戻せる。コミット後は revert）。
+
+### 出発点の姿勢で、新しい座標の値の見込み（計算。実測ではない）
+- 同じ物理姿勢なら、`新 rad = 旧 rad − zero_shift × 2π/4095`（angle、direction=1）。`zero_shift` は `measure_C1c_1.json` と今の yaml の差。gripper は新しい範囲（1454〜2944、旧 1900〜3385）での %。
+- 出発点（`start_pose.log` の調整後の値）からの見込み:
+
+  | 関節 | 旧（今の yaml） | 新の見込み | 差 |
+  |---|---|---|---|
+  | shoulder_pan | −0.08362 | −0.08439 | −0.0008 |
+  | shoulder_lift | −1.51134 | −1.51057 | +0.0008 |
+  | elbow_flex | +1.66938 | **+1.68242** | +0.0130 |
+  | wrist_flex | +0.50941 | +0.49714 | −0.0123 |
+  | wrist_roll | −0.07135 | −0.05447 | +0.0169 |
+  | gripper | +0.01645 | +0.02342 | +0.0070 |
+- **elbow_flex は URDF の上限（+1.69）まで +0.0076 rad しか残らない見込み**（今は +0.0206）。`pose_margin.py` で見込みの姿勢を試した結果（キャリブレーションの範囲は今の yaml のまま、URDF の上限・下限までの残りだけ有効）: elbow_flex が LOW（仮の目安 0.05 rad 未満）。ほかの関節は ok。URDF・SRDF は変えない方針なので、**C3 の手順 5 で実測して報告し、判断を仰ぐ**（出発点の姿勢を手で少し開く、など）。

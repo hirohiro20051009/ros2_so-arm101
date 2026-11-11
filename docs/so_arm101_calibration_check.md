@@ -184,7 +184,7 @@ ros2 node list
      --joints gripper --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_apply.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`gripper Lock: 1`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。書く順序は Lock=0 → Homing → Min → Max → Lock=1（各項目を 50 ms 待って読み戻す。**値が変わるので、読み戻しの一致が、待ち時間が足りていることの最初の実測になる**）。
-3. **サーボの電源を入れ直す**（外部電源を切って入れる。USB はつないだままでよいと考えている（未確認）。入れ直したあとにポート名が変わったら報告する）。値が残ることを確認（読み取り専用。launch は起動しない）:
+3. **サーボの電源を入れ直す**（外部電源を切って入れる。USB はつないだままでよい。C2 で確認済み。ポート名は `/dev/ttyACM0` のままだった）。値が残ることを確認（読み取り専用。launch は起動しない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
      --out ~/so_arm101_check/eeprom_after_C2.json 2>&1 | tee -i ~/so_arm101_check/calib_C2_after.log; echo "exit=${PIPESTATUS[0]}"
@@ -208,27 +208,75 @@ ros2 node list
 - 報告してほしいもの: `calib_C2_dryrun.log`、`calib_C2_apply.log`、`calib_C2_after.log`、`calib_C2_restore.log`、`calib_C2_restore_check.log`、各ログの `exit=` の値。
 
 ## C3: 全関節（gripper を含む 6 関節）を 1 回で書く（yaml はそのとき 1 回だけ更新）
-**実行する前に Claude に伝えて承認を得る。** C2 が合格していること。**C2 と同じ C1c の測定ファイル**を使う（旧形式の測定ファイルは `apply` が拒否する）。
-1. dry-run: C2 の手順 1 から `--joints gripper` を外す。`全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する: <yaml のパス>` と出ること（パスは launch が読む `…/share/so_arm101_hardware/config/follower_calibration.yaml`。`colcon build --symlink-install` ならソースの yaml に解決される）。
-2. 書き込み: C2 の手順 2 から `--joints gripper` を外し、ログ名を `calib_C3_apply.log` に。成功すると、`yaml を更新した:` が出る。終了コード 0。
-3. **サーボの電源を入れ直す。** 読み取り専用で起動して診断を確認する（腕は触らない。トルク OFF のまま）:
+**実行する前に Claude に「これから C3 を実行する」と伝え、承認を得る。** C2 が合格していること（合格済み。`docs/inventory.md`）。
+使うファイル: 測定ファイル **`~/so_arm101_check/measure_C1c_1.json`**（C2 と同じ）、バックアップ **`~/so_arm101_check/eeprom_backup_20261111-163729.json`**。待ち時間は 50 ms。
+
+### yaml の扱い（C3 の前に読む）
+- **更新される yaml は src 側 1 つ**: `src/so_arm101_hardware/config/follower_calibration.yaml`（git 管理）。ドライバが起動時に読む install 側（`install/so_arm101_hardware/share/so_arm101_hardware/config/follower_calibration.yaml`）は、`colcon build --symlink-install` により**そのファイルへのシンボリックリンク**で、`apply` はリンクを解決して src 側の実体を書き換える。**そろえる作業も、`colcon build` も要らない**（symlink-install でない場合は install 側がコピーなので別途必要。今の環境は symlink-install）。dry-run に出る yaml のパスは install 側の名前だが、更新されるのは src 側の実体。
+- **出所の記録（`source`）**: 更新後は `kind: ros_calibrated`、`measure_file`（`~/so_arm101_check/measure_C1c_1.json` の絶対パス）、`backup_file`、`applied_at`（実行時刻）、`applied_by: so_arm101_calib 0.1.0`（**コードに固定された値。今のツールは 0.2.0 なので、版の表記は古い。動作には無関係**）になる。今の `source`（LeRobot の json からの変換）は消える（git の履歴に残る）。ファイル冒頭のコメントも置き換わる。`id`・`kind`・`direction`・`schema_version`・`bus`・`conversion` は引き継ぐ。
+- **控え**: 更新前の yaml は git の履歴にある（作業ツリーは clean。最後のコミット `1e9e968`）。念のため、リポジトリの外にも複製がある: `~/so_arm101_check/follower_calibration_before_C3.yaml`（sha256 `822dad7d…98a1`）。
+- **yaml をコミットする時期**: 手順 3〜5 のログが合格してから（Claude が差分を確認してコミットする）。それまでは作業ツリーの変更のまま。
+- yaml に入る値（`measure_C1c_1.json`）。Homing_Offset / min / max（`eeprom.*` も同じ）と、angle 関節の `center`:
+
+  | 関節 | Homing_Offset | min | max | center |
+  |---|---|---|---|---|
+  | shoulder_pan | 144 | 724 | 3454 | 2089 |
+  | shoulder_lift | 117 | 836 | 3211 | 2023.5 |
+  | elbow_flex | 119 | 849 | 3090 | 1969.5 |
+  | wrist_flex | 143 | 808 | 3174 | 1991 |
+  | wrist_roll | 1196 | 100 | 3943 | 2021.5 |
+  | gripper | 547 | 1454 | 2944 | （なし） |
+
+### 実行前の確認
+```bash
+ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"
+ros2 node list
+git status --short src/so_arm101_hardware/config/
+```
+どれも空であること（launch は止まっている。yaml に未コミットの変更がない）。
+
+### 手順
+1. dry-run（何も書かない）:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
+     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
+     2>&1 | tee -i ~/so_arm101_check/calib_C3_dryrun.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   `OK 全関節がバックアップと一致`、`書き込む値` が上の表の 6 関節（`今` はバックアップの値）、`全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する: …/follower_calibration.yaml`、`dry-run: 何も書いていない`、終了コード 0。違うときは書かずに報告する。
+2. 書き込み（確認文字列 `WRITE-EEPROM` を入力。Enter だけでは何も書かれない）:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
+     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
+     --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C3_apply.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   6 関節とも `[新]`、各 `Lock: 1`、`OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml を更新した: …`、終了コード 0。続けて `git diff --stat` に `follower_calibration.yaml` だけが出ること（**コミットはまだしない**）。**launch はまだ起動しない。**
+3. **12 V を入れ直す**（USB はつないだまま）。まず launch なしで、EEPROM が残ったことを確認（読み取り専用）:
+   ```bash
+   ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
+     --out ~/so_arm101_check/eeprom_after_C3.json 2>&1 | tee -i ~/so_arm101_check/calib_C3_after.log; echo "exit=${PIPESTATUS[0]}"
+   ```
+   6 関節とも「2 回読んで一致」で、値が上の表のとおり（Homing_Offset / Min / Max）、終了コード 0。
+4. 読み取り専用で起動して診断を確認する（腕は触らない。トルク OFF のまま）:
    ```bash
    ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_readonly.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   `[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、全関節 `torque_enable=0`。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
-4. 同じ起動のまま、腕を**出発点の姿勢**（トルク OFF で手を離しても止まる姿勢。手で作る）にして、新しい座標での値を読む:
+   `[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、全関節 `torque_enable=0`、`MISMATCH` の行なし。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
+5. 同じ起動のまま、腕を**出発点の姿勢**（W3.5・W4 の出発点。トルク OFF で手を離しても止まる姿勢。手で作る）にして、新しい座標での値を読む:
    ```bash
    ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_start_pose.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   停止は Ctrl-C だけ。後始末（ps と `ros2 node list`。残っていたら `ros2 daemon stop; ros2 daemon start`）。
-5. **URDF の関節リミットとの余裕**（オフライン。URDF・SRDF は読むだけ）:
+   見込み（計算。同じ物理姿勢なら）: pan −0.0844、lift −1.5106、elbow **+1.6824**、wrist_flex +0.4971、roll −0.0545、gripper +0.0234（出発点は pan −0.0836、lift −1.5113、elbow +1.6694、wrist_flex +0.5094、roll −0.0713、gripper +0.0165）。**目安: 各関節が見込みから 0.03 rad 以内**（姿勢を手で作る再現性のぶん。符号の誤り・単位の誤り・オフセットの誤りのような大きなずれを見つける確認。それより大きくずれたら、書き込みモードに進まず報告する）。
+   停止は Ctrl-C だけ。後始末: `ps`（上の `ps aux | grep …` と同じ）と `ros2 node list` が空であること。`ros2 node list` だけに残り `ps` が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する。
+6. **URDF の関節リミットとの余裕**（オフライン。URDF・SRDF は読むだけ。`source install/setup.bash` の後に実行）:
    ```bash
    python3 tools/pose_margin.py --pose start=<pan>,<lift>,<elbow>,<wrist_flex>,<wrist_roll>,<gripper> \
      2>&1 | tee -i ~/so_arm101_check/calib_C3_margin.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   （値は手順 4 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。必要なら `--pose home=…` を足す。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。
-- 合格基準: 手順 2 が終了コード 0、手順 3 が 6/6 MATCH（2 行とも）、手順 4・5 のログが取れている。
-- 報告してほしいもの: `calib_C3_apply.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`、`calib_C3_margin.log`。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
+   （値は手順 5 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。`--calibration` は新しい yaml（既定）。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。**見込みでは elbow_flex の上限までの余裕が約 0.008 rad（今は 0.021）と小さい**ので、LOW が出るかもしれない。
+- 合格基準: 手順 2 が終了コード 0（6 関節 `[新]`、yaml 更新）。手順 3 で 12 V を入れ直した後も値が残る。手順 4 が 6/6 MATCH（2 行とも）。手順 5 の各関節が見込みから 0.03 rad 以内。手順 6 のログが取れている（LOW・OUT は報告して判断）。
+- 報告してほしいもの: `calib_C3_dryrun.log`、`calib_C3_apply.log`、`calib_C3_after.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`、`calib_C3_margin.log`、各ログの `exit=` の値、`git diff --stat` の出力。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
+- 失敗したとき: 上の「失敗したときの共通の対処」。`apply` が失敗すると、yaml は更新されず、触れた全関節がバックアップへ戻る。終了コード 2 は、表示された `restore` で戻す。**どの場合も launch を起動しない**（EEPROM と yaml が食い違う）。
+- **C3 の後に元に戻す手順**（C3 が合格したあとで、やはり戻すとき）: ① EEPROM: `so_arm101_calib restore --port /dev/ttyACM0 --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C3_revert.log; echo "exit=${PIPESTATUS[0]}"`（違う項目だけ書く）。② yaml: 未コミットなら `git checkout -- src/so_arm101_hardware/config/follower_calibration.yaml`、コミット済みなら `git revert <そのコミット>`（履歴は書き換えない）。③ 全関節の dry-run（`restore --backup …` に `--write` なし）が「同じ」で、読み取り専用の起動で 6/6 MATCH になるまで、書き込みモードは起動しない。`restore` は yaml を更新しない。
 
 ## 失敗したときの共通の対処
 - `apply` が終了コード 1: 全関節が実行前の値（バックアップ）に戻り、Lock=1 を確認した。原因（表示された `read-back mismatch` など）を報告する。
