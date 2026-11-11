@@ -1167,3 +1167,12 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 - 手順書 `docs/so_arm101_calibration_check.md` に C1・判断・C2・C3・失敗時の共通の対処を追記（C3 の URDF 余裕の確認は `tools/pose_margin.py`）。
 - 未実施・実機でしか確認できないこと（計画 6 章どおり）: Lock の実動作と EEPROM の書き込み待ち時間（C0.5 で実測）、Min/Max limit が Present_Position の読み値に影響しないこと（推測）、負の offset の実機での挙動、全 40 バイトを 8 バイトずつ読めること。
 - 次: ユーザーが C0（バックアップ）から実機確認を行う。EEPROM への最初の書き込み（C0.5）の前に、ユーザーの確認を取る。
+
+## 段階2c 実機確認: C0（バックアップ）合格（2026-11-11）
+- 実施: ユーザー（Claude は実機・シリアルポートに触れていない）。読み取り専用の確認で、EEPROM には何も書いていない。結果はユーザーの報告による。
+- `calib_C0_backup.log`: 6 関節すべてで「2 回読んで一致」。Homing_Offset と Min/Max は yaml の `eeprom.*` と一致。終了コード 0。
+- バックアップ: `~/so_arm101_check/eeprom_backup_20261111-163729.json`（1843 バイト）。消さない（以降の復元の元）。
+- `calib_C0_dryrun.log`（`restore` の dry-run）: 前提の確認 6/6 OK、18 レジスタすべて「同じ（書かない）」、dry-run、終了コード 0。
+- 事実（実機で通った）: EEPROM の 40 バイト（アドレス 0〜39）を 8 バイトずつ読むこと。
+- 終了コードの取り方: パイプの後に `echo "exit=${PIPESTATUS[0]}"` を付けて取った（`tee` につなぐと `$?` は `tee` の値になるため）。
+- 次: C0.5（実機で初めて EEPROM に書く。gripper だけ、バックアップと同じ値）。実行前にユーザーの確認を取る。
