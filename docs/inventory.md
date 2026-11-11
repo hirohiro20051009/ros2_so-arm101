@@ -1548,3 +1548,8 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - **リポジトリの外のファイルを読む試験は無い（確認）**: 試験が読むのは、`CALIBRATION_YAML`・`PRODUCTION_YAML`（リポジトリ内）、`GOLDEN_CSV`・`UNNORMALIZE_GOLDEN_CSV`（`test/data`）、`PACKAGE_XML`、`PACKAGE_SOURCE_DIR` のソース（`test_write_bus.cpp` のソース走査）、`JOINT_LIMITS_YAML`・`CONTROLLERS_YAML`（リポジトリ内の他パッケージ）、`::testing::TempDir()` の一時ファイルだけ。**`YamlMatchesLeRobotJsonSource` は、名前に反して LeRobot の json を読まない**（固定ファイルの値を、json の値として試験に書いてある）。`~/.cache/huggingface/lerobot/…`、`~/miniforge3` などを読む試験は無い（`grep` で確認）。LeRobot を使うのは、黄金表を作る `tools/gen_conversion_golden.py`（試験の外。`colcon test` では動かない）だけ。
 - **試験の結果**（`colcon build` 成功、`colcon test --packages-select so_arm101_hardware so_arm101_calibration` を 3 回）: **`so_arm101_hardware` 88 件、`so_arm101_calibration` 66 件、3 回とも失敗 0**（8 件の赤が解消。`Measure.CommErrorsWhileRecordingAreTolerated` も、この 3 回では落ちなかった）。
 - **不安定な `Measure.CommErrorsWhileRecordingAreTolerated` の頻度（測定。無効にしない）**: ビルド済みの試験バイナリの単独実行を連続で 40 回: **31 回失敗**。`test_measure_apply` 全体の実行を連続で 15 回: **3 回失敗**。`colcon test` 3 回: 0 回。実行の仕方で頻度が大きく違う（連続で起動し直すと、最初の試験として実行されるぶん、偽サーボのスレッドが冷えていて、残りの応答が捨てた後に届く競合が出やすい、と見ている。推測）。原因はバス層の競合（残課題「バス層の古い応答の取り違え」）。計画は `docs/bus_layer_fix_plan.md`。
+
+## バス層の修正の計画書（2026-11-11。計画のみ。実装は承認の後）
+- `docs/bus_layer_fix_plan.md` に、案 A（失敗したら静かになるまで待って捨てる）・B（SYNC_READ の残りの応答を読み切る）・C（EEPROM の読み戻しを 2 回一致）・D（取り違えの数を出す）、偽サーボの「応答を遅らせる」機能の設計、試験の計画、「誤って一致」の経路の検討、W0 の `checksum mismatch` との関係（この競合では説明できない）、`Measure.CommErrorsWhileRecordingAreTolerated` の見立て（A・B で安定する見込み。100 回連続で確認する）、実機での確認の手順（C4 と合わせる）、実装の順序を書いた。
+- 実機の頻度（事実）: 書き込みモードの運転で約 22.2 万回の読み取り、`measure` の記録で 9999 回の SYNC_READ に、失敗 0。競合が実機で起きた記録は無い。
+- 実装の時期: C3 の後、C4 の前（ユーザーの予定）。承認の後に、計画書の 8 章の順序で行う。
