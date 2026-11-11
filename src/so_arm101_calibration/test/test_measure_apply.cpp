@@ -13,6 +13,7 @@
 
 #include "so_arm101_calibration/apply.hpp"
 #include "so_arm101_calibration/measure.hpp"
+#include "so_arm101_calibration/version.hpp"
 #include "test_rig.hpp"
 
 using namespace so_arm101_calibration;  // NOLINT
@@ -157,6 +158,7 @@ TEST(Measure, MeasuresCenterAndRangeWithoutWritingAnything)
   MeasureFile m;
   std::string text;
   ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  EXPECT_EQ(m.tool, tool_id());
   ASSERT_EQ(m.joints.size(), 6u);
   for (int i = 0; i < 6; ++i) {
     const auto & j = m.joints[i];
@@ -1003,4 +1005,7 @@ TEST(Apply, TheRenderedYamlKeepsTheOldFormat)
   EXPECT_NE(text.find("gripper: {id: 6, kind: linear_percent, direction: 1, min: "), std::string::npos) << text;
   EXPECT_EQ(text.find("gripper: {id: 6, kind: linear_percent, direction: 1, center"), std::string::npos);
   EXPECT_NE(text.find("conversion: {angle_ticks: 4095}"), std::string::npos);
+  // 出所の版は、測定ファイル・バックアップと同じ 1 か所の定数
+  EXPECT_NE(text.find("applied_by: " + tool_id() + "\n"), std::string::npos) << text;
+  EXPECT_EQ(text.find("0.1.0"), std::string::npos) << text;
 }

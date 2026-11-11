@@ -17,6 +17,7 @@
 #include "so_arm101_calibration/eeprom_backup.hpp"
 #include "so_arm101_calibration/eeprom_ops.hpp"
 #include "so_arm101_calibration/restore.hpp"
+#include "so_arm101_calibration/version.hpp"
 #include "so_arm101_hardware/calibration.hpp"
 #include "so_arm101_hardware/serial_port.hpp"
 
@@ -386,4 +387,20 @@ TEST(Restore, WaitTimeDecidesWhetherASlowEepromCommitIsReadBackCorrectly)
   c.opt.wait_ms = 80;
   ASSERT_EQ(s.run(c, &text), kExitOk) << text;
   EXPECT_TRUE(s.equals(bs));
+}
+
+// ---------------------------------------------------------------- 版の表記
+TEST(Version, ToolIdIsOneStringAndMatchesPackageXml)
+{
+  EXPECT_EQ(tool_id(), std::string(kToolName) + " " + kToolVersion);
+  std::ifstream f(PACKAGE_XML);
+  ASSERT_TRUE(f.good()) << PACKAGE_XML;
+  std::stringstream ss;
+  ss << f.rdbuf();
+  const std::string xml = ss.str();
+  const std::string tag = "<version>";
+  const auto a = xml.find(tag);
+  ASSERT_NE(a, std::string::npos);
+  const auto b = xml.find("</version>", a);
+  EXPECT_EQ(xml.substr(a + tag.size(), b - a - tag.size()), kToolVersion) << "package.xml の <version> と version.hpp の kToolVersion を同じにする";
 }

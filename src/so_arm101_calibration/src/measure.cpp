@@ -14,6 +14,7 @@
 #include <thread>
 
 #include "so_arm101_calibration/eeprom_backup.hpp"
+#include "so_arm101_calibration/version.hpp"
 
 namespace so_arm101_calibration
 {
@@ -527,7 +528,7 @@ int run_measure(
   // 5. 結果
   MeasureFile m;
   m.created = now_string(false);
-  m.tool = "so_arm101_calib 0.2.0";
+  m.tool = tool_id();
   bool all_valid = true;
   out << "\n== 測定結果（新座標。Homing_Offset = actual_center − 2047）\n";
   out << std::left << std::setw(15) << "joint" << std::right << std::setw(8) << "center" << std::setw(9) << "measured"

@@ -26,6 +26,7 @@
 #include "so_arm101_calibration/eeprom_backup.hpp"
 #include "so_arm101_calibration/measure.hpp"
 #include "so_arm101_calibration/restore.hpp"
+#include "so_arm101_calibration/version.hpp"
 #include "so_arm101_hardware/calibration.hpp"
 #include "so_arm101_hardware/serial_port.hpp"
 
@@ -249,7 +250,7 @@ int main(int argc, char ** argv)
     Backup b;
     b.created = now_string(false);
     b.port = path;
-    b.tool = "so_arm101_calib 0.1.0";
+    b.tool = tool_id();
     for (const auto & j : all) {
       JointEeprom e, e2;
       if (!read_joint_eeprom(bus, j.id, j.name, 3, &e, &err) || !read_joint_eeprom(bus, j.id, j.name, 3, &e2, &err)) {

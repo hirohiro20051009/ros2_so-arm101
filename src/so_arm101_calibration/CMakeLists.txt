@@ -43,6 +43,7 @@ if(BUILD_TESTING)
   target_link_libraries(test_calibration so_arm101_calib_core util)
   target_include_directories(test_calibration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test)
   target_compile_definitions(test_calibration PRIVATE
+    PACKAGE_XML="${CMAKE_CURRENT_SOURCE_DIR}/package.xml"
     CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/config/follower_calibration.yaml")
 endif()
 

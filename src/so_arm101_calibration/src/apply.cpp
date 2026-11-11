@@ -1,5 +1,6 @@
 // Copyright 2026 so_arm101 authors. MIT License.
 #include "so_arm101_calibration/apply.hpp"
+#include "so_arm101_calibration/version.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -65,7 +66,7 @@ std::string render_calibration_yaml(
     << "# 違うと起動を拒否する）。\n"
     << "schema_version: " << old["schema_version"].as<int>() << "\n"
     << "source:\n  kind: ros_calibrated\n  measure_file: " << measure_path << "\n  backup_file: " << backup_path
-    << "\n  applied_at: " << applied_at << "\n  applied_by: so_arm101_calib 0.1.0\n"
+    << "\n  applied_at: " << applied_at << "\n  applied_by: " << tool_id() << "\n"
     << "bus: {baudrate: " << old["bus"]["baudrate"].as<int>() << ", protocol: " << old["bus"]["protocol"].as<int>() << "}\n"
     << "# LeRobot 等価（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。\n"
     << "conversion: {angle_ticks: " << old["conversion"]["angle_ticks"].as<int>() << "}\n"
