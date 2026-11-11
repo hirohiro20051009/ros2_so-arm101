@@ -3,9 +3,12 @@ SO-ARM101 統合ランチャー（ルート名前空間）。
 
   mock:=true  (既定) : mock_components/GenericSystem でシミュレーション
   mock:=false        : 実機。hardware で経路を選ぶ（mock:=true のときは hardware は無視される）
-    hardware:=lerobot (既定) : So101HardwareBridge + LeRobot bridge (so_arm101_lerobot_bridge)
-    hardware:=feetech        : Sts3215System（STS3215 を直接制御。read_only:=true は読み取り専用で、
-                               LeRobot を使わず、サーボのレジスタには書き込まない）
+    hardware:=feetech (既定) : Sts3215System（STS3215 を直接制御。LeRobot を使わない）
+                               read_only:=true (既定) は読み取り専用で、サーボのレジスタには書き込まない。
+                               書き込みモード（トルク ON。腕が動く）は read_only:=false を明示したときだけ
+                               （手順は docs/feetech_write_check.md）
+    hardware:=lerobot        : So101HardwareBridge + LeRobot bridge (so_arm101_lerobot_bridge)。
+                               hardware:=lerobot を明示したときだけ使う（段階2c の後に archive へ移す予定）
 
 どちらのモードも robot_state_publisher / ros2_control_node / move_group は1つずつ、
 コントローラ名・トピックは共通（/arm_controller, /gripper_controller, /joint_states）。
@@ -68,15 +71,16 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(
         DeclareBooleanLaunchArg(
-            "mock", default_value=True, description="true=mock / false=実機(LeRobot bridge 経由)"
+            "mock", default_value=True, description="true=mock / false=実機（hardware で経路を選ぶ）"
         )
     )
     ld.add_action(
         DeclareLaunchArgument(
             "hardware",
-            default_value="lerobot",
+            default_value="feetech",
             choices=["lerobot", "feetech"],
-            description="mock:=false のときだけ有効。lerobot=LeRobot bridge 経由 / feetech=STS3215 を直接読む(読み取り専用)",
+            description="mock:=false のときだけ有効。feetech=STS3215 を直接制御（既定。read_only で読み取り専用/書き込みを選ぶ）"
+            " / lerobot=LeRobot bridge 経由（明示したときだけ使う）",
         )
     )
     ld.add_action(DeclareLaunchArgument("serial_port", default_value="/dev/ttyACM0"))
@@ -93,7 +97,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "read_only", default_value="true", choices=["true", "false"],
             description="hardware:=feetech のみ。true=読み取り専用（既定）/ false=書き込みモード（トルク ON。腕が動く。"
-            "手順は docs/feetech_write_check.md）",
+            "read_only:=false を明示したときだけ有効。手順は docs/feetech_write_check.md）",
         )
     )
     ld.add_action(

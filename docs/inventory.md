@@ -1097,3 +1097,13 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 | チェックサム不一致の原因 | 未特定 | 再試行と受信バイト列の記録は残す（今日の起動 7 回は `startup_read_retries=0`） |
 | タグ `stage2b-done` | このコミットの直後に付与（承認済み） | |
 | `bringup.launch.py` の `hardware` / `read_only` の既定値 | 未（計画を出し、承認後） | 現在 `hardware=lerobot`（既定）、`read_only=true`（既定） |
+
+## 段階2b-4: bringup.launch.py の既定値の変更（2026-11-11）
+- 変更（`src/so_arm101_bringup/launch/bringup.launch.py` の `DeclareLaunchArgument` の既定値・説明文と冒頭コメントだけ）: `hardware` の既定を `lerobot` → `feetech`。`read_only` の既定は `true` のまま（説明に「書き込みは `read_only:=false` を明示したときだけ」を追記）。`mock` の説明文から「LeRobot bridge 経由」を除いた。条件式・ノード構成は変更なし。
+- 確認（事実）:
+  - `colcon build` 成功（7 パッケージ）。`--show-args` で `hardware` の default が `'feetech'`、`read_only` が `'true'`。
+  - モック（`use_rviz:=false`）: `gripper_controller`・`joint_state_broadcaster`・`arm_controller` がすべて active。
+  - bridge の条件式 `mock=='false' and hardware=='lerobot'` を 4 通りで評価: bridge が起動するのは mock=false かつ hardware=lerobot のときだけ（mock=true/any、mock=false/feetech は起動しない）。
+  - 停止後: `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` は出力なし、`ros2 node list` も出力なし。
+- 手順書: `feetech_*_check.md` の起動コマンドはすべて `hardware:=` を明示しており、意味が変わる箇所なし。`feetech_write_check.md` に既定の説明を 1 段落追記。
+- 実機は動かしていない。
