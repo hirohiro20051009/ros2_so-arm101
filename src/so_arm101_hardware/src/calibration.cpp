@@ -52,10 +52,24 @@ Calibration load_calibration(const std::string & path)
     throw std::runtime_error(ctx + ": unsupported schema_version " + std::to_string(c.schema_version));
   }
   if (root["source"]) {
+    // ログ用の出所の説明（動作には使わない）。
+    //  旧形式（LeRobot の json からの変換）: kind, file, file_date（無い項目は ?）。表示は従来のまま。
+    //  新形式（so_arm101_calib の apply が書く）: kind, measure_file, backup_file, applied_at, applied_by（ある項目だけ）。
     const auto s = root["source"];
-    c.source = (s["kind"] ? s["kind"].as<std::string>() : std::string("?")) + ", file=" +
-      (s["file"] ? s["file"].as<std::string>() : std::string("?")) + ", file_date=" +
-      (s["file_date"] ? s["file_date"].as<std::string>() : std::string("?"));
+    auto text = [&s](const char * key) {return s[key].as<std::string>();};
+    const std::string kind = s["kind"] ? text("kind") : std::string("?");
+    const char * const new_keys[] = {"measure_file", "backup_file", "applied_at", "applied_by"};
+    bool has_new = false;
+    for (const char * k : new_keys) {has_new = has_new || static_cast<bool>(s[k]);}
+    if (has_new && !s["file"] && !s["file_date"]) {
+      c.source = kind;
+      for (const char * k : new_keys) {
+        if (s[k]) {c.source += std::string(", ") + k + "=" + text(k);}
+      }
+    } else {
+      c.source = kind + ", file=" + (s["file"] ? text("file") : std::string("?")) + ", file_date=" +
+        (s["file_date"] ? text("file_date") : std::string("?"));
+    }
   }
   const auto bus = root["bus"];
   if (!bus) {throw std::runtime_error(ctx + ": missing 'bus'");}

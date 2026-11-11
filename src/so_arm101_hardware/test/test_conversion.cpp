@@ -142,6 +142,56 @@ TEST(Calibration, RejectsBrokenFiles)
   EXPECT_THROW(load_calibration(path), std::runtime_error);
 }
 
+// ---- 起動ログの出所の表示（`calibration.source`）。本番の yaml には依存しない（一時ファイルを書く） ----
+namespace
+{
+const char * const kJointsYaml =
+  "bus: {baudrate: 1000000, protocol: 0}\nconversion: {angle_ticks: 4095}\njoints:\n"
+  "  a: {id: 1, kind: angle, direction: 1, center: 1, min: 0, max: 2, eeprom: {homing_offset: 0, min_limit: 0, max_limit: 2}}\n";
+
+std::string source_of(const std::string & source_block)
+{
+  const std::string path = ::testing::TempDir() + "source_cal.yaml";
+  {
+    std::ofstream f(path);
+    f << "schema_version: 1\n" << source_block << kJointsYaml;
+  }
+  const std::string src = load_calibration(path).source;
+  std::remove(path.c_str());
+  return src;
+}
+}  // namespace
+
+TEST(CalibrationSource, OldFormatIsShownAsBefore)
+{
+  EXPECT_EQ(
+    source_of("source:\n  kind: converted_from_lerobot_json\n  file: ~/x/so101_follower.json\n  file_date: 2026-09-07\n"
+              "  converted_at: 2026-11-06\n  converted_by: tools/convert_lerobot_calibration.py\n"),
+    "converted_from_lerobot_json, file=~/x/so101_follower.json, file_date=2026-09-07");
+  // 旧形式で項目が欠けたときは、従来どおり ?
+  EXPECT_EQ(source_of("source:\n  kind: converted_from_lerobot_json\n"), "converted_from_lerobot_json, file=?, file_date=?");
+  EXPECT_EQ(source_of("source:\n  file: a.json\n"), "?, file=a.json, file_date=?");
+}
+
+TEST(CalibrationSource, NewFormatShowsTheFieldsThatApplyWrites)
+{
+  EXPECT_EQ(
+    source_of("source:\n  kind: ros_calibrated\n  measure_file: calibration_records/2026-11-11/measure_C1c_1.json\n"
+              "  backup_file: calibration_records/2026-11-11/eeprom_backup_20261111-163729.json\n"
+              "  applied_at: 2026-11-11T19:43:04\n  applied_by: so_arm101_calib 0.2.0\n"),
+    "ros_calibrated, measure_file=calibration_records/2026-11-11/measure_C1c_1.json, "
+    "backup_file=calibration_records/2026-11-11/eeprom_backup_20261111-163729.json, "
+    "applied_at=2026-11-11T19:43:04, applied_by=so_arm101_calib 0.2.0");
+  // 項目が欠けたら、その項目だけ出さない（? は出さない）
+  EXPECT_EQ(source_of("source:\n  kind: ros_calibrated\n  applied_at: 2026-11-11T19:43:04\n"), "ros_calibrated, applied_at=2026-11-11T19:43:04");
+  EXPECT_EQ(source_of("source:\n  applied_by: x 1\n"), "?, applied_by=x 1");
+}
+
+TEST(CalibrationSource, NoSourceStaysEmpty)
+{
+  EXPECT_EQ(source_of(""), "");
+}
+
 TEST(SignMagnitude, DecodesLikeLeRobot)
 {
   // encoding_utils.py: decode_sign_magnitude(encoded, sign_bit)

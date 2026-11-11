@@ -997,6 +997,22 @@ TEST(Apply, TheFirstSessionOfCommErrorsIsRetriedButAMismatchIsNot)
   EXPECT_TRUE(t.eeprom_is_new({1, 2, 3, 4, 5, 6}));
 }
 
+TEST(Apply, TheRenderedYamlLoadsAndItsSourceIsShownInTheStartupLog)
+{
+  // apply が書いた yaml の source（ros_calibrated）を、ドライバの読み込みが説明の文字列にする（`file=?` にならない）
+  ApplyRig t;
+  const std::string text = render_calibration_yaml(
+    t.yaml, t.m, "calibration_records/x/B.json", "calibration_records/x/M.json", "2026-11-11T19:43:04");
+  const std::string path = t.dir + "/rendered.yaml";
+  {std::ofstream(path) << text;}
+  const auto cal = so_arm101_hardware::load_calibration(path);
+  EXPECT_EQ(
+    cal.source,
+    "ros_calibrated, measure_file=calibration_records/x/M.json, backup_file=calibration_records/x/B.json, "
+    "applied_at=2026-11-11T19:43:04, applied_by=" + tool_id());
+  EXPECT_EQ(cal.source.find('?'), std::string::npos) << cal.source;
+}
+
 TEST(Apply, TheRenderedYamlKeepsTheOldFormat)
 {
   ApplyRig t;
