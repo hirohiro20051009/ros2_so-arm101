@@ -101,6 +101,9 @@ TEST(Conversion, GripperTickInRad)
   EXPECT_NEAR(tick_in_rad(*g, cal.angle_ticks), (100.0 / 1485.0) * kPi / 180.0, 1e-15);
 }
 
+// CALIBRATION_YAML は、試験専用の固定ファイル（test/data/follower_calibration_lerobot_json_20260907.yaml。旧校正＝
+// LeRobot の json から変換した値）。本番の yaml は C3 で更新されたので、この試験は本番の yaml を読まない
+// （この試験は LeRobot の json そのものは読まない。json の値は、固定ファイルの値としてここに書いてある）。
 TEST(Conversion, YamlMatchesLeRobotJsonSource)
 {
   const Calibration cal = load_calibration(CALIBRATION_YAML);
@@ -140,6 +143,37 @@ TEST(Calibration, RejectsBrokenFiles)
     "schema_version: 1\nbus: {baudrate: 1000000, protocol: 0}\nconversion: {angle_ticks: 4095}\njoints:\n"
     "  a: {id: 1, kind: angle, direction: 1, center: 1, min: 5, max: 2, eeprom: {homing_offset: 0, min_limit: 0, max_limit: 2}}\n");
   EXPECT_THROW(load_calibration(path), std::runtime_error);
+}
+
+// ---- 本番の yaml（config/follower_calibration.yaml）の構造の検査。値は固定しない（再校正で変わる） ----
+TEST(ProductionYaml, LoadsAndIsStructurallyConsistent)
+{
+  const Calibration cal = load_calibration(PRODUCTION_YAML);
+  EXPECT_EQ(cal.schema_version, 1);
+  EXPECT_EQ(cal.baudrate, 1000000);
+  EXPECT_EQ(cal.angle_ticks, 4095);
+  EXPECT_FALSE(cal.source.empty());
+  ASSERT_EQ(cal.joints.size(), 6u);
+  const char * const names[] = {"shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"};
+  for (int i = 0; i < 6; ++i) {
+    const JointCalibration * j = cal.find(names[i]);
+    ASSERT_NE(j, nullptr) << names[i];
+    EXPECT_EQ(int(j->id), i + 1) << names[i];
+    EXPECT_EQ(j->direction, 1) << names[i];
+    EXPECT_LT(j->raw_min, j->raw_max) << names[i];
+    EXPECT_GE(j->raw_min, 0) << names[i];
+    EXPECT_LE(j->raw_max, 4095) << names[i];
+    // eeprom.* は、変換に使わない診断用で、min/max と同じ値（apply が書く形）
+    EXPECT_EQ(j->eeprom.min_limit, j->raw_min) << names[i];
+    EXPECT_EQ(j->eeprom.max_limit, j->raw_max) << names[i];
+    EXPECT_LE(std::abs(j->eeprom.homing_offset), 2047) << names[i];  // Homing_Offset は bit11 の符号付き
+    if (j->kind == JointKind::Angle) {
+      EXPECT_GT(j->center, j->raw_min) << names[i];
+      EXPECT_LT(j->center, j->raw_max) << names[i];
+    }
+  }
+  EXPECT_EQ(cal.find("gripper")->kind, JointKind::LinearPercent);
+  EXPECT_EQ(cal.find("shoulder_pan")->kind, JointKind::Angle);
 }
 
 // ---- 起動ログの出所の表示（`calibration.source`）。本番の yaml には依存しない（一時ファイルを書く） ----

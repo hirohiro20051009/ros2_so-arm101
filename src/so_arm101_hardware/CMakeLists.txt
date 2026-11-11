@@ -55,7 +55,8 @@ if(BUILD_TESTING)
   ament_add_gtest(test_conversion test/test_conversion.cpp)
   target_link_libraries(test_conversion so_arm101_sts3215)
   target_compile_definitions(test_conversion PRIVATE
-    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/follower_calibration.yaml"
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/test/data/follower_calibration_lerobot_json_20260907.yaml"
+    PRODUCTION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/follower_calibration.yaml"
     GOLDEN_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/data/conversion_golden.csv"
     UNNORMALIZE_GOLDEN_CSV="${CMAKE_CURRENT_SOURCE_DIR}/test/data/unnormalize_golden.csv")
 
@@ -73,7 +74,7 @@ if(BUILD_TESTING)
   ament_add_gtest(test_sts3215_system test/test_sts3215_system.cpp)
   target_link_libraries(test_sts3215_system so_arm101_sts3215 util)
   target_compile_definitions(test_sts3215_system PRIVATE
-    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/follower_calibration.yaml"
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/test/data/follower_calibration_lerobot_json_20260907.yaml"
     JOINT_LIMITS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_moveit_config/config/joint_limits.yaml"
     CONTROLLERS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_controller/config/controllers.yaml")
 endif()

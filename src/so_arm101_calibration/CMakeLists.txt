@@ -39,12 +39,14 @@ if(BUILD_TESTING)
   target_link_libraries(test_measure_apply so_arm101_calib_core util)
   target_include_directories(test_measure_apply PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test)
   target_compile_definitions(test_measure_apply PRIVATE
-    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/config/follower_calibration.yaml")
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test/data/follower_calibration_lerobot_json_20260907.yaml")
   target_link_libraries(test_calibration so_arm101_calib_core util)
   target_include_directories(test_calibration PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test)
   target_compile_definitions(test_calibration PRIVATE
     PACKAGE_XML="${CMAKE_CURRENT_SOURCE_DIR}/package.xml"
-    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/config/follower_calibration.yaml")
+    PRODUCTION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/config/follower_calibration.yaml"
+    EEPROM_AFTER_C3_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../../calibration_records/2026-11-11/eeprom_after_C3.json"
+    CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_hardware/test/data/follower_calibration_lerobot_json_20260907.yaml")
 endif()
 
 ament_package()

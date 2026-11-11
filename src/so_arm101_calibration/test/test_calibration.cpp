@@ -404,3 +404,26 @@ TEST(Version, ToolIdIsOneStringAndMatchesPackageXml)
   const auto b = xml.find("</version>", a);
   EXPECT_EQ(xml.substr(a + tag.size(), b - a - tag.size()), kToolVersion) << "package.xml の <version> と version.hpp の kToolVersion を同じにする";
 }
+
+// ---------------------------------------------------------------- 本番の yaml と、記録した EEPROM の読み出し
+// 本番の follower_calibration.yaml の eeprom.*（Homing_Offset・Min・Max）が、C3 の後に実機から読み出して保存した
+// calibration_records/2026-11-11/eeprom_after_C3.json と一致する（ファイルどうしを比べる。値は試験に書かない）。
+// 再校正して yaml を更新したときは、新しい読み出しを calibration_records に置き、EEPROM_AFTER_C3_JSON の指す先を更新する。
+TEST(ProductionYaml, MatchesTheEepromReadAfterC3)
+{
+  const so_arm101_hardware::Calibration cal = so_arm101_hardware::load_calibration(PRODUCTION_YAML);
+  Backup after;
+  std::string err;
+  ASSERT_TRUE(load_backup_file(EEPROM_AFTER_C3_JSON, &after, &err)) << EEPROM_AFTER_C3_JSON << ": " << err;
+  ASSERT_EQ(after.joints.size(), cal.joints.size());
+  for (const auto & j : cal.joints) {
+    const JointEeprom * e = after.find(j.id);
+    ASSERT_NE(e, nullptr) << j.name;
+    uint16_t homing_raw = 0;
+    ASSERT_TRUE(so_arm101_hardware::encode_sign_magnitude(j.eeprom.homing_offset, so_arm101_hardware::kHomingOffsetSignBit, &homing_raw))
+      << j.name;
+    EXPECT_EQ(e->raw(CalibReg::HomingOffset), homing_raw) << j.name << " Homing_Offset（yaml " << j.eeprom.homing_offset << "）";
+    EXPECT_EQ(e->raw(CalibReg::MinPositionLimit), j.eeprom.min_limit) << j.name << " Min";
+    EXPECT_EQ(e->raw(CalibReg::MaxPositionLimit), j.eeprom.max_limit) << j.name << " Max";
+  }
+}
