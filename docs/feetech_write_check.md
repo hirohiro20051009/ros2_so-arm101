@@ -19,6 +19,44 @@
 7. 腕の周りに物を置かない。ケーブルが引っかからないようにする。
 8. 後始末の確認: `ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"` と `ros2 node list` の両方で残りがないことを確認する。**`ros2 node list` に残っていても `ps` が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する**（move_group が Segmentation fault で終わると、daemon に古い一覧が残ることがある。推測）。それでも残るなら、ps に出ない原因を調べる。
 
+## C4 の全体の順序（C3 合格後。バス層の修正の確認を含む）
+
+**実行するのはユーザーだけ。** 各ステップは前のステップが合格してから。ログは `~/so_arm101_check/` に取る。止めるのは **Ctrl-C だけ**（`kill -9`・名前での kill はしない）。各ステップの後に、共通の約束 8 の後始末の確認（`ps` と `ros2 node list` の両方）を行う。
+前提: `git log` に、バス層の修正（段階 1〜4）のコミットがある／`colcon build --symlink-install` 済み／`colcon test`（`so_arm101_hardware`・`so_arm101_calibration`）が全件通っている（Claude が確認済み）。
+
+| 順 | ステップ | 腕・トルク | 何をするか | 報告してほしいもの |
+|---|---|---|---|---|
+| 1 | **C0.6**（案 C の確認。`docs/so_arm101_calibration_check.md`） | トルク OFF。EEPROM に書く（gripper、同じ値） | 手順どおり。**実行前に Claude に伝えて確認を得る** | 各ログと `exit=`、`time` の出力、失敗時は `bus:` の行 |
+| 2 | **読み取り専用の運転 10 分**（バス層の修正の健全性） | トルク OFF。腕は触らない | 下の「2. 読み取り専用 10 分」 | `deactivated (no register was written)` の行の全文（`reads`・`retried`・`failed_cycles`・`bus:`）、経過時間 |
+| 3 | **読み値のばらつきの確認**（出発点） | トルク OFF | 腕をたたみ切った姿勢に作り直して、読み取り専用の起動を 3 回（各 5 秒）。`[diag]` と `/joint_states` の elbow_flex を比べる | 3 回の elbow_flex の読み値（出発点 +1.69009 との差） |
+| 4 | **W0 を 5 回**（起動と停止の繰り返し） | トルク ON（保持のみ）。腕を両手で支える | 下の「4. W0 を 5 回」 | 各回の `startup_read_retries`・`deactivated.` の行（`bus:` を含む）、`checksum mismatch` が出たら `rx=` と `flushed_before_request=` の行を全部 |
+| 5 | **W1 → W2 → W3 → W3.5 → W4**（本文の各段階どおり） | 各段階の支え方どおり | 各段階の合格基準を満たしてから次へ。W4 は OMPL、目標は elbow_flex を + に動かさない | 各段階の抜き出し（報告してほしいもの）＋ `deactivated.` の `retried`・`failed_cycles`・`monitors`・`rate_limited`・`port_contention`・`bus:` |
+| 6 | **RViz の重なり・問題2・`allowed_start_tolerance` の確認**（`inventory.md` の「未確認として残すもの」） | W4 と同じ起動で | W4 の最初の Execute の前に、MotionPlanning の現在の状態で upper_arm_link と wrist_link の重なりを見る。Plan & Execute が実機で通るか（`allowed_start_tolerance` に収まるか） | 重なりの有無、Plan & Execute の結果（成功／中止の表示） |
+| 7 | **`measure` の記録**（任意。EEPROM には書かない。トルク OFF、ros2_control を止める） | トルク OFF | C1c と同じ手順（`docs/so_arm101_calibration_check.md`） | `記録:` の行と `bus:` の行（失敗 0、間隔 約 21.7 ms、`drained_bytes=0 id_mismatch=0 answered_first=0`） |
+| 8 | **`drain_quiet_ms:=0` との比較**（問題が出たときだけ） | 問題の出た段階と同じ | **今は実施できない**: 起動引数 `drain_quiet_ms` が launch・xacro に無い（ドライバはコードの既定値 2 で動く）。引数を足すには `bringup.launch.py`・`so101_new_calib.urdf.xacro`・`so101_new_calib.ros2_control.xacro` の差分が要り、**ユーザーの承認が要る**（差分は Claude が示す）。承認されたら、`drain_quiet_ms:=0` を足した同じ起動で、同じ運転の `retried`・`failed_cycles`・`bus:` を比べる | 比較の表（0 と 2 の `retried`・`failed_cycles`・`bus:`） |
+
+### 2. 読み取り専用 10 分
+```bash
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false \
+  2>&1 | tee -i ~/so_arm101_check/c4_readonly_10min.log
+```
+- 10 分ほど放置（腕は触らない。トルク OFF なので、腕を自重で落ちない姿勢にしておく）して、**Ctrl-C を 1 回**。
+- 合格: `retried=0`、`failed_cycles=0`、`bus:` の **`drained_bytes=0`、`id_mismatch=0`、`answered_first=0`**（健全なバスでは、捨てるものが無い＝A・B は何もしない）。`flushed_requests`・`timeouts`・`bad_checksum` も 0 が望ましい。
+- **正常な経路が遅くなっていないこと**: 同じ時間での `reads` の数が、修正前の記録（約 50 Hz。10 分で約 3 万回）と同じ。
+- 0 でない項目があれば、その行と、直前の `read failed` の WARN（`[tx=… rx=… flushed_before_request=…]`）を全部報告する。次へ進む前に Claude と相談する。
+- 抜き出し: `grep -a "deactivated\|read failed\|WARN\|ERROR" ~/so_arm101_check/c4_readonly_10min.log | sed 's/\x1b\[[0-9;]*m//g' | cut -c1-400`
+
+### 4. W0 を 5 回
+W0 の手順（本文の「W0. 保持のみ」）を**起動と停止を 5 回繰り返す**（W0 の失敗は過去に 4 回中 2 回だった。直近は 0 が続いている）。毎回、腕を折りたたみ姿勢で両手で支え、10 秒保持して Ctrl-C、`[deactivate] torque OFF and Lock=1 confirmed` を確認。ログは `write_C4_W0_1.log`〜`_5.log`。
+- 各回の記録: `startup_read_retries`、`[diag]` の行、`deactivated.` の行（`bus:` を含む）。
+- 合格: 5 回とも起動し、腕が動かず、`startup_read_retries=0`、`bus:` の `id_mismatch=0 answered_first=0 drained_bytes=0`。`checksum mismatch` が出たら、`flushed_before_request` が 0 より大きいか（要求の前に古いバイトがあった）0 か（配線・USB の化け）を見て、**`rx=` と `flushed_before_request=` の行を全部報告**する（W0 の過去の失敗の原因の切り分け。`docs/bus_layer_fix_plan.md` の 6 章）。
+- 5 回の後に、読み取り専用で状態を確認する（本文の W0 の最後と同じ。`torque_enable=0 lock=1`）。
+
+### 実機でエラーを起こす試験はしない
+バスのバイトを壊す・止めるのは危険なので、実機ではしない。エラー時の挙動は偽サーボの試験で確認済み（`docs/inventory.md` の「バス層の修正」の段階 1〜4）。
+
+---
+
 ## 0. 準備（共通）
 ```bash
 source /opt/ros/humble/setup.bash
@@ -199,7 +237,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `read of X failed (...); retrying n/2`（WARN） | 起動の読み戻しの通信エラー（checksum mismatch・フレーム不良・タイムアウト）。`[tx=… rx=… flushed_before_request=…]` に送った要求と受信したバイトが出る。再試行で直れば起動は続く | 行を全部報告。`startup_read_retries` の数も見る |
 | `cannot read back X (...)`、直前に `retrying` が 2 回 | 3 回とも通信エラー。トルクは ON にならない | 報告。`[activation failed] torque OFF and Lock=1 confirmed` を確認 |
 | `ros2_control_node` が exit code -6、直前に `terminate called after throwing an instance of 'std::runtime_error'` / `Failed to set the initial state of the component ... to active` | 起動に失敗したとき、controller_manager（Humble）が例外で終了する。Humble の仕様 | `[activation failed] torque OFF and Lock=1 confirmed (read back) on all joints` の行があれば安全面の問題はない。その行が無ければサーボの電源を切る |
-| `deactivated. ... bus: flushed_requests=… flushed_bytes=… drained_bytes=… id_mismatch=… answered_first=… timeouts=… bad_checksum=…`（バス層の診断。読み取り専用の `deactivated (no register was written)` の行にも出る） | `drained_bytes`・`id_mismatch`・`answered_first` は、**健全なバスでは 0**（通信エラーの後に、古い応答を捨てた／取り違えた数）。`flushed_requests`・`flushed_bytes` は、要求の直前に古いバイトがあって捨てた回数と量（0 が望ましい）。`timeouts`・`bad_checksum` は通信エラーの数（`retried` と対応）。0 でなければ、その数と、直前の WARN の `[tx=… rx=… flushed_before_request=…]` を報告する。切り分け: `checksum mismatch` のとき `flushed_before_request>0` なら要求の前に古いバイトがあった、0 なら配線・USB の化け | 報告。原因の比較は `drain_quiet_ms:=0`（従来の「捨てるだけ」）で行う（C4 の手順 6） |
+| `deactivated. ... bus: flushed_requests=… flushed_bytes=… drained_bytes=… id_mismatch=… answered_first=… timeouts=… bad_checksum=…`（バス層の診断。読み取り専用の `deactivated (no register was written)` の行にも出る） | `drained_bytes`・`id_mismatch`・`answered_first` は、**健全なバスでは 0**（通信エラーの後に、古い応答を捨てた／取り違えた数）。`flushed_requests`・`flushed_bytes` は、要求の直前に古いバイトがあって捨てた回数と量（0 が望ましい）。`timeouts`・`bad_checksum` は通信エラーの数（`retried` と対応）。0 でなければ、その数と、直前の WARN の `[tx=… rx=… flushed_before_request=…]` を報告する。切り分け: `checksum mismatch` のとき `flushed_before_request>0` なら要求の前に古いバイトがあった、0 なら配線・USB の化け | 報告。原因の比較は `drain_quiet_ms:=0`（従来の「捨てるだけ」）で行う（C4 の順 8。起動引数の追加の承認が要る） |
 | `[deactivate] ... could NOT confirm ...` | 終了でトルク OFF／Lock=1 を確認できなかった | 腕を支えてサーボの電源を切る |
 
 ## 報告してほしいもの（段階ごと）

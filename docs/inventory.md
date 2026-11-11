@@ -1602,3 +1602,7 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - 試験: `WriteVerified.ReadBackNeverMatchesOnAStaleReply`（書き込みは反映されず実際の値は旧のまま、1 回目の読み戻しだけ新の値が届く → **失敗になる**。C が無ければ「一致」になっていた）、`TwoAgreeingReadBacksPassAndCostExactlyTwoReads`（正常なら成功し、読み取りは正確に 2 回）、`SameValueRewriteStillPassesWithTwoReads`（`--rewrite-same` の形）、`TheFinalStateTableShowsOnlyValuesThatTwoReadsAgreeOn`。既存の `apply`/`restore` の試験（失敗時の巻き戻し、通信エラーの再試行など）は変更なしで通る。
 - 実機の確認手順: `docs/so_arm101_calibration_check.md` に **C0.6** を追加（gripper への `--rewrite-same`、C0.5 と同じ形。待ち 50 ms と 0 ms、dry-run → 書き込み → 状態確認。合格基準と、失敗時に報告するもの）。**新しいコードで実機に書き込む前に、ユーザーの確認を取る（Claude は実行しない。まだ実施していない）**。
 - 確認: `colcon test`: `so_arm101_hardware` 99 件、`so_arm101_calibration` 71 件、失敗 0。
+
+## バス層の修正 段階5の準備: C4 の手順書（2026-11-11。C4 はまだ実施していない）
+- `docs/feetech_write_check.md` の先頭に「C4 の全体の順序」の表と、「2. 読み取り専用 10 分」「4. W0 を 5 回」の手順を追加した（順: C0.6 → 読み取り専用 10 分 → 読み値のばらつき（3 回）→ W0 ×5 → W1〜W4 → RViz の重なり・問題2・`allowed_start_tolerance` → 任意の `measure` → 問題が出たときの `drain_quiet_ms:=0` の比較）。各ステップで報告してほしいものを表にした。合格の基準は計画書 7 章どおり（`retried=0`、`failed_cycles=0`、`bus:` の `id_mismatch`・`answered_first`・`drained_bytes` が 0、`reads` の数が従来と同じ）。
+- **未承認の変更（実施していない）**: `drain_quiet_ms:=0` を起動引数で渡すには、`bringup.launch.py`（引数の宣言と `mappings`）、`so101_new_calib.urdf.xacro`（`xacro:arg` と呼び出し）、`so101_new_calib.ros2_control.xacro`（マクロの引数と `<param name="drain_quiet_ms">`）の 3 か所の差分が要る。条件（xacro・ros2_control のタグに書き足す必要があるなら、実装前に差分を示して承認を取る）により、差分を示して承認を待つ。承認までは、ドライバはコードの既定値 2 ms で動き、C4 の順 8 は実施できない。
