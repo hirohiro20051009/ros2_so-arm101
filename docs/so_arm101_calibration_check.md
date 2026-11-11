@@ -184,7 +184,7 @@ ros2 node list
      --joints gripper --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C2_apply.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`gripper Lock: 1`、`yaml は更新していない（一部の関節だけ）`、終了コード 0。書く順序は Lock=0 → Homing → Min → Max → Lock=1（各項目を 50 ms 待って読み戻す。**値が変わるので、読み戻しの一致が、待ち時間が足りていることの最初の実測になる**）。
-3. **サーボの電源を入れ直す**（外部電源を切って入れる。USB は抜かなくてよい）。値が残ることを確認（読み取り専用。launch は起動しない）:
+3. **サーボの電源を入れ直す**（外部電源を切って入れる。USB はつないだままでよいと考えている（未確認）。入れ直したあとにポート名が変わったら報告する）。値が残ることを確認（読み取り専用。launch は起動しない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
      --out ~/so_arm101_check/eeprom_after_C2.json 2>&1 | tee -i ~/so_arm101_check/calib_C2_after.log; echo "exit=${PIPESTATUS[0]}"
