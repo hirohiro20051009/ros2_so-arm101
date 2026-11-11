@@ -1067,3 +1067,33 @@ URDF・関節リミット・planning_frame・IK solver・SRDF・`joint_limits.ya
 ### 状態
 - W0・W1・W2・W3・W3.5・W4 合格。W5（通信断）は任意で未実施（行うかはユーザーが決める）。
 - 段階2b の完了に向けて残り: `open_loop_control` が True のままであることの確認、書き込みモードで LeRobot を使っていないことの確認（`feetech_readonly_check.md` 2.5 節と同じ確認）。その後にタグ `stage2b-done` と、`bringup.launch.py` の `hardware` / `read_only` の既定値の計画（いずれも承認後）。
+
+## 段階2b-3c: 確認 2（書き込みモードでの LeRobot 不使用）合格（2026-11-11、ユーザー報告。ログ: `~/so_arm101_check/write_final.log`）
+- 条件: `hardware:=feetech read_only:=false use_rviz:=false`、指令は送っていない。腕は W3.5・W4 の出発点の姿勢（トルク OFF で手を離しても止まっている姿勢）。手順は `feetech_readonly_check.md` の 2.5 節 (1)〜(7) と同じ。
+- 起動: `write mode active ... startup_read_retries=0`。
+- (1) `CONDA_PREFIX=[] LECONDA_SITE_PACKAGES=[]`、`python3` は `/usr/bin/python3`。(2)(3)(4)(6) は出力なし。(5) `pid=179412`、`lerobot|miniforge3` の数は 0。(7) `fd 10 -> /dev/ttyACM0`（`ros2_control_node` 自身）。
+- `ros2 param get /arm_controller open_loop_control` → `Boolean value is: True`。設定の出どころ: `src/so_arm101_controller/config/controllers.yaml:43`（`bringup.launch.py` が `so_arm101_controller` の share から読む）。
+- 停止: `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`。`deactivated. reads=13087 retried=0 failed_cycles=0 goal_writes=13087 monitors=258 rate_limited=0 port_contention=0 startup_read_retries=0`。
+- **判定: 合格**。
+
+### 残課題: `ros2 node list` の名前の重複警告（修正は未実施）
+- 現象（ユーザー報告）: (3) の実行時に「nodes in the graph that share an exact name」の WARNING。`ros2 node list | sort | uniq -d` の結果は `/static_transform_publisher0` のみ。`ps` では `ros2_control_node`・`move_group`・`robot_state_publisher` は今回の起動（14:36:14）のものだけだった。
+- 事実（コード）: 名前を付けて `static_transform_publisher` を起動するのは `src/so_arm101_moveit_config/launch/static_virtual_joint_tfs.launch.py` が呼ぶ `moveit_configs_utils.launches.generate_static_virtual_joint_tfs_launch` だけ。SRDF の `virtual_joint` は 1 つ（world → base_link、`so101_new_calib.srdf:37`）なので、**起動されるのは 1 つで、名前は `static_transform_publisher0`**（名前なしのノードが 2 つあるのではない）。`bringup.launch.py` はこの launch を 1 回だけ include している。他に `static_transform_publisher` を起動する箇所は `src/` に無い（`archive/stage2a/description/launch/rsp.launch.py` にあるが、アーカイブで bringup は使わない）。ユーザーの「名前なしが 2 つ」という推測は、コードの上では成り立たない。
+- 原因の候補（事実）: Claude が同日 13:31 に起動したモックの `static_transform_publisher0`（PID 175277、`world`→`base_link`）が**止め損ねて残っていた**。Claude の後始末の `ps` 確認パターン（`ros2_control_node|move_group|robot_state_pub|rviz2|spawner`）に `static_transform_publisher` が含まれておらず、見逃した。ユーザーが `uniq -d` で見つけた重複はこれと一致する（残りの確認は 14 時台ではなく、このコミットの作業中に `ps` で見つけた）。Claude が PID を指定して停止し、`ps` で残りなしを確認した。
+- 対応: 今後、モック・実機の後始末の確認パターンに `static_transform_publisher` を加える。コード・設定の修正は不要（再発するなら launch ごとの起動前の残りの確認を手順に入れる）。
+- 注意: 実機のログ（`write_final.log`）に影響したのは名前の重複警告のみ。ハードウェアドライバ・トルク・シリアルポートには関係しない（static_transform_publisher は TF を出すだけ）。
+
+## 段階2b 完了条件のチェックリスト（2026-11-11 更新）
+※ 指示書そのものはリポジトリに無いため、これまでの作業で確認してきた項目で記録する。
+
+| 項目 | 状態 | 根拠 |
+|---|---|---|
+| 読み取り専用ドライバ `Sts3215System`（2b-2） | ✅ | 2b-2 実機確認 合格（2026-11-10） |
+| 書き込みモードの実装（2b-3b）とビルド・試験 | ✅ | `colcon test` 全試験通過（偽サーボ含む） |
+| 実機 W0〜W4 | ✅ | W0・W1・W2・W3・W3.5・W4 合格 |
+| `arm_controller` の `open_loop_control` が True | ✅ | `controllers.yaml:43`、起動後 `ros2 param get` → True |
+| `hardware:=feetech read_only:=false` が LeRobot を使わない | ✅ | 確認 2 合格（`write_final.log`） |
+| W5（通信断） | 未実施（任意） | ユーザーの判断で今日は行わない |
+| チェックサム不一致の原因 | 未特定 | 再試行と受信バイト列の記録は残す（今日の起動 7 回は `startup_read_retries=0`） |
+| タグ `stage2b-done` | このコミットの直後に付与（承認済み） | |
+| `bringup.launch.py` の `hardware` / `read_only` の既定値 | 未（計画を出し、承認後） | 現在 `hardware=lerobot`（既定）、`read_only=true`（既定） |
