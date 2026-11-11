@@ -1396,3 +1396,9 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
   | wrist_roll | −0.07135 | −0.05447 | +0.0169 |
   | gripper | +0.01645 | +0.02342 | +0.0070 |
 - **elbow_flex は URDF の上限（+1.69）まで +0.0076 rad しか残らない見込み**（今は +0.0206）。`pose_margin.py` で見込みの姿勢を試した結果（キャリブレーションの範囲は今の yaml のまま、URDF の上限・下限までの残りだけ有効）: elbow_flex が LOW（仮の目安 0.05 rad 未満）。ほかの関節は ok。URDF・SRDF は変えない方針なので、**C3 の手順 5 で実測して報告し、判断を仰ぐ**（出発点の姿勢を手で少し開く、など）。
+
+## C3 の準備（続き）: 版の表記の統一、リポジトリ内の複製、elbow の扱い（2026-11-11）
+- **版の表記を 1 か所の定数に**（commit 08ae234）: `include/so_arm101_calibration/version.hpp` の `kToolName`・`kToolVersion`（"0.2.0"）と `tool_id()`。測定ファイルの `tool`（`measure.cpp`）、バックアップの `tool`（`main.cpp`。これまで 0.1.0 だった）、yaml の出所の `applied_by`（`apply.cpp`。これまで 0.1.0 で固定）が同じ値を使う。`package.xml` の `<version>` を 0.2.0 にそろえ、試験 `Version.ToolIdIsOneStringAndMatchesPackageXml` が `version.hpp` と `package.xml` の一致を照合する。測定・書き込み・検査の動きは変えていない。`colcon build` 成功、試験は `so_arm101_calibration` 62 件、`so_arm101_hardware` 84 件が通過。偽サーボの実行ファイルでの通し確認（scratchpad の yaml の複製を使い、リポジトリの yaml は変わらない＝sha256 同じ）: `backup`・`measure` のファイルの `tool` が `so_arm101_calib 0.2.0`、`apply --write` が `applied_by: so_arm101_calib 0.2.0` を書いた。
+- **リポジトリ内の複製**: C3 の合格後に、測定ファイル・バックアップ・C3 の後の `backup` を `calibration_records/2026-11-11/` に複製し、更新した yaml と同じコミットに入れる（ユーザーの判断）。
+- **yaml の出所にリポジトリ内のパスを書く方法（コードの変更なし）**: `apply` は `--measure`・`--backup` に渡した文字列を、そのまま yaml の `source.measure_file`・`backup_file` に書く（`main.cpp`、`apply.cpp` の `render_calibration_yaml`。偽サーボの通し確認で、渡した絶対パスがそのまま入ることを確認）。そこで、**C3 の前に**、原本の複製を `calibration_records/2026-11-11/`（`measure_C1c_1.json`、`eeprom_backup_20261111-163729.json`。sha256 が原本と一致。未コミット）に置き、C3 の `apply` を**リポジトリの直下で、相対パス**（`calibration_records/2026-11-11/…`）で実行する。コミットは合格後（上の判断どおり）。複製を先に置くのは、yaml をツールが書いたまま（手で書き換えない）にするため。測定ファイルの中の `backup_file` は、測定時のパスのまま（チェックサム付きなので書き換えない）。
+- **elbow_flex の余裕**（見込み 0.008 rad、LOW）: C3 はこのまま進め、手順 6 の実測で判断する（ユーザーの判断）。LOW・OUT が出たら報告し、C4 の前に出発点の姿勢の見直し（elbow を少し開く）を検討する。URDF・SRDF は変えない。

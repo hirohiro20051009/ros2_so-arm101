@@ -209,13 +209,18 @@ ros2 node list
 
 ## C3: 全関節（gripper を含む 6 関節）を 1 回で書く（yaml はそのとき 1 回だけ更新）
 **実行する前に Claude に「これから C3 を実行する」と伝え、承認を得る。** C2 が合格していること（合格済み。`docs/inventory.md`）。
-使うファイル: 測定ファイル **`~/so_arm101_check/measure_C1c_1.json`**（C2 と同じ）、バックアップ **`~/so_arm101_check/eeprom_backup_20261111-163729.json`**。待ち時間は 50 ms。
+使うファイル（**リポジトリ内の複製**。`~/so_arm101_check/` の原本と sha256 が同じ。Claude が C3 の前に置いた。コミットは C3 の合格後）:
+- 測定ファイル **`calibration_records/2026-11-11/measure_C1c_1.json`**（原本 `~/so_arm101_check/measure_C1c_1.json`。C2 と同じ内容。sha256 `cfc0f592…6f47`）
+- バックアップ **`calibration_records/2026-11-11/eeprom_backup_20261111-163729.json`**（原本 `~/so_arm101_check/eeprom_backup_20261111-163729.json`。sha256 `729b5015…b88f`）
+
+待ち時間は 50 ms。**コマンドは、リポジトリの直下（`cd ~/ros2_so-arm101`）で、上の相対パスのまま実行する**（`apply` は `--measure`・`--backup` に渡した文字列を、そのまま yaml の出所に書く。絶対パスや `~` で渡すと、リポジトリの外のパスが入る）。
 
 ### yaml の扱い（C3 の前に読む）
 - **更新される yaml は src 側 1 つ**: `src/so_arm101_hardware/config/follower_calibration.yaml`（git 管理）。ドライバが起動時に読む install 側（`install/so_arm101_hardware/share/so_arm101_hardware/config/follower_calibration.yaml`）は、`colcon build --symlink-install` により**そのファイルへのシンボリックリンク**で、`apply` はリンクを解決して src 側の実体を書き換える。**そろえる作業も、`colcon build` も要らない**（symlink-install でない場合は install 側がコピーなので別途必要。今の環境は symlink-install）。dry-run に出る yaml のパスは install 側の名前だが、更新されるのは src 側の実体。
-- **出所の記録（`source`）**: 更新後は `kind: ros_calibrated`、`measure_file`（`~/so_arm101_check/measure_C1c_1.json` の絶対パス）、`backup_file`、`applied_at`（実行時刻）、`applied_by: so_arm101_calib 0.1.0`（**コードに固定された値。今のツールは 0.2.0 なので、版の表記は古い。動作には無関係**）になる。今の `source`（LeRobot の json からの変換）は消える（git の履歴に残る）。ファイル冒頭のコメントも置き換わる。`id`・`kind`・`direction`・`schema_version`・`bus`・`conversion` は引き継ぐ。
+- **出所の記録（`source`）**: 更新後は `kind: ros_calibrated`、`measure_file: calibration_records/2026-11-11/measure_C1c_1.json`、`backup_file: calibration_records/2026-11-11/eeprom_backup_20261111-163729.json`（**渡した相対パスのまま。リポジトリ内の複製を指す**）、`applied_at`（実行時刻）、`applied_by: so_arm101_calib 0.2.0`（版の定数 1 か所から。直した）になる。今の `source`（LeRobot の json からの変換）は消える（git の履歴に残る）。ファイル冒頭のコメントも置き換わる。`id`・`kind`・`direction`・`schema_version`・`bus`・`conversion` は引き継ぐ。
+- **注意**: 測定ファイルの中の `backup_file` は、測定したときに渡した原本のパス（`/home/hirok/so_arm101_check/…`）のまま（チェックサム付きなので、複製しても書き換えない）。
 - **控え**: 更新前の yaml は git の履歴にある（作業ツリーは clean。最後のコミット `1e9e968`）。念のため、リポジトリの外にも複製がある: `~/so_arm101_check/follower_calibration_before_C3.yaml`（sha256 `822dad7d…98a1`）。
-- **yaml をコミットする時期**: 手順 3〜5 のログが合格してから（Claude が差分を確認してコミットする）。それまでは作業ツリーの変更のまま。
+- **yaml をコミットする時期**: 手順 3〜6 のログが合格してから（Claude が差分を確認してコミットする）。それまでは作業ツリーの変更のまま。**コミットには、更新した yaml と、`calibration_records/2026-11-11/` の中身（測定ファイル、バックアップ、C3 の後の `backup`（`eeprom_after_C3.json`）、`README.md`）を、同じコミットに入れる**（下の「合格後のコミット（Claude が行う）」）。
 - yaml に入る値（`measure_C1c_1.json`）。Homing_Offset / min / max（`eeprom.*` も同じ）と、angle 関節の `center`:
 
   | 関節 | Homing_Offset | min | max | center |
@@ -229,27 +234,31 @@ ros2 node list
 
 ### 実行前の確認
 ```bash
+cd ~/ros2_so-arm101
 ps aux | grep -E "ros2_control_node|move_group|robot_state_pub|rviz2|spawner|static_transform_publisher" | grep -v -E "grep|gvfsd"
 ros2 node list
 git status --short src/so_arm101_hardware/config/
+ls calibration_records/2026-11-11/
 ```
-どれも空であること（launch は止まっている。yaml に未コミットの変更がない）。
+最初の 3 つは空であること（launch は止まっている。yaml に未コミットの変更がない）。`ls` は `eeprom_backup_20261111-163729.json  measure_C1c_1.json` の 2 つ。（`git status --short` 全体には `?? calibration_records/` が出る。複製は、C3 の合格後に yaml と一緒にコミットする。）
 
 ### 手順
 1. dry-run（何も書かない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
+     --measure calibration_records/2026-11-11/measure_C1c_1.json \
+     --backup calibration_records/2026-11-11/eeprom_backup_20261111-163729.json \
      2>&1 | tee -i ~/so_arm101_check/calib_C3_dryrun.log; echo "exit=${PIPESTATUS[0]}"
    ```
    `OK 全関節がバックアップと一致`、`書き込む値` が上の表の 6 関節（`今` はバックアップの値）、`全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する: …/follower_calibration.yaml`、`dry-run: 何も書いていない`、終了コード 0。違うときは書かずに報告する。
 2. 書き込み（確認文字列 `WRITE-EEPROM` を入力。Enter だけでは何も書かれない）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib apply --port /dev/ttyACM0 \
-     --measure ~/so_arm101_check/measure_C1c_1.json --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json \
+     --measure calibration_records/2026-11-11/measure_C1c_1.json \
+     --backup calibration_records/2026-11-11/eeprom_backup_20261111-163729.json \
      --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C3_apply.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   6 関節とも `[新]`、各 `Lock: 1`、`OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml を更新した: …`、終了コード 0。続けて `git diff --stat` に `follower_calibration.yaml` だけが出ること（**コミットはまだしない**）。**launch はまだ起動しない。**
+   6 関節とも `[新]`、各 `Lock: 1`、`OK: 測定ファイルの値を書き、読み戻しと Lock=1 を確認した`、`yaml を更新した: …`、終了コード 0。続けて `git diff` で、`source` が `calibration_records/2026-11-11/…` の相対パス・`applied_by: so_arm101_calib 0.2.0` になっていること、`git diff --stat` に `follower_calibration.yaml` だけが出ること（**コミットはまだしない**）。**launch はまだ起動しない。**
 3. **12 V を入れ直す**（USB はつないだまま）。まず launch なしで、EEPROM が残ったことを確認（読み取り専用）:
    ```bash
    ros2 run so_arm101_calibration so_arm101_calib backup --port /dev/ttyACM0 \
@@ -272,9 +281,20 @@ git status --short src/so_arm101_hardware/config/
    python3 tools/pose_margin.py --pose start=<pan>,<lift>,<elbow>,<wrist_flex>,<wrist_roll>,<gripper> \
      2>&1 | tee -i ~/so_arm101_check/calib_C3_margin.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   （値は手順 5 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。`--calibration` は新しい yaml（既定）。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。**見込みでは elbow_flex の上限までの余裕が約 0.008 rad（今は 0.021）と小さい**ので、LOW が出るかもしれない。
+   （値は手順 5 の `position`。順序は pan, lift, elbow, wrist_flex, wrist_roll, gripper。`--calibration` は新しい yaml（既定）。）校正した範囲の両端と URDF の範囲の差、姿勢ごとの URDF の上限・下限までの残りが出る。範囲の外（OUT）や余裕が小さい（LOW。仮の目安 0.05 rad）関節があれば、**C4 の前に Claude へ報告して判断を仰ぐ**（URDF・SRDF は変えない）。**見込みでは elbow_flex の上限までの余裕が約 0.008 rad（今は 0.021）と小さい**ので、LOW が出るかもしれない。**C3 はこのまま進め、実測（この手順）で判断する**（ユーザーの判断）。LOW・OUT が出たら報告し、**C4 の前に、出発点の姿勢の見直し（elbow を少し開く）を検討する**。URDF・SRDF は変えない。
 - 合格基準: 手順 2 が終了コード 0（6 関節 `[新]`、yaml 更新）。手順 3 で 12 V を入れ直した後も値が残る。手順 4 が 6/6 MATCH（2 行とも）。手順 5 の各関節が見込みから 0.03 rad 以内。手順 6 のログが取れている（LOW・OUT は報告して判断）。
-- 報告してほしいもの: `calib_C3_dryrun.log`、`calib_C3_apply.log`、`calib_C3_after.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`、`calib_C3_margin.log`、各ログの `exit=` の値、`git diff --stat` の出力。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
+- 報告してほしいもの（**コミットはまだしない**。Claude が確認してから）: `calib_C3_dryrun.log`、`calib_C3_apply.log`、`calib_C3_after.log`、`calib_C3_readonly.log`、`calib_C3_start_pose.log`、`calib_C3_margin.log`、各ログの `exit=` の値、`git diff --stat` の出力。Claude が yaml の差分を確認して commit し、手順書の出発点の姿勢などを直す（C4 の前）。
+
+### 合格後のコミット（Claude が行う。ユーザーの作業は、手順 3〜6 のログの報告まで）
+手順 3〜6 が合格（手順 6 の LOW・OUT は報告して判断）してから、Claude が次を行う:
+1. `~/so_arm101_check/eeprom_after_C3.json` を `calibration_records/2026-11-11/eeprom_after_C3.json` に複製し、**sha256 が原本と一致すること**を確認する。
+2. `calibration_records/2026-11-11/README.md` を作る（各ファイルの内容・元のパス・sha256・使い道。`measure_C1c_1.json` を C3 で使ったこと、`eeprom_backup_…` が C3 の前のバックアップで `restore` の元になること、`eeprom_after_C3.json` が C3 の後の EEPROM であること）。
+3. `git diff` で yaml の差分を確認する（`source`、冒頭のコメント、各関節の `center`・`min`・`max`・`eeprom.*` だけが変わっていること）。
+4. **更新した yaml と `calibration_records/2026-11-11/` を、同じコミットに入れる**（コミットメッセージに、C3 の合格と、手順 5・6 の結果の要点を書く）。
+5. 手順書・`inventory.md` に C3 の結果を記録する（別のコミットでもよい）。
+手順 3〜6 のどれかが不合格なら、コミットしない（yaml は `git checkout`、EEPROM は `restore` で戻す。複製は未コミットのまま残してよい）。
+
+
 - 失敗したとき: 上の「失敗したときの共通の対処」。`apply` が失敗すると、yaml は更新されず、触れた全関節がバックアップへ戻る。終了コード 2 は、表示された `restore` で戻す。**どの場合も launch を起動しない**（EEPROM と yaml が食い違う）。
 - **C3 の後に元に戻す手順**（C3 が合格したあとで、やはり戻すとき）: ① EEPROM: `so_arm101_calib restore --port /dev/ttyACM0 --backup ~/so_arm101_check/eeprom_backup_20261111-163729.json --write --eeprom-wait-ms 50 2>&1 | tee -i ~/so_arm101_check/calib_C3_revert.log; echo "exit=${PIPESTATUS[0]}"`（違う項目だけ書く）。② yaml: 未コミットなら `git checkout -- src/so_arm101_hardware/config/follower_calibration.yaml`、コミット済みなら `git revert <そのコミット>`（履歴は書き換えない）。③ 全関節の dry-run（`restore --backup …` に `--write` なし）が「同じ」で、読み取り専用の起動で 6/6 MATCH になるまで、書き込みモードは起動しない。`restore` は yaml を更新しない。
 
