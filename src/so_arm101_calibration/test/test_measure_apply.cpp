@@ -372,6 +372,12 @@ TEST(LiveDisplay, GapIsReadInTheSameDirectionOnBothSides)
   EXPECT_EQ(format_gap(12), "あと 12");
   EXPECT_EQ(format_gap(0), "届いた");
   EXPECT_EQ(format_gap(-30), "届いた(+30)");
+  // 「ほぼ届いた」: あと kNearTicks（10 tick）以内。境界は 10 が「ほぼ」、11 が「あと」
+  EXPECT_EQ(kNearTicks, 10);
+  EXPECT_EQ(format_gap(11), "あと 11");
+  EXPECT_EQ(format_gap(10), "ほぼ あと 10");
+  EXPECT_EQ(format_gap(1), "ほぼ あと 1");
+  EXPECT_EQ(format_gap(-1), "届いた(+1)");
   LiveJoint j;
   j.name = "shoulder_pan";
   j.has_ref = true;
@@ -412,6 +418,70 @@ TEST(LiveDisplay, GapIsReadInTheSameDirectionOnBothSides)
   // yaml の範囲が無いとき
   j.has_ref = false;
   EXPECT_NE(row().find(" -"), std::string::npos);
+}
+
+TEST(LiveDisplay, AlmostReachedIsShownOnBothSidesAndStaysInTheColumns)
+{
+  LiveJoint j;
+  j.name = "elbow_flex";
+  j.has_ref = true;
+  j.ref_min = -1000;
+  j.ref_max = 1000;
+  j.min = -993;    // min 側: あと 7
+  j.max = 980;     // max 側: あと 20
+  auto row = [&]() {return format_live_table({j})[1];};
+  std::string l = row();
+  EXPECT_NE(l.find("ほぼ あと 7"), std::string::npos) << l;
+  EXPECT_NE(l.find("あと 20"), std::string::npos) << l;
+  EXPECT_EQ(l.find("ほぼ あと 20"), std::string::npos) << l;
+  // max 側も同じ表記（あと 10 は「ほぼ」、あと 11 は「あと」）
+  j.min = -1000; j.max = 990;
+  l = row();
+  EXPECT_NE(l.find("届いた"), std::string::npos) << l;
+  EXPECT_NE(l.find("ほぼ あと 10"), std::string::npos) << l;
+  j.max = 989;
+  EXPECT_EQ(row().find("ほぼ"), std::string::npos) << row();
+  // * は「ほぼ」の後ろに付く。列（14 桁）に収まり、表の幅は 72 桁以内
+  j.min = -990; j.max = 990;
+  j.min_recent = j.max_recent = true;
+  const auto rows = format_live_table({j});
+  EXPECT_NE(rows[1].find("ほぼ あと 10*"), std::string::npos) << rows[1];
+  int w = 0;
+  for (size_t i = 0; i < rows[1].size();) {
+    const unsigned char c = static_cast<unsigned char>(rows[1][i]);
+    const int len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : 4;
+    w += len >= 3 ? 2 : 1;
+    i += static_cast<size_t>(len);
+  }
+  EXPECT_LE(w, 72) << rows[1];
+}
+
+TEST(LiveDisplay, AlmostReachedAppearsInTheFinalTableOfARun)
+{
+  // 偽サーボでの記録: shoulder_pan の min 側は前回の端の 7 tick 手前、max 側は 20 tick 手前。gripper は届いた
+  Rig r;
+  Measure ms(r);
+  ms.io.yaml_ref.clear();
+  for (int i = 0; i < 6; ++i) {ms.io.yaml_ref.push_back({kCenter[i] + kLo[i], kCenter[i] + kHi[i]});}
+  ms.io.yaml_ref[0] = {kCenter[0] + kLo[0] - 7, kCenter[0] + kHi[0] + 20};
+  MeasureFile m;
+  std::string text;
+  ASSERT_EQ(ms.run(&m, &text), kExitOk) << text;
+  const auto fin = text.find("記録を終えた時点");
+  ASSERT_NE(fin, std::string::npos);
+  auto row_of = [&](const std::string & name) {
+      const auto p = text.find(name, fin);
+      return text.substr(p, text.find('\n', p) - p);
+    };
+  const std::string pan = row_of("shoulder_pan"), grip = row_of("gripper");
+  EXPECT_NE(pan.find("ほぼ あと 7"), std::string::npos) << pan;
+  EXPECT_NE(pan.find("あと 20"), std::string::npos) << pan;
+  EXPECT_EQ(pan.find("ほぼ あと 20"), std::string::npos) << pan;
+  EXPECT_NE(grip.find("届いた"), std::string::npos) << grip;
+  EXPECT_EQ(grip.find("ほぼ"), std::string::npos) << grip;
+  // 表示だけの変更: 測定結果（範囲）は変わらない
+  EXPECT_EQ(m.joints[0].actual_min, kCenter[0] + kLo[0]);
+  EXPECT_EQ(m.joints[0].actual_max, kCenter[0] + kHi[0]);
 }
 
 TEST(LiveDisplay, YamlRangeCrossing4095IsUnwrappedMod4096)

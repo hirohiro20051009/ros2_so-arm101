@@ -87,7 +87,11 @@ struct LiveJoint
 /// 範囲の中点を mod 4096 で折り返して center からの差を出し（±2048 に収める）、幅（max − min）はそのまま保つ。
 std::pair<int, int> yaml_range_around(int yaml_actual_min, int yaml_actual_max, int center);
 
-/// 「前回の端まで あと N tick」。remaining > 0: "あと N" / 0: "届いた" / < 0: "届いた(+N)"（N tick 超えた）。
+/// 「ほぼ届いた」と表示する近さ（tick。1 tick ≈ 0.0879° なので 10 tick ≈ 0.88°）。表示だけで、測定・検査には使わない。
+constexpr int kNearTicks = 10;
+
+/// 「前回の端まで あと N tick」。remaining > kNearTicks: "あと N" / 1〜kNearTicks: "ほぼ あと N" /
+/// 0: "届いた" / < 0: "届いた(+N)"（N tick 超えた）。
 /// min 側は remaining = 記録した min − yaml の min、max 側は remaining = yaml の max − 記録した max（どちらも同じ向きで読める）。
 std::string format_gap(int remaining);
 /// 見出し + 関節ごとの行（ANSI なし。端末の表示とログで共通）。

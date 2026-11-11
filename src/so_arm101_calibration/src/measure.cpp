@@ -283,7 +283,8 @@ std::pair<int, int> yaml_range_around(int yaml_actual_min, int yaml_actual_max, 
 
 std::string format_gap(int remaining)
 {
-  if (remaining > 0) {return "あと " + std::to_string(remaining);}
+  if (remaining > kNearTicks) {return "あと " + std::to_string(remaining);}
+  if (remaining > 0) {return "ほぼ あと " + std::to_string(remaining);}
   if (remaining == 0) {return "届いた";}
   return "届いた(+" + std::to_string(-remaining) + ")";
 }
@@ -440,7 +441,7 @@ int run_measure(
   // 4. MIN/MAX の記録（Enter 2 回目で終える）。中央の測定中に押した Enter が残っていると、記録がすぐ終わるので捨てる
   if (io.on_recording_start) {io.on_recording_start();}
   out << "\n中央の測定 OK、記録中。動かし始めてよい。全関節を端から端まで押し切り、終わったら Enter\n"
-      << "（記録中は、端末の表だけが書き換わる。値は中央からの差。「端まで」= 前回の端まで あと N tick。「届いた」になれば前回の端と同じ位置まで届いている。* は直近 1 秒に更新）\n"
+      << "（記録中は、端末の表だけが書き換わる。値は中央からの差。「端まで」= 前回の端まで あと N tick。「ほぼ あと N」は あと 10 tick（約 0.9°）以内、「届いた」は前回の端と同じ位置まで届いている。* は直近 1 秒に更新）\n"
       << std::flush;
   std::vector<int> dmin(n, 0), dmax(n, 0), count(n, 0), now(n, 0);
   std::vector<long> min_tick(n, 0), max_tick(n, 0);
