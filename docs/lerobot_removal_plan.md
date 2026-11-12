@@ -257,3 +257,8 @@
 - **進め方**: ① **調査**（今の xacro とオリジナルの差の表: 0 の位置・軸の向き・関節リミット・リンク名・メッシュのパス。SRDF・`controllers.yaml`・`moveit_controllers.yaml`・`joint_limits.yaml` などへの影響）→ ② **計画** → ③ **承認** → ④ **実施** → ⑤ **実機での確認のやり直し**（読み取り専用の起動・W0〜W4・MoveIt の Plan & Execute）。
 - **注意**: URDF・関節リミット・`planning_frame`・IK solver は MoveIt 本体の設定（CLAUDE.md により勝手に変えない）。差の表で関節リミット・0 の位置・軸の向きが変わるなら、校正（`follower_calibration.yaml` の `direction`・`center`）や既存の記録（出発点の値、elbow の URDF の上限との差）にも影響する。
 
+
+### 10.1 URDF の作り直しの調査項目に加えるもの: SRDF の整合（2026-11-12 追記。調査の結果は `inventory.md` の「残課題: SRDF の `Link 'elbow_flex'...`」）
+- **SRDF の `disable_collisions` の全行を、実在のリンク名と照合する**。既知の不整合: `so101_new_calib.srdf:45` の `link2="elbow_flex"` は**関節名**（リンクではない）。起動のたびに `move_group` が警告を出す。旧ワークスペースの SRDF から変わっていない（L1 で出始めたものではない）。
+- 照合の観点: (1) 存在しないリンク名がないこと。(2) 隣接（`Adjacent`）のペアが、URDF の親子と合っていること。(3) 重複（`gripper_link`×`lower_arm_link` などはすでにある）。(4) `virtual_joint` の `parent_frame="world"` と、URDF 側の `world` リンクの有無（URDF では `world` がコメントアウトされている。MoveIt の `planning_frame` に関わるので、**調査だけ**）。
+- オリジナルの URDF に作り直すと**リンク名が変わりうる**ので、SRDF の `disable_collisions`・`group`・`end_effector`・`group_state` は、リンク名・関節名の対応表を作って更新する。SRDF の変更は MoveIt の設定の変更なので、**承認が要る**。

@@ -1702,3 +1702,19 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
   - `mock:=true use_rviz:=false`: 起動前に `ps`・`ros2 node list` とも既存のノードなし。起動 20 秒後、`ros2 control list_controllers` で **arm_controller（joint_trajectory_controller）・gripper_controller（GripperActionController）・joint_state_broadcaster が active**。ノードは controller_manager・move_group・robot_state_publisher など。`kill -INT`（launch の PID だけ）で停止。停止後、`ps` は空。`ros2 node list` に `/move_group`・`/moveit_simple_controller_manager` が残った（`ps` は空）ので、`ros2 daemon stop; ros2 daemon start` の後に再確認して、**両方とも空**。停止時に `move_group` が exit code -11（Segmentation fault。`rclcpp::CallbackGroup::~CallbackGroup()`。実機の W4 の終了時にも出ていたものと同じ形で、今回の変更とは無関係と見られる）。
   - `mock:=true hardware:=lerobot use_rviz:=false`: launch が **exit code 1 で自分で終了**。`[ERROR] [launch]: Caught exception in launch ...: hardware:=lerobot is not supported. The LeRobot path ... was removed from this workspace; use hardware:=feetech (the default). The removed code is in git tag stage2c-done ...`。ノードは 1 つも起動せず、`ps`・`ros2 node list` とも空。
 - **未実施**: 実機確認（読み取り専用の起動と W0）。コミットの後にユーザーが行う。
+
+## L1 の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/` の `L1_readonly.log`・`write_L1_W0.log`・`write_L1_W0_after.log`）
+- **読み取り専用の起動**: 出所 `ros_calibrated`（`applied_by=so_arm101_calib 0.2.0`）、EEPROM vs yaml **6/6 match**、`servo settings vs LeRobot` **6/6 match**（L3 まで文言は旧いまま）、SRAM は全関節 `torque_enable=0 lock=1 acceleration=50`。停止時 `reads=10331 retried=0 failed_cycles=0`、bus はすべて 0、exit=0。
+- **W0（`probe_lock_sram:=true`）**: 腕は動かず保持。`[probe] ACCEPTED on all joints`、`startup_read_retries=0`、`[deactivate] torque OFF and Lock=1 confirmed`、`deactivated. reads=2681 goal_writes=2680 monitors=53`（保持していた時間が約 54 秒だったため）、`rate_limited=0 port_contention=0`、bus はすべて 0、exit=0。
+- **W0 の後の読み取り専用**: 全関節 `torque_enable=0 lock=1 acceleration=50`、6/6 match が 2 行、`reads=532`、カウンタ 0。
+- `move_group` の exit -11 は、いつもの終了時のもの（無視してよい。W4 でも出ていた）。
+- 結論: L1（launch・xacro の変更）は、実機の挙動に影響していない。
+
+## 残課題: SRDF の `Link 'elbow_flex' is not known to URDF`（調査のみ。**SRDF は変更していない**。MoveIt の設定の変更なので、承認の後。2026-11-12）
+起動時に `move_group` が `Warning: Link 'elbow_flex' is not known to URDF. Cannot disable/enable collisons.`（`model.cpp:594`）を出す。
+1. **どこで使っているか**: `src/so_arm101_moveit_config/config/so101_new_calib.srdf:45` の `<disable_collisions link1="gripper_link" link2="elbow_flex" reason="Never"/>` **の 1 行だけ**。`elbow_flex` は URDF の**関節の名前**であって、リンクではない（リンクは `base_link`・`shoulder_link`・`upper_arm_link`・`lower_arm_link`・`wrist_link`・`gripper_link`・`gripper_frame_link`・`moving_jaw_so101_v1_link` の 8 つ）。SRDF のほかの `elbow_flex`（`:10,17,24`）は `group_state` の**関節**の値で、正しい用法。つまり、関節名とリンク名が混ざっている（リンク名を書くべき `link2` に関節名が入っている）。
+2. **過去のログ**: `~/so_arm101_check/` の `*.log`（73 件）のうち、**move_group を起動したログ 36 件の全部に同じ警告が 1 回ずつ**（残りはキャリブ道具のログで、move_group を起動しない）（`write_C4_step6.log`・`write_W4.log` は 2 回＝起動が 2 回）。最古は `lerobot_launch.log`（2026-11-10 18:28。LeRobot 経路でも出ていた）、次が `feetech_launch.log`。C4 の `write_C4_W0_*.log` にもある。**L1 で出始めたものではない**。さらに、旧ワークスペースの SRDF（`~/ros2_so101/src/so101_moveit_config/config/so101_new_calib.srdf`、初回コミット 39c2966）と**現在の SRDF は完全に同一**（`diff` で差なし）。旧ワークスペースの時点からある。
+3. **本来の意図と、今の影響**（推測を含む）:
+   - `gripper_link` と、**肘の関節 `elbow_flex` で動くリンク**（`elbow_flex` の child は `lower_arm_link`、parent は `upper_arm_link`）の衝突を無視する意図だったと思われる。ただし、どちらのリンクを書くつもりだったかは**確定できない**（[推測]）。
+   - **今の影響は無いと見られる**: `gripper_link`×`lower_arm_link`（`:40`）と `gripper_link`×`upper_arm_link`（`:44`）は、SRDF にすでに `Never` で入っている。どちらの意図でも、**無視するはずの衝突は、ほかの行で無視できている**。この行は MoveIt に捨てられるだけで、警告以外の副作用は確認していない（実際の衝突検査の挙動は、この調査では動かして確認していない）。
+   - 修正案（**未実施・承認が要る**）: この 1 行を削除する、または `link2` を実在のリンク（`lower_arm_link` など）にする。どちらも、同じ組が既にあるので、実質は「1 行の削除」になる。URDF の作り直しの段階（`lerobot_removal_plan.md` 10 章）で、SRDF 全体を見直すときにまとめて直すのが自然。
