@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true hardware:=lerobot serial_port:=/dev/ttyACM0 calibration_file:='' read_only:=true acceleration:=50 torque_limit:=1000 apply_servo_config:=false probe_lock_sram:=false">
+    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true hardware:=feetech serial_port:=/dev/ttyACM0 calibration_file:='' read_only:=true acceleration:=50 torque_limit:=1000 apply_servo_config:=false probe_lock_sram:=false">
+        <!-- hardware は feetech だけ。それ以外は、use_fake_hardware の値に関わらず、xacro の展開で失敗させる
+             （xacro の property は遅延評価なので、xacro:if の本文で評価する） -->
+        <xacro:if value="${hardware != 'feetech'}">${xacro.fatal('hardware:=' + str(hardware) + ' is not supported: the LeRobot path was removed from this workspace; use hardware:=feetech (the removed code is in git tag stage2c-done)')}</xacro:if>
         <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
 
         <ros2_control name="${name}" type="system">
@@ -21,11 +24,6 @@
                         <param name="apply_servo_config">${apply_servo_config}</param>
                         <param name="probe_lock_sram">${probe_lock_sram}</param>
                     </xacro:if>
-                    <xacro:unless value="${hardware == 'feetech'}">
-                        <!-- 実機用(LeRobot 経由): So101HardwareBridge。ルートの /joint_commands と /joint_states_raw で
-                             so_arm101_lerobot_bridge と接続する -->
-                        <plugin>so_arm101_hardware/So101HardwareBridge</plugin>
-                    </xacro:unless>
                 </xacro:unless>
             </hardware>
             <joint name="shoulder_pan">

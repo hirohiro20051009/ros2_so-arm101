@@ -1,4 +1,4 @@
-# LeRobot 経路の削除の計画（2026-11-12。第 2 版。計画のみ。実施は未。承認の後）
+# LeRobot 経路の削除の計画（2026-11-12。第 2 版。L1 は 2026-11-12 に実施済み（下の「進捗」）。L2 以降は未実施）
 
 ユーザーの判断（`inventory.md`「ユーザーの判断の記録」）: **LeRobot 経路は、このプロジェクトの ROS パッケージから削除する。**
 この文書は洗い出し・分類・段階・確認の計画。**コード・launch・xacro・URDF・yaml・CMake・package.xml は変更していない。実機・シリアルポートにも触れていない。**
@@ -10,6 +10,12 @@
 > **注意（CLAUDE.md との関係）**: CLAUDE.md の規則は「ファイルの削除はしない。不要なものは archive/ へ移動し、理由を記録する」。今回のユーザー判断（git rm で削除、タグから戻す）はこの規則と異なる。**CLAUDE.md は変更していない**。実施の承認と合わせて、CLAUDE.md の規則を直すかをユーザーが決める（直さない場合、実施のたびに例外の承認が要る）。
 
 凡例: **[事実]** = grep・コード読みで確認した。**[推測]** = 未確認。
+
+## 進捗と、ユーザーの追加判断（2026-11-12）
+- **L1 実施済み**（コミットは `git log` を参照。結果は `inventory.md` の「L1 実施」）。**L2 以降は未実施**。
+- **判断**: `hardware` 引数の検査は `mock:=true` のときも行う（L1 で実装済み）。plugin xml の改名は **L3** で行う（L2 では `So101HardwareBridge` のブロックを消すだけで、ファイル名は変えない）。**候補 B（`camera.launch.py` とカメラ設定 yaml 3 つ）は L2 で `git rm` する**。`LICENSE.so101_ros2` は、description の urdf・meshes・controller の由来が確定するまで**残す**（ヘッダが無いことは、由来でない証拠にならないため）。package.xml の `maintainer` は変えてよいが、`license` 欄は変えない（L3 で）。CLAUDE.md の archive の規則は **L4 で**「削除は `git rm`。戻すためのタグかコミットを `inventory.md` に書く」に直す（文言の案は L4 の前に出す）。
+- **LeRobot の削除（L1〜L4）の後に別のコミットで行う候補**: A（`apriltag_test`）・G（`tools/` の開発用スクリプト）・H（既存の `archive/`）と、C の `assets/step`・`assets/stl`。**保留**: C の `usd/`、D・E・F。
+- 7 章の「推奨 (a)」「LICENSE の削除」は、上の判断で置き換わる（B は L2 で削除、LICENSE は由来が確定するまで残す）。
 
 ## 0. 前提
 
@@ -242,3 +248,12 @@
 5. CLAUDE.md の「archive へ移動」の規則を、`git rm` とタグでの復元に直すか。
 6. 8 章の候補（A〜J）のうち、どれをいつ外すか（別途）。
 7. 実機確認（L1 の後と L3 の後）の日程（ユーザー）。
+
+## 10. 後の段階: URDF まわりの作り直し（方針の記録。**今は実施しない**）
+**時期**: LeRobot の削除（L1〜L4）と、候補の削除（A・G・H・C の step/stl）の**後**。別の段階とする。
+**方針（ユーザー）**: URDF まわりは、将来、SO-ARM101 のオリジナルの URDF（**TheRobotStudio/SO-ARM100 の `Simulation/SO101` にある `so101_new_calib.urdf` と思われる**。未確認）から**正しく引用する形**に作り直す。
+- **案**: オリジナルを**変更せずに**置き、**薄い xacro で include** して、ros2_control と追加のフレームだけを足す。
+- **取得元の URL・コミットとライセンスを記録する**（`docs/third_party.md`）。
+- **進め方**: ① **調査**（今の xacro とオリジナルの差の表: 0 の位置・軸の向き・関節リミット・リンク名・メッシュのパス。SRDF・`controllers.yaml`・`moveit_controllers.yaml`・`joint_limits.yaml` などへの影響）→ ② **計画** → ③ **承認** → ④ **実施** → ⑤ **実機での確認のやり直し**（読み取り専用の起動・W0〜W4・MoveIt の Plan & Execute）。
+- **注意**: URDF・関節リミット・`planning_frame`・IK solver は MoveIt 本体の設定（CLAUDE.md により勝手に変えない）。差の表で関節リミット・0 の位置・軸の向きが変わるなら、校正（`follower_calibration.yaml` の `direction`・`center`）や既存の記録（出発点の値、elbow の URDF の上限との差）にも影響する。
+

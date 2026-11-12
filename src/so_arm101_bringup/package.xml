@@ -13,7 +13,6 @@
   <exec_depend>so_arm101_moveit_config</exec_depend>
   <exec_depend>so_arm101_controller</exec_depend>
   <exec_depend>so_arm101_hardware</exec_depend>
-  <exec_depend>so_arm101_lerobot_bridge</exec_depend>
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>usb_cam</exec_depend>

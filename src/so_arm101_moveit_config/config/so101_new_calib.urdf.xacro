@@ -3,8 +3,8 @@
     <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
     <!-- 追加：　fake/real切り替え引数 -->
     <xacro:arg name="use_fake_hardware" default="true" />
-    <!-- 段階2b-2: 実機(use_fake_hardware=false)のときのハードウェア選択。mock のときは無視される -->
-    <xacro:arg name="hardware" default="lerobot" />          <!-- lerobot | feetech -->
+    <!-- 実機(use_fake_hardware=false)のハードウェア。feetech だけ（それ以外は ros2_control.xacro のマクロがエラーで止める） -->
+    <xacro:arg name="hardware" default="feetech" />          <!-- feetech のみ -->
     <xacro:arg name="serial_port" default="/dev/ttyACM0" />  <!-- feetech のみ -->
     <xacro:arg name="calibration_file" default="" />         <!-- feetech のみ -->
     <xacro:arg name="read_only" default="true" />            <!-- feetech のみ。false で書き込みモード（段階2b-3b） -->

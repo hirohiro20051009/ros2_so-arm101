@@ -2,30 +2,45 @@
 SO-ARM101 統合ランチャー（ルート名前空間）。
 
   mock:=true  (既定) : mock_components/GenericSystem でシミュレーション
-  mock:=false        : 実機。hardware で経路を選ぶ（mock:=true のときは hardware は無視される）
-    hardware:=feetech (既定) : Sts3215System（STS3215 を直接制御。LeRobot を使わない）
+  mock:=false        : 実機（hardware:=feetech）
+
+  hardware:=feetech (既定。これだけが使える) : Sts3215System（STS3215 を直接制御。LeRobot を使わない）
                                read_only:=true (既定) は読み取り専用で、サーボのレジスタには書き込まない。
                                書き込みモード（トルク ON。腕が動く）は read_only:=false を明示したときだけ
                                （手順は docs/feetech_write_check.md）
-    hardware:=lerobot        : So101HardwareBridge + LeRobot bridge (so_arm101_lerobot_bridge)。
-                               hardware:=lerobot を明示したときだけ使う（段階2c の後に archive へ移す予定）
+  hardware:=feetech 以外（lerobot など）は、mock:=true / false のどちらでも、起動前にエラーで止まる
+  （LeRobot 経路は削除した。タグ stage2c-done に残っている）。
 
-どちらのモードも robot_state_publisher / ros2_control_node / move_group は1つずつ、
-コントローラ名・トピックは共通（/arm_controller, /gripper_controller, /joint_states）。
-hardware:=lerobot のとき追加されるのは LeRobot bridge ノードだけ（/joint_commands, /joint_states_raw）。
+robot_state_publisher / ros2_control_node / move_group は1つずつ、
+コントローラ名・トピックは mock / 実機で共通（/arm_controller, /gripper_controller, /joint_states）。
 """
 
 import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launch_utils import DeclareBooleanLaunchArg
+
+
+def _require_feetech(context, *args, **kwargs):
+    """hardware:=feetech 以外は、はっきりしたエラーで止める（mock:=true のときも検査する）。"""
+    value = context.perform_substitution(LaunchConfiguration("hardware"))
+    if value != "feetech":
+        raise RuntimeError(
+            f"hardware:={value} is not supported. The LeRobot path (hardware:=lerobot) was "
+            "removed from this workspace; use hardware:=feetech (the default). "
+            "The removed code is in git tag stage2c-done "
+            "(e.g. git checkout stage2c-done -- src/so_arm101_lerobot_bridge)."
+        )
+    return []
 
 
 def generate_launch_description():
@@ -40,7 +55,7 @@ def generate_launch_description():
     probe_lock_sram = LaunchConfiguration("probe_lock_sram")
 
     # robot_description は全ノード（rsp / ros2_control_node）で同一。
-    # mock と hardware で ros2_control のプラグインだけが切り替わる（hardware 等は mock のとき無視される）。
+    # mock で ros2_control のプラグインだけが切り替わる（serial_port 等の hardware 用の引数は mock のとき無視される）。
     moveit_config = (
         MoveItConfigsBuilder("so101_new_calib", package_name="so_arm101_moveit_config")
         .robot_description(
@@ -62,25 +77,19 @@ def generate_launch_description():
     controllers_yaml = os.path.join(
         get_package_share_directory("so_arm101_controller"), "config", "controllers.yaml"
     )
-    bridge_launch = os.path.join(
-        get_package_share_directory("so_arm101_lerobot_bridge"),
-        "launch",
-        "so101_ros2_bridge.launch.py",
-    )
 
     ld = LaunchDescription()
     ld.add_action(
         DeclareBooleanLaunchArg(
-            "mock", default_value=True, description="true=mock / false=実機（hardware で経路を選ぶ）"
+            "mock", default_value=True, description="true=mock / false=実機（hardware:=feetech）"
         )
     )
     ld.add_action(
         DeclareLaunchArgument(
             "hardware",
             default_value="feetech",
-            choices=["lerobot", "feetech"],
-            description="mock:=false のときだけ有効。feetech=STS3215 を直接制御（既定。read_only で読み取り専用/書き込みを選ぶ）"
-            " / lerobot=LeRobot bridge 経由（明示したときだけ使う）",
+            description="feetech だけ受け付ける（STS3215 を直接制御。既定。read_only で読み取り専用/書き込みを選ぶ）。"
+            "それ以外は、mock の値に関わらず、起動前にエラーで止まる。mock:=true のときは使われない",
         )
     )
     ld.add_action(DeclareLaunchArgument("serial_port", default_value="/dev/ttyACM0"))
@@ -135,6 +144,9 @@ def generate_launch_description():
             condition=condition,
         )
 
+    # hardware の検査（宣言した引数の後、ノードの起動の前）。feetech 以外はここで止まる
+    ld.add_action(OpaqueFunction(function=_require_feetech))
+
     # world -> base_link (SRDF の virtual_joint)
     ld.add_action(include("static_virtual_joint_tfs.launch.py"))
 
@@ -156,18 +168,6 @@ def generate_launch_description():
             executable="ros2_control_node",
             parameters=[moveit_config.robot_description, controllers_yaml],
             output="screen",
-        )
-    )
-
-    # 実機かつ hardware:=lerobot のときだけ: LeRobot bridge（サーボ I/O）。ルート名前空間
-    # hardware:=feetech では LeRobot のノードを一切起動しない（ドライバが直接サーボを読む）
-    ld.add_action(
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(bridge_launch),
-            launch_arguments={"type": "follower"}.items(),
-            condition=IfCondition(
-                PythonExpression(["'", mock, "'.lower() == 'false' and '", hardware, "' == 'lerobot'"])
-            ),
         )
     )
 
