@@ -72,7 +72,7 @@ if(BUILD_TESTING)
   target_compile_definitions(test_sts3215_system PRIVATE
     CALIBRATION_YAML="${CMAKE_CURRENT_SOURCE_DIR}/test/data/follower_calibration_fixture_20260907.yaml"
     JOINT_LIMITS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_moveit_config/config/joint_limits.yaml"
-    CONTROLLERS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_controller/config/controllers.yaml")
+    CONTROLLERS_YAML="${CMAKE_CURRENT_SOURCE_DIR}/../so_arm101_bringup/config/controllers.yaml")
 endif()
 
 # 他のパッケージ（so_arm101_calibration など）が so_arm101_sts3215（Sts3215Bus / Sts3215WriteBus /

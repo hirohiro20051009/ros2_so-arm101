@@ -2050,3 +2050,59 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - 注意: 古い `install/so_arm101_controller`・`build/so_arm101_controller` が残る（isolated + symlink-install。`ros2 pkg prefix` が成功し続ける見込み）。片付けは 2 ディレクトリだけを消す案（承認制。消す前の控えは計画の 6 章）。
 - 基準（取得済み）: `gen_rd6.sh` の 6 通りが `urdf_after/` と同一、`--show-args` 21 個、pipelines（chomp・ompl・pilz）、`colcon test-result` は全体 231 件・失敗 10（bringup 51・失敗 10、calibration 73、controller 0、description 2、hardware 105、moveit_config 0）。
 - ユーザーの決定待ち: 計画 10 章（D1〜D9）。
+
+## E1（`controllers.yaml` の移動）の実施と、D3 の控え（2026-11-12。計画: `docs/controllers_yaml_move_plan.md`。E1 はコミット前）
+
+### E1 の変更（git 管理下。削除の直前のコミット `49a6c18` から取り出せる）
+
+- `git mv src/so_arm101_controller/config/controllers.yaml src/so_arm101_bringup/config/controllers.yaml`（内容は同一。`git diff --cached -M` で R 100%）。`git rm src/so_arm101_controller/package.xml`・`CMakeLists.txt`。空ディレクトリ `src/so_arm101_controller/{launch,config}` と `src/so_arm101_controller/` を rmdir（中身なし）。
+- `src/so_arm101_bringup/CMakeLists.txt:17` に `install(DIRECTORY config DESTINATION share/${PROJECT_NAME})` を追加。`src/so_arm101_bringup/package.xml:15` の `<exec_depend>so_arm101_controller</exec_depend>` を削除。`src/so_arm101_hardware/CMakeLists.txt:75` の `../so_arm101_controller/config/controllers.yaml` → `../so_arm101_bringup/config/controllers.yaml`。`src/so_arm101_bringup/launch/bringup.launch.py:98` の `get_package_share_directory("so_arm101_controller")` → `("so_arm101_bringup")`。`THIRD_PARTY_NOTICES.md` の 2 か所（controllers.yaml のパス、`<author>Nimrod</author>` の対象から controller を外す）。
+- 旧パス → 新パス: `src/so_arm101_controller/config/controllers.yaml` → `src/so_arm101_bringup/config/controllers.yaml`。この節より前の記録（旧パスを書いたもの）は当時のまま。
+
+### E1 の確認の結果
+
+- `colcon build`: 5 パッケージ成功。`colcon test`: 全体 231 件・失敗 10（前と同一）。パッケージごとの `colcon test-result`・xunit ファイルごとの件数も前と同一（bringup 51・失敗 10、calibration 73、description 2、hardware 105、moveit_config 0）。bringup の失敗の名前（`launch/bringup.launch.py` の pep257 D400・D415、copyright、flake8 E501 ×4。行番号 115・136・193・194）も同一。lint の対象に `controllers.yaml` は入らない（yaml は ament の lint の対象外）。
+- hardware の試験 `DesignLimits.StepLimitCoversTheWorstCaseTrajectoryStep` は新しいパスで pass。**パスが無いと、試験は黙って飛ばされず失敗する**（`YAML::LoadFile` の `bad file` 例外が試験の本体で投げられ、gtest が FAILED にする。ファイル内に `GTEST_SKIP`・`catch` は無い。一時ファイル（スクラッチパッド。リポジトリ外）の gtest で確かめた）。
+- `controllers.yaml` の sha256: `8515d643d6c60175b3216da52cc66ee1a52982fc3e4af6187ed892bbccf20308`（src・新しい install とも同一）。
+- `ros2_control_node` に渡るパラメータファイル（ノードを起動せず launch を Python で読み込んで確認）: `/home/hirok/ros2_so-arm101/install/so_arm101_bringup/share/so_arm101_bringup/config/controllers.yaml`（実体: `src/so_arm101_bringup/config/controllers.yaml`）。parameters は 2 つのまま。
+- `--show-args`: 21 個、前後で出力が同一。`gen_rd6.sh` の 6 通り: 全て `~/so_arm101_check/urdf_after/` と同一。pipelines: chomp・ompl・pilz、default ompl（前と同一）。
+- `install/` のファイル一覧の diff（前 324 行 → 後 326 行。追加 2 行のみ）:
+
+| 行 | 前 → 後 | 理由 |
+|---|---|---|
+| `d install/so_arm101_bringup/share/so_arm101_bringup/config` | 無 → 有 | `bringup/CMakeLists.txt:17` の `install(DIRECTORY config …)` |
+| `l …/so_arm101_bringup/config/controllers.yaml -> src/so_arm101_bringup/config/controllers.yaml` | 無 → 有 | 同上（symlink-install のリンク） |
+| `install/so_arm101_bringup/share/colcon-core/packages/so_arm101_bringup`・`…/package_run_dependencies/so_arm101_bringup`（内容） | 一覧には出ない（名前は同じ）。内容から `so_arm101_controller` が消えた | `bringup/package.xml` の exec_depend の削除 |
+| `install/so_arm101_controller/**`・`build/so_arm101_controller/**` | **まだ有る**（D3 の削除は未実施） | colcon は古いパッケージを消さない。削除は D3 の承認後 |
+
+### D3 の控え（削除の前に書く。git 管理外なのでタグから戻せない）
+
+- 構成: `install/` は isolated（パッケージごとのディレクトリ 6 個 + `COLCON_IGNORE` + `setup.*`）。`install/COLCON_IGNORE` は 0 バイト。`install/share`・`install/lib` のような共有ディレクトリは無い。`install/so_arm101_controller` と `build/so_arm101_controller` はどちらも通常のディレクトリ（`readlink -f` が自分自身）。
+- `install/so_arm101_controller` の実ファイル 9 個（sha256）:
+  - `share/colcon-core/packages/so_arm101_controller` `6b970667b38304c3ddf76b3a34c319f53631a13dbb7decf25ff1df6c02f7c898`（中身: `controller_manager:joint_state_publisher_gui:rclcpp:rclpy:robot_state_publisher:ros2launch:sensor_msgs:so_arm101_description:trajectory_msgs:xacro`）
+  - `share/so_arm101_controller/hook/cmake_prefix_path.dsv` `7ab2eb0a…69d3`、`.ps1` `0c7394c1…885a`、`.sh` `ee9849de…94b2`
+  - `share/so_arm101_controller/package.bash` `7ce016c0…ac8`、`package.dsv` `6292db6d…1b`、`package.ps1` `0a91fd7d…cf8`、`package.sh` `819a3464…e1a`、`package.zsh` `bdfea06d…81fb`
+- シンボリックリンク 15 個（`install/so_arm101_controller/` 以下 → 先）:
+  - `share/ament_index/resource_index/{package_run_dependencies,packages,parent_prefix_path}/so_arm101_controller` → `build/so_arm101_controller/ament_cmake_index/share/ament_index/resource_index/<同名>/so_arm101_controller`
+  - `share/so_arm101_controller/cmake/so_arm101_controllerConfig.cmake`・`…Config-version.cmake` → `build/so_arm101_controller/ament_cmake_core/<同名>`
+  - `share/so_arm101_controller/config/controllers.yaml` → `src/so_arm101_controller/config/controllers.yaml`（**今はぶら下がり**）、`share/so_arm101_controller/package.xml` → `src/so_arm101_controller/package.xml`（**ぶら下がり**）
+  - `share/so_arm101_controller/environment/ament_prefix_path.dsv`・`path.dsv` → `build/so_arm101_controller/ament_cmake_environment_hooks/<同名>`、`environment/ament_prefix_path.sh`・`path.sh` → `/opt/ros/humble/share/ament_cmake_core/cmake/environment_hooks/environment/<同名>`
+  - `share/so_arm101_controller/local_setup.{bash,dsv,sh,zsh}` → `build/so_arm101_controller/ament_cmake_environment_hooks/local_setup.<同拡張子>`
+- `build/so_arm101_controller`: 106 エントリ（ファイル 75）。`colcon_build.rc` = 0、`colcon_test.rc` = 0、`cmake_args.last` = `None`、`CMakeCache.txt` の `CMAKE_INSTALL_PREFIX:PATH=/home/hirok/ros2_so-arm101/install/so_arm101_controller`、`CMAKE_BUILD_TYPE` は空。`Testing/` は `Temporary` だけ。
+- 再生成: パッケージ（`3bc04f8` 以降の `package.xml`・`CMakeLists.txt`）を `49a6c18` から戻したうえで `colcon build --packages-select so_arm101_controller`。`log/` は消さない。
+
+### D3 の削除の結果（2026-11-12。ユーザーの承認と「launch も実機も動かしていない」の返事の後）
+
+- 実行したコマンド（これだけ）: `rm -r /home/hirok/ros2_so-arm101/install/so_arm101_controller /home/hirok/ros2_so-arm101/build/so_arm101_controller`（rc=0）。`log/` には触れていない。削除前に `ps` で `ros2_control_node`・`move_group` が無いことを確認。
+- 確認（`env -i` の新しいシェルで `source /opt/ros/humble/setup.bash` と `source install/setup.bash`）: `ros2 pkg prefix so_arm101_controller` → `Package not found`（rc=1）、`ros2 pkg prefix so_arm101_bringup` → `/home/hirok/ros2_so-arm101/install/so_arm101_bringup`（rc=0）。`ros2 pkg list | grep so_arm101` は 5 個（bringup・calibration・description・hardware・moveit_config）、`colcon list` も 5 個。`AMENT_PREFIX_PATH` に controller は無い。削除の後の `colcon build`: 5 パッケージ成功。
+- `install/` の一覧（324 行 → 288 行。E1 の変更前を基準）の diff:
+
+| 行 | 前 → 後 | 理由 |
+|---|---|---|
+| `install/so_arm101_controller/**` の 38 行（ディレクトリ 14、実ファイル 9、リンク 15） | 有 → 無 | D3 の削除（パッケージを無くした） |
+| `install/so_arm101_bringup/share/so_arm101_bringup/config`（ディレクトリ）と `…/config/controllers.yaml`（`src/so_arm101_bringup/config/controllers.yaml` へのリンク） | 無 → 有（2 行） | E1 の `bringup/CMakeLists.txt:17` の install |
+| 上記以外 | 変更なし | — |
+
+  合計: 324 − 38 + 2 = 288。controller の分以外で減った行は無い。
+- 削除の直前のコミットと取り出し方: `git` 管理下の `src/so_arm101_controller/{package.xml,CMakeLists.txt,config/controllers.yaml}` は、実装のコミットの親 `49a6c18`（docs だけの変更。`src/` は `a5c8cbd` と同一）から取り出せる（`git checkout 49a6c18 -- src/so_arm101_controller`）。ソースの内容が最後に変わったのは `a5c8cbd`。`install/`・`build/` は git 管理外で戻らないが、上の控えと `colcon build --packages-select so_arm101_controller`（パッケージを戻した後）で再生成できる。
+- 承認の一覧に入っていなかった rmdir（`src/so_arm101_controller/launch`、`config`、`src/so_arm101_controller` の 3 つ）は、空だった（`find` で確認）ので、事後に承認された。

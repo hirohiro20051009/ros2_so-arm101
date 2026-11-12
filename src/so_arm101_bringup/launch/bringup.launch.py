@@ -95,7 +95,7 @@ def generate_launch_description():
     )
     moveit_launch = moveit_config.package_path / "launch"
     controllers_yaml = os.path.join(
-        get_package_share_directory("so_arm101_controller"), "config", "controllers.yaml"
+        get_package_share_directory("so_arm101_bringup"), "config", "controllers.yaml"
     )
 
     ld = LaunchDescription()
