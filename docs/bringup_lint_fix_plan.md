@@ -298,3 +298,18 @@ SO-ARM101 統合ランチャー（ルート名前空間）。
 
 - **事実**: 違反 10 件の出力、`git log --follow` の経緯、上流 HEAD `b50872d` の `so101_robot.launch.py` の取得、行の一致の数、`gen_rd6.sh` と `urdf_after/` の sha256、`ament_copyright` の出力。
 - **推測 / 判断**: 上流の構成から着想を得た可能性、Setup Assistant の雛形の一致が「著作権表示を要する量ではない」という判断、bringup 以外のパッケージの試験が影響を受けないこと、`__doc__` を参照するコードが bringup の外（ほかのパッケージや launch の機構）にもないこと。
+
+## 11. 実施の記録（2026-11-12）
+
+**ユーザーの決定（承認）**
+- **A**: Copyright 行は **`Copyright 2026 hiro`**（ルートの `LICENSE` と maintainer に揃える）。nimiCurtis は併記せず、`THIRD_PARTY_NOTICES.md` は変えない。理由: 上流（HEAD `b50872d`）と比べて固有のコードが残っていない（一致する行は launch の一般的な行だけ）。Setup Assistant の雛形と同じ形の行は、moveit_config について `THIRD_PARTY_NOTICES.md` の 4 章に BSD-3-Clause を記載済みで、一般的な骨組みなので追記しない。（計画の 4.1・9 章の `hirok` は、この決定で `hiro` に変わった。）
+- **B**: 英語の要約 1 行を足し、日本語の 1 行は本文に残す。
+- **C**: 実機の読み取り専用の確認は**行わない**。理由は「**実行されるコードが同じ**（変わるのはコメント・docstring・折り返しだけ）」。docstring は AST に含まれるので、全体の AST は変わる（差は docstring だけ。docstring を除いた AST は一致）。7 章の「AST が変わらない」は、この表現に読み替える。
+- **D**: `ast.dump` の比較は、docstring を除いた AST の一致と、差が docstring だけであることの確認。E501 の折り返しは、暗黙の文字列連結か括弧内の改行で、`+` は使わない。
+- **E**: モックの起動は、ユーザーが実機を使っていないと答えてから（答えあり。下記）。
+
+**結果**
+- **件数（bringup の colcon test）**: 51 件・失敗 10 → **47 件・失敗 0**（pytest は 34 → 34、全件成功）。内訳: pytest 34、copyright 2、flake8 4 → 1、lint_cmake 1、pep257 3 → 2、xmllint 1、CTest のまとめ 6。**検査の消滅ではない**: ament の lint は違反を 1 件ずつ数え、通過すると 1 件にまとまる（xunit で確認）。6.1 の「期待は 51 件」は、47 件に読み替える。
+- **静的な確認**: docstring を除いた AST が一致、文字列定数 84 個が一致、`--show-args` 21 個が前後で `diff` 空、xacro の sha256 6 通りが一致、未宣言の引数で exit 1（`process started` 0 行）。
+- **モック（`mock:=true use_rviz:=false`、ログ `~/so_arm101_check/lintfix_mock.log`）**: `joint_state_broadcaster`・`arm_controller`・`gripper_controller` が **active**。`ros2_control_node` の `--params-file` は `install/so_arm101_bringup/share/so_arm101_bringup/config/controllers.yaml`。`is not known to URDF` は **0 件**（`grep -a -c`、move_group を除かずに数えた）。`move_group` の Segmentation fault（exit -11）は既知。`kill -INT <launch の PID>` で 3 秒で停止、`ps` に残りなし（残っていたのは gvfsd の 2 つで無関係）、新しいシェル（`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`）の `ros2 node list` は空。
+- **launch 経由の robot_description**: `git stash` はせず、モックの起動中の `ros2 param get /robot_state_publisher robot_description`（16459 バイト）を、xacro の 6 通りのうち **mock の `1_mock_feetech` と `2_mock_default`**（どちらも sha256 `d8eebdcd27762b2b…`）と比べた。そのままでは sha256 は一致しない（**理由 [事実]**: launch 経由は xacro の整形がなく 1 行、かつ冒頭のコメントのパスが `install/…` で、xacro 直接は `src/…` で整形あり）。**パスのコメントを同じ値にして、タグの間の空白を除いて比べると、1・2 のどちらとも一致**（正規化後の sha256 `c08c4ee35822b7eb…`、16342 文字）。launch の変更は robot_description に影響していない。
