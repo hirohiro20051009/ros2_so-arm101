@@ -802,7 +802,7 @@ V. VR（解析 IK の連続出力。Servo は使わない）
 | 関節の指令（予備） | `/servo_node/delta_joint_cmds` | `control_msgs/msg/JointJog` | 使わない（モックの関節の順の検証にだけ使う） |
 | **Servo の開始・停止** | `/servo_node/start_servo`、`pause_servo`、`unpause_servo`、`stop_servo`（= `pause_servo`） | `std_srvs/srv/Trigger` | **`start_servo` は 1 回必須**（起動しただけでは何もしない）。**`success` は信用しない**（タイムアウトでも true）。`pause_servo` 中は何も出力しない |
 | drift の設定 | `/servo_node/change_drift_dimensions` | `moveit_msgs/srv/ChangeDriftDimensions` | 2.4。rx（または ry）だけ true。`start_servo` の前、または止まっているとき |
-| 状態の通知（Servo） | `/servo_node/status` | `std_msgs/msg/Int8` | Servo の周期（約 29 Hz）で出る（開始後）。**0 NO_WARNING、1 DECELERATE_FOR_APPROACHING_SINGULARITY、2 HALT_FOR_SINGULARITY、3 DECELERATE_FOR_COLLISION、4 HALT_FOR_COLLISION、5 JOINT_BOUND、6 DECELERATE_FOR_LEAVING_SINGULARITY、−1 INVALID**（`status_codes.h`） |
+| 状態の通知（Servo） | `/servo_node/status` | `std_msgs/msg/Int8` | Servo の周期（約 29 Hz）で出る（開始後。**`pause_servo` の間も出続ける**。止まらない）。**値が付くのは、動かす指令を処理している周期だけ。指令が無い（止まっている）周期は 0**（15 章）。**共通の層は `status` だけに頼らない**（`collision_velocity_scale`、`/joint_states`、先端の位置の変化も見る。15 章）。**0 NO_WARNING、1 DECELERATE_FOR_APPROACHING_SINGULARITY、2 HALT_FOR_SINGULARITY、3 DECELERATE_FOR_COLLISION、4 HALT_FOR_COLLISION、5 JOINT_BOUND、6 DECELERATE_FOR_LEAVING_SINGULARITY、−1 INVALID**（`status_codes.h`） |
 | 衝突の倍率 | `/servo_node/collision_velocity_scale` | `std_msgs/msg/Float64` | 10 Hz。0〜1 |
 | 状態リセット | `/servo_node/reset_servo_status` | `std_srvs/srv/Empty` | 衝突などの状態コードを戻す |
 | **コントローラの切り替え** | `/controller_manager/switch_controller` | `controller_manager_msgs/srv/SwitchController` | `strict`。`arm_controller`（JTC）⇔ forward 系。**止まっているときだけ**（3.1.1） |
@@ -988,6 +988,39 @@ V. VR（解析 IK の連続出力。Servo は使わない）
 - **手順書での避け方（`docs/servo_real_check.md` の「停止したあとの確認」と止め方の表に反映した）**: (1) 止める前に、Twist の送信を止め（S1）、`pause_servo`（S2）、止まっていることを確認して forward controller を外して `arm_controller` に戻し（S3）、腕を支えてから、launch を Ctrl-C 1 回（S5）。（効果は未確認。頻度の原因が特定できていないため、予防の気休めを超えない）。(2) **停止のたびに、ログの `[deactivate] … confirmed` と `deactivated. …` の 2 行を確認**し、無ければ腕を支えて 12 V を切る（S6）。(3) 停止後に読み取り専用で起動し、`torque_enable=0 lock=1` を確認。(4) **R0b（読み取り専用）で、`use_servo:=true` の起動・停止を 3 回行い、−11 の回数を数える**（腕に書かないので安全）。(5) −11 が出たら、スタックと、直前の行の有無を報告。
 
 **運用の事実（手順の注意）**: シェルのバックグラウンド（`&`）で起動した launch は、**SIGINT が無視される**ことがある（非対話のシェルでは、`&` で起動したジョブが SIGINT を無視する設定を引き継ぐ）。launch は前景で動かし（`2>&1 | tee -i …`）、**別の端末から `kill -INT` する**（または launch の端末で Ctrl-C）。今回の 1 回目の再実行は `&` で起動したため `kill -INT` が効かず、launch に `kill -TERM` を送ったところ、launch の本体だけが死んで子プロセス（`ros2_control_node`・`move_group`・`servo_node_main` など）が残った。**残った子は、控えた PID（自分で起動したもの）に個別に `kill -INT` で止めた**（モックのみ。実機では起きない）。そのログ（1 回目の `servo_mock_3.log`）は上書きして取り直した。
+
+## 15. 実機の読み取り専用の結果（R 段階）と、`status` の調査（2026-11-12）
+
+### 15.1 結果（ユーザーの報告。ログ `~/so_arm101_check/servo_R0a.log`・`servo_R0b.log`・`servo_R0b_2.log`・`servo_R0b_3.log`・`servo_R1.log`・`servo_R`（R3。ファイル名の打ち間違いで拡張子なし））
+
+- **合格**: R0a、R0b（3 回）、R1、R3。`[diag]` 6/6 ×2、停止時の `bus:` はすべて 0（R3 は `reads=53744`）。
+- **`ros2_control_node` の −11 は、実機の読み取り専用で 5 回中 0 回**（`move_group` の −11 は毎回。既知）。
+- **R1**: 出発点で `collision_velocity_scale` = **0.01457**（見込み 0.015。モックの出発点の計算 0.0146 と一致）。
+- **R2 は省略**（ユーザーの判断。中間の姿勢 T は、トルク OFF では支えなしで止まらず、手で支えながらの操作が難しいため。向き・大きさ・順序はモックの d・f で確認済み）。代わりに、W3 の最初の指令を「+z（床から離れる向き）に 5 mm」にして、実機で向きを確かめる（手順書を直した）。
+- **R3**（出発点。読み取り専用）: 送信の終わり・S1・S2・S4 で `commands` の出力が止まった。**S4 では `servo_node_main` が SIGINT で `finished cleanly` になり、launch のほかの部分は動き続け、forward_position_controller は active のままだった**（手順書の未確認の点が確認できた）。S3 で `arm_controller` に戻せた。
+
+### 15.2 `status` が減速を表さない件の調査（moveit_servo 2.5.10、タグのソース）
+
+ユーザーの観察: 出発点で、ツールの表示の 5×5 条件数が 124.1（停止のしきい値 100 を超える）、ログには毎回 `Close to a collision, decelerating` の WARN が出ているのに、`/servo_node/status` は常に 0 だった。
+
+**コードの事実（ファイル:行。`moveit_ros/moveit_servo/src/`）**:
+- **公開**: `calculateSingleIteration` の**先頭**で、その時点の `status_` を publish し（`servo_calcs.cpp:322-323`）、すぐ `NO_WARNING` に戻す（`:326`）。パッケージ内では、`paused_` の判定（`:375`）より前なので、**pause の間も公開され続ける**。
+- **設定**: 動かす指令を処理する枝の中だけ。(a) 特異点: `velocityScalingFactorForSingularity`（`utilities.cpp:143` 減速、`:152` 停止）。呼び出しは `cartesianServoCalcs`（`servo_calcs.cpp:649`）の中だけ（**Twist の経路だけ。JointJog の経路では特異点の状態は付かない**）。(b) 衝突: `internalServoUpdate`（`:686` 減速、`:692` 停止）。(c) 関節の端: `:713`。**どれも、新しい（stale でない）非ゼロの指令を処理した周期でだけ実行される**。**指令が無い周期は、`status_` が `NO_WARNING` のまま公開される**。
+- **上書き**: `status_` は 1 つの値。1 周期の中で、特異点（`:649`）の後に、衝突・関節の端（`:686`〜`:713`）が上書きする。**特異点の減速・停止の状態は、同じ周期に衝突・関節の端があると失われる**。
+- **特異点の「近づく向きのときだけ」（推測が当たっていた）**: `velocityScalingFactorForSingularity`（`utilities.cpp:139-152`）は、条件数 `c` が `lower` と `hard_stop` の間のとき減速（status 1 または 6）、`upper_threshold` 以上のとき停止（status 2）。`upper_threshold` は、**近づく向き（dot > 0）は `hard_stop`（100）**、**離れる向き（dot ≤ 0）は `(hard_stop − lower) × multiplier + lower` = (100 − 40) × 2 + 40 = 160**。したがって、**`c` = 124 で離れる向きなら、`lower < c < hard_stop` でも `c ≥ upper` でもなく、減速も停止も status も付かない（倍率 1）**。近づく向きなら、停止（status 2）。
+
+**モックでの再現（実機の出発点と同じ姿勢。`servo_mock_8.log`。ノードは `mock:=true` のみ）**: モックを出発点（pan −0.0982、lift −1.48295、elbow +1.69009、wrist_flex +0.50327、roll −0.04833）に動かし、同じ条件でツールを実行: 条件数 **124.1**（実機と同じ）、`collision_velocity_scale` = 0.0146。`/servo_node/status` を送信中・送信の前後で数えた結果:
+
+| 指令（2 秒、出発点） | 送信中の status（値: 回数） | 備考 |
+|---|---|---|
+| +z | **3: 59**（衝突で減速） | 送信の前後の周期は 0 |
+| −z | **5: 59**（関節の端） | elbow が上限（1.69）なので |
+| +x、−x | **3: 59** | 作れない向きを 9.6 % 捨てる |
+| +y | （ツールが拒否: 97 % が作れない向き） | |
+
+→ **status は、送信中は衝突の減速（3）を表した。止まっている周期は 0**。ユーザーの観察（常に 0）は、**指令を処理していない周期（送信の前後・pause の間・ツールの終了後）に読んだため**と考えられる（旧ツールは終了後の `status last` を表示していたので、0 だった）。**ツールを直した**（送信中の値と回数を表示）。特異点の状態（1・2・6）は、**この条件では衝突（3）か関節の端（5）に上書きされて見えなかった**。
+
+**共通の層への約束（9.1 に反映）**: (1) **`status` は、動かす指令を処理している周期だけ値が付く**。止まっている周期は 0。(2) **`status` だけに頼らない**: 減速の有無は `collision_velocity_scale`（10 Hz、`~/collision_velocity_scale`）、実際の動きは `/joint_states` と先端の位置の変化で見る。(3) 特異点は、**離れる向きなら、`hard_stop` を超えても動く**（status も付かない）。(4) 特異点の状態は、衝突・関節の端に上書きされうる。(5) `pause_servo` の間も `status` は出続ける。**動作の確認は `/forward_position_controller/commands` が出ているか**で行う。
 
 ## 付録: Jacobian の条件数の計算（ノード不使用）
 

@@ -25,10 +25,10 @@
 
 | 順 | 操作 | 効果 | コマンド・手順 |
 |---|---|---|---|
-| S1 | Twist の送信を止める | 0.1 秒後に Servo の出力が止まる。腕は最後の目標で止まる | 送信ツールの端末で **Ctrl-C**（ツールはゼロの Twist を 0.3 秒送って終わる） |
-| S2 | `pause_servo` | Servo が何も出さなくなる | `ros2 service call /servo_node/pause_servo std_srvs/srv/Trigger` |
+| S1 | Twist の送信を止める | 0.1 秒後に Servo の出力が止まる。腕は最後の目標で止まる | 送信ツールの端末で **Ctrl-C**（ツールは、ゼロの Twist を 0.3 秒送ってから、終了コード 130 で終わる。確認の画面での Ctrl-C は `cancelled (nothing was sent)` で静かに終わる） |
+| S2 | `pause_servo` | Servo が何も出さなくなる（`/forward_position_controller/commands` が止まる。**`/servo_node/status` は止まらない**）。**止めておく鍵ではない**: `send_servo_twist.py` は、送る前に必ず `unpause_servo` を呼ぶので、ツールを実行すると再開する（S2 のあと、別の送信を止めておきたいときは、S3 で forward controller を外す） | `ros2 service call /servo_node/pause_servo std_srvs/srv/Trigger` |
 | S3 | **手動で JTC に戻す** | forward controller が外れ、`arm_controller` が直前の指令を保持する | 先に「止まっていることの確認」（コマンド A）→ `ros2 control switch_controllers --strict --deactivate forward_position_controller --activate arm_controller` → `ros2 control list_controllers` で `arm_controller` が `active`、`forward_position_controller` が `inactive`。**両方 `inactive` なら `ros2 control switch_controllers --strict --activate arm_controller`**（保持のまま） |
-| S4 | Servo のノードだけを止める | 出力が止まる（forward controller は最後の目標を保持。腕は止まる） | `ps aux \| grep servo_node_main \| grep -v grep` で **自分の launch の子の PID** を控え、`kill -INT <PID>`。launch は動き続ける見込み（**未確認。結果を報告**） |
+| S4 | Servo のノードだけを止める | 出力が止まる（forward controller は最後の目標を保持。腕は止まる） | `ps aux \| grep servo_node_main \| grep -v grep` で **自分の launch の子の PID** を控え、`kill -INT <PID>`。launch は動き続け、forward controller は active のまま（R3 で確認済み） |
 | S5 | ハードウェアの launch を止める | トルク OFF。**腕が自重で落ちる** | 腕を折りたたみ姿勢で支えて、launch の端末で **Ctrl-C を 1 回** |
 | S6 | 12 V を切る | トルクが切れて腕が落ちる（最後の手段） | 下の条件のときだけ |
 
@@ -88,7 +88,8 @@ source /opt/ros/humble/setup.bash
 source ~/ros2_so-arm101/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 mkdir -p ~/so_arm101_check
-cd ~/ros2_so-arm101 && colcon build --symlink-install     # 最新のビルドであること
+# ビルド済みなら不要（実行すると install/ が作り直され、端末を開き直す必要がある）。ソースを更新したときだけ:
+# cd ~/ros2_so-arm101 && colcon build --symlink-install
 ls -l /dev/ttyACM0                                          # ポートがあること
 git log --oneline | head -3                                 # Servo の統合のコミット（5b35507 以降）があること
 ```
@@ -161,8 +162,8 @@ timeout 5 ros2 topic echo /servo_node/status --once                        # dat
 timeout 5 ros2 topic echo /servo_node/collision_velocity_scale --once      # data: 0.0 台（出発点の姿勢のとき。0.015 前後の見込み）
 ```
 
-確認すること: `status` が来る（0 か、特異点・衝突の減速の値 1〜6）。**出発点（elbow ≈ +1.69）では `collision_velocity_scale` が 1 より十分小さい**（見込み 0.015。0.1 未満）。値を報告する。1.0 だった場合は、姿勢が出発点と違う（elbow が開いている）ので、実測の姿勢と合わせて報告。
-`pause_servo` を呼ぶ（S2）→ `status` が止まる。Ctrl-C で止める。停止時の確認は R0b と同じ。
+確認すること: `status` が来る。**`status` は、動かす指令を処理している周期だけ値が付き、指令が無い（止まっている）周期は 0**（`servo_calcs.cpp:322-326`、計画 9.1）。この R1 では Twist を送らないので、0 でよい。減速・停止の値（1〜6）は、**送信中**に見る（R3）。**出発点（elbow ≈ +1.69）では `collision_velocity_scale` が 1 より十分小さい**（見込み 0.015。0.1 未満）。値を報告する。1.0 だった場合は、姿勢が出発点と違う（elbow が開いている）ので、実測の姿勢と合わせて報告。
+`pause_servo` を呼ぶ（S2）。**`/servo_node/status` は pause の後も約 29.4 Hz で出続ける**（止まらない）ので、pause の効き目は `status` では見ない。**効き目は、Twist を送っている間に `/forward_position_controller/commands` が止まること**で確認する（R3。Twist を送っていないときは、pause の前でも commands は出ない）。Ctrl-C で止める。停止時の確認は R0b と同じ。
 
 合格: `start_servo` 後に `status` が来る、出発点で `collision_velocity_scale` が小さい。
 
@@ -185,7 +186,7 @@ python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 -0.5 --seconds 2
 確認すること:
 - ツールの表示: `drift: rx`（pan ≈ 0 のとき）、`5x5 condition number` が 40 未満（見込み 20 台）、`dropped by the projection` が 0 % 付近。
 - 送信中に別の端末で `ros2 topic echo /forward_position_controller/commands`: **5 要素。各要素が `/joint_states` の実測との差 0.002 rad 以内**（1 周期の差。向きは、z を下げる Twist で lift・elbow・wrist_flex が動く向き）。**順序は pan、lift、elbow、wrist_flex、roll**。
-- `ros2 topic echo /servo_node/status --once`: 0。`/servo_node/collision_velocity_scale`: 1.0（姿勢 T は自己衝突まで約 97 mm）。
+- 送信中の `/servo_node/status`（`ros2 topic echo /servo_node/status`）が 0、`/servo_node/collision_velocity_scale`: 1.0（姿勢 T は自己衝突まで約 97 mm）。
 - **腕が（手で止めている以外に）勝手に動かない**。`READ-ONLY: command … is discarded` の WARN が出ていれば、内容を報告。
 - 先端が実際には動かないので、ツールの最後の表示（`tip moved`）は 0 付近でよい。
 
@@ -199,7 +200,7 @@ python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 -0.5 --seconds 2
 
 R2 の状態（forward が active、Servo が動作中）で、**送信を何度かやり直して**、次のそれぞれで出力が止まることを確認する（`ros2 topic hz /forward_position_controller/commands` で、止まったら出力が無くなる）:
 - S1: 送信中にツールの Ctrl-C → 0.1 秒後に出力が止まる。
-- S2: 送信中に別の端末で `pause_servo` → 出力が止まる（ツールは送り続けるが、Servo は出さない）。`unpause_servo` で再開。
+- S2: **送信中に**別の端末で `pause_servo` → `/forward_position_controller/commands` が止まる（ツールは送り続けるが、Servo は出さない）。`/servo_node/status` は止まらない（約 29.4 Hz で出続ける）。`unpause_servo` で再開。**注意: `send_servo_twist.py` は送る前に必ず `unpause_servo` を呼ぶ**（pause は止めておく鍵にならない）。Twist を送っていないときは、pause の前でも commands は出ない。
 - S4: `ps aux | grep servo_node_main | grep -v grep` の PID に `kill -INT` → 出力が止まる。**launch が動き続けるか（他のノードが生きているか）を `ros2 node list` と `list_controllers` で確認して報告**。確認後、launch の端末で Ctrl-C。
 
 合格: それぞれで出力が止まる。
@@ -278,16 +279,16 @@ grep -E "WRITE mode:|write mode active:" ~/so_arm101_check/servo_W0.log
 - ツールの上限（超える指定は拒否される）: 成分 0.5（`--allow-fast` で 1.0）、時間 3 秒、先端の総移動量 2 cm、frame は `base_link` か `gripper_frame_link`。**作れない向きの回転（rx。pan ≈ 0 のとき）は、ツールが拒否する**。
 - 各回の手順（**毎回**）: コマンド A（止まっている）→ `--dry-run` → 本番（Enter）→ 終了後に先端の位置（`tf2_echo`）と関節の実測を記録。
 
-**W3a. 最初の 1 回（重力に従う向き）**:
+**W3a. 最初の 1 回は、床から離れる向き（+z）に 5 mm**（実機で向きを確かめる）:
 ```bash
-python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 -0.3 --seconds 1 --dry-run
-python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 -0.3 --seconds 1
+python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 0.5 --seconds 1 --dry-run
+python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 0.5 --seconds 1
 ```
-期待（`scale` × 時間）: −3 mm。見ること: 先端が下がる向きに動く（動かなくてもよい。Q1 の不感帯の可能性。記録）。**腕が急に動く、異音、`FAULT` なら S1→S2→S3**。
+期待（`scale` × 時間）: +5 mm。見ること: **先端が上に動く**（`tf2_echo base_link gripper_frame_link` の z が増える。動かなくてもよい。Q1 の不感帯の可能性。記録）。**向きが逆（下に動く）なら、直ちに中止して報告**。**腕が急に動く、異音、`FAULT` なら S1→S2→S3**。**上に動くことを確かめてから、ほかの向きに進む。**
 
-**W3b. 上げる向き**: `--linear 0 0 0.5 --seconds 1`（+5 mm）。**W3c. 前後・横**: `--linear 0.5 0 0 --seconds 2`（+10 mm）、`--linear 0 0.5 0 --seconds 2`（+10 mm。pan と roll が動く）。**W3d. ピッチ**: `--angular 0 0.5 0 --seconds 2`。
+**W3b. 下げる向き（床に近づく。1 回 3 mm、累計 15 mm 以内）**: `--linear 0 0 -0.3 --seconds 1`（−3 mm）。先端 z が 0.045 m を下回りそうなら送らない。**W3c. 前後・横**: `--linear 0.5 0 0 --seconds 2`（+10 mm）、`--linear 0 0.5 0 --seconds 2`（+10 mm。pan と roll が動く）。**W3d. ピッチ**: `--angular 0 0.5 0 --seconds 2`。
 
-見ること（各回）: 先端が**指令の向き**に動く／**ほかの軸のずれ**が小さい（モックでは 0.01 mm 以内。実機では記録）／向き（姿勢）が大きく変わらない／`status` が 0／`READ-ONLY` の WARN は出ない（書き込みモード）／**`step limit` の WARN が arm で出ない**／`FAULT` なし。
+見ること（各回）: **送信中の `/servo_node/status`**（0 以外なら、減速・停止の理由。値は 1 近づく特異点で減速、2 特異点で停止、3 衝突で減速、4 衝突で停止、5 関節の端、6 離れる特異点で減速。**ツールの最後の行に、送信中の値と回数が出る**。status は動かす指令を処理している周期だけ値が付く）／先端が**指令の向き**に動く／**ほかの軸のずれ**が小さい（モックでは 0.01 mm 以内。実機では記録）／向き（姿勢）が大きく変わらない／`status` が 0／`READ-ONLY` の WARN は出ない（書き込みモード）／**`step limit` の WARN が arm で出ない**／`FAULT` なし。
 
 **Q1〜Q6（記録。計画 11.1）**: 次を、W3 の送信で測る。各回の「期待」はツールが表示する。
 

@@ -123,7 +123,7 @@ def _scales():
         return DEFAULT_SCALE_LINEAR, DEFAULT_SCALE_ROTATIONAL
 
 
-def main():
+def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--linear', type=float, nargs=3, default=[0.0, 0.0, 0.0], metavar=('X', 'Y', 'Z'),
                     help='並進の入力（-1..1 の割合。frame の座標）')
@@ -148,6 +148,7 @@ def main():
         sys.exit(str(e))
 
     import rclpy
+    from rclpy.signals import SignalHandlerOptions
     from controller_manager_msgs.srv import ListControllers
     from geometry_msgs.msg import TwistStamped
     from moveit_msgs.srv import ChangeDriftDimensions
@@ -157,16 +158,20 @@ def main():
     from std_msgs.msg import Int8
     from std_srvs.srv import Trigger
 
-    rclpy.init()
+    # rclpy の SIGINT の処理（context を先に閉じる）を無効にして、Ctrl-C を KeyboardInterrupt として自分で扱う。
+    # 送信中の Ctrl-C でも、ゼロの Twist を確実に送ってから終わるため（context が生きている間に送る）
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = Node('send_servo_twist')
     state = {}
-    status = {'seen': False, 'last': None}
+    status = {'seen': False, 'last': None, 'sending': False, 'during': {}}
     node.create_subscription(JointState, '/joint_states',
                              lambda m: state.update(zip(m.name, m.position)), 10)
 
     def on_status(m):
         status['seen'] = True
         status['last'] = m.data
+        if status['sending']:
+            status['during'][m.data] = status['during'].get(m.data, 0) + 1
     node.create_subscription(Int8, '/servo_node/status', on_status, 10)
 
     def call(client, request, what, timeout=5.0):
@@ -235,24 +240,44 @@ def main():
         m.twist.angular.x, m.twist.angular.y, m.twist.angular.z = (float(v) for v in values[3:])
         publisher.publish(m)
 
+    interrupted = False
+    status['sending'] = True
     try:
         stop = time.time() + args.seconds
         while rclpy.ok() and time.time() < stop:
             publish(plan['command'])
             rclpy.spin_once(node, timeout_sec=1.0 / args.rate)
+    except KeyboardInterrupt:
+        interrupted = True
+        print('Ctrl-C: stopping (zero Twist for 0.3 s)...')
     finally:
         zero = np.zeros(6)
         end = time.time() + 0.3
         while time.time() < end:
             publish(zero)
             rclpy.spin_once(node, timeout_sec=0.02)
+    status['sending'] = False
     for _ in range(20):
         rclpy.spin_once(node, timeout_sec=0.05)
     q1 = np.array([state[j] for j in arm])
     _, tip1, _ = servo_math.jacobian(chain, q1)
-    print(f'done. Servo status last={status["last"]}. tip moved {np.round((tip1 - tip0) * 1000, 2)} mm '
+    print(f'done. Servo status while sending (code: count) = {status["during"]} '
+          f'(the status is set only while a command is processed; 0 when idle: 1 approaching '
+          f'singularity, 2 halt singularity, 3 decelerate collision, 4 halt collision, '
+          f'5 joint bound, 6 leaving singularity). tip moved {np.round((tip1 - tip0) * 1000, 2)} mm '
           f'(expected {np.round(plan["expected_translation"] * 1000, 2)} mm)')
     rclpy.shutdown()
+    if interrupted:
+        sys.exit(130)
+
+
+def main():
+    try:
+        _main()
+    except KeyboardInterrupt:
+        # 送る前（確認の画面・サービスの待ちなど）の Ctrl-C。何も送っていない
+        print('cancelled (nothing was sent)')
+        sys.exit(130)
 
 
 if __name__ == '__main__':

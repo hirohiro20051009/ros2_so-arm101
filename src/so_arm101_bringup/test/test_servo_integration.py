@@ -458,3 +458,11 @@ def test_twist_tool_converts_the_gripper_frame_to_base_link():
     assert plan['command'][2] < -0.4
     assert abs(plan['command'][0]) < 0.01
     assert abs(plan['command'][1]) < 0.01
+
+
+def test_twist_tool_handles_ctrl_c_itself():
+    # Ctrl-C must not close the rclpy context before the zero Twist is sent.
+    source = (REPO / 'tools' / 'send_servo_twist.py').read_text()
+    assert 'SignalHandlerOptions.NO' in source
+    assert source.count('except KeyboardInterrupt') == 2  # while sending / before sending
+    assert 'sys.exit(130)' in source
