@@ -578,3 +578,119 @@ src/so_arm101_description/
 
 詳細は `docs/inventory.md` の「URDF の置き換え・SRDF の削除の後の実機確認: 合格」。読み取り専用（6/6・6/6、コントローラ 3 つ active、`reads=7711 retried=0 failed_cycles=0`）、W0（保持・probe ACCEPTED・`torque OFF and Lock=1 confirmed`・`reads=1406 goal_writes=1406`）、W0 の後（6/6 match）とも、`transmission`・`FAULT`・`ERROR`・`mismatch`・`not known to URDF` は 0 件。**11.5 の実機確認の範囲（読み取り専用の起動と W0）を満たした。A 案の S1〜S3 と SRDF `:45` は完了。**
 SRAM の `torque_limit`（pan・lift・elbow・wrist_flex・roll が 1000、gripper が 500）は、コードの仕様どおり（`torque_limit` の既定は 1000。500 は `torque_limit:=500` で起動したときの値）。説明は `inventory.md` の同名の節。
+
+---
+
+## 22. 未使用・重複ファイルの削除と依存の整理の計画（2026-11-12。**計画のみ。実装はしていない**。承認制）
+
+**章の番号について**: 依頼では「21 章」だったが、21 章は既にある（実機の確認の結果）ため、22 章にした。
+
+目的: 12 章の削除の候補と、保留だった D（description と moveit_config の重複）・F（moveit_config の補助ファイル）を、ユーザーの判断（2026-11-12）に沿って 1 つの計画にする。E（`controllers.yaml` の移動）は**保留**。
+根拠の調査（2026-11-12。ファイルの変更・起動は無し）は、チャットで報告済み。ここには結果だけを書く。
+
+### 22.1 判断の表（ユーザーの判断）
+
+| 対象 | 判断 | 理由 |
+|---|---|---|
+| description の `urdf/so101_new_calib.urdf.xacro` | **削除** | どの launch も読まない。moveit_config 側が正本 |
+| description の `urdf/so101_new_calib.ros2_control.xacro` | **削除** | moveit_config 側に同名の正本がある。isaac・gazebo の分岐は 22.6 の手順で取り出せる |
+| description の `urdf/so101_new_calib_with_transmission.xacro` | **削除** | `<transmission>` は今の URDF に直接入っている（xacro の出力に 6 か所）ので重複 |
+| description の `config/initial_positions.yaml`、`joint_limits.yaml` | **削除** | moveit_config 側に同名で別の値のものがあり、そちらが使われる。誤読の危険がある |
+| description の `config/joint_names_so_arm_urdf.yaml` | **削除** | 参照ゼロ |
+| description の `joints_properties.xml` | **削除** | 参照ゼロ。MuJoCo 用 |
+| description・controller の `.flake8`（2 つ） | **削除** | `ament_flake8` は自前の ini を `--config` で渡すので、効いていない（試験で確認: E501 を無視する設定を置いても E501 が報告された）。lint 自体も走っていない |
+| moveit_config の `launch/rsp.launch.py` | **削除** | 参照ゼロ。bringup は自前の robot_state_publisher を使う（`bringup.launch.py:168-172`） |
+| `servo.launch.py`、`config/servo.yaml` | **残す** | Diff-IK は MoveIt Servo を使う |
+| `setup_assistant.launch.py`、`.setup_assistant` | **残す** | Setup Assistant で今の設定を開き直す |
+| `kinematics.yaml`、SRDF | **残す** | Servo が使う。別のアームで Setup Assistant と併用する可能性 |
+| `pilz_cartesian_limits.yaml` | **残す** | **実際に読み込まれる**（22.2 の表の下）。無いと launch の生成で失敗する |
+| `config/ros2_controllers.yaml`、`moveit_controllers.yaml` ほか bringup が使うもの | **残す** | `moveit_controllers.yaml` は spawn に使う。`ros2_controllers.yaml` は Setup Assistant 用 |
+| E: `so_arm101_controller` の `controllers.yaml` の移動 | **保留** | 参照が 3 か所（`bringup.launch.py:98`、`hardware/CMakeLists.txt:75`、`bringup/package.xml:15`）。今回は触らない |
+| `find_package(urdf)`、`<depend>urdf</depend>` | **残す** | 使っていない根拠が grep だけ（**[推測]**） |
+| description の `package.xml` :16-19、:26-28 の依存 | **今回は触らない** | 同上 |
+
+### 22.2 `git rm` の一覧と、参照がゼロであることの grep
+
+**一覧（12 ファイル）**: `src/so_arm101_description/urdf/` の xacro 3 つ、`src/so_arm101_description/config/` の yaml 3 つ、`src/so_arm101_description/joints_properties.xml`、`src/so_arm101_description/.flake8`、`src/so_arm101_controller/.flake8`、`src/so_arm101_moveit_config/launch/rsp.launch.py`。全部 git で追跡されている。**git 管理外のものは無い**（`git ls-files -o --exclude-standard src` が空）ので、CLAUDE.md の「控え」は要らない。
+
+grep（リポジトリのルートで。`build/ install/ log/ .git __pycache__ docs/` を除外し、`src tools CLAUDE.md setup_so101.sh` を対象）:
+`grep -rnI --exclude-dir=build --exclude-dir=install --exclude-dir=log --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=docs "<パターン>" src tools CLAUDE.md setup_so101.sh`
+
+| ファイル | パターン | 結果（参照のあるもの） |
+|---|---|---|
+| `urdf/so101_new_calib.urdf.xacro`（description） | `so101_new_calib.urdf.xacro` | `tools/pose_margin.py:54` だけ。これは **moveit_config 側**の `config/so101_new_calib.urdf.xacro` のパスで、description 側ではない。description 側を読むものは **0** |
+| `urdf/so101_new_calib.ros2_control.xacro`（description） | `so101_new_calib.ros2_control.xacro` | description の `urdf.xacro:16`（これも削除する）と、moveit_config の `urdf.xacro:20`（**moveit_config 側の自前版**を相対パスで include）。description 側を読むのは、削除するファイルだけ |
+| `urdf/so101_new_calib_with_transmission.xacro` | `with_transmission` | description の `urdf.xacro:12`（削除する）だけ |
+| `config/initial_positions.yaml`（description） | `initial_positions` | description の `urdf.xacro:5`（削除する）。ほかは moveit_config 側の同名のファイルの参照 |
+| `config/joint_limits.yaml`（description） | `joint_limits` | `hardware/CMakeLists.txt:74` と `test_sts3215_system.cpp:630` は **moveit_config 側**の `joint_limits.yaml`。description 側を読むものは **0** |
+| `config/joint_names_so_arm_urdf.yaml` | `joint_names_so_arm_urdf` | **0** |
+| `joints_properties.xml` | `joints_properties` | **0** |
+| `.flake8`（2 つ） | `flake8` | `.flake8` の自分自身（`[flake8]`）だけ。**0** |
+| `launch/rsp.launch.py`（moveit_config） | `rsp.launch` | 自分自身（`rsp.launch.py:7` の `generate_rsp_launch`）だけ。**0**。CMake は `launch` ディレクトリごと install（`CMakeLists.txt:8-12`）で、個別の参照は無い |
+
+**xacro の出力でも確認**（`strace -f -e trace=openat xacro <moveit_config の urdf.xacro> …`）: 開かれたファイルは、moveit_config の `urdf.xacro`・`ros2_control.xacro`・`initial_positions.yaml`、install の `so101_new_calib.urdf`、ament のインデックスの 5 つだけ。**description の xacro 3 つと config の yaml は開かれない**。
+
+**`pilz_cartesian_limits.yaml` を残す理由（前回の「使われていない」は誤り）**: `moveit_configs_builder.py`（`/opt/ros/humble/lib/python3.10/site-packages/moveit_configs_utils/`、moveit_configs_utils 2.5.10）の `:530-532` で、planning_pipelines に `pilz_industrial_motion_planner` があれば読む。`default_configs/` にその設定があるため、pipelines は `['chomp', 'ompl', 'pilz_industrial_motion_planner']`（既定は ompl）。ファイルが無いと `launch_param_builder/utils.py:55-57` の `raise_if_file_not_found` が例外を出し、launch の生成で失敗する（move_group の起動の前）。
+
+### 22.3 12 章の #7 は何か
+
+`usd/`（`src/so_arm101_description/usd/` の 5 ファイル、約 23 MB）。**候補から外し、残す**（ユーザーの判断 2026-11-12、20 章。Isaac Sim／Isaac Lab で使う予定）。今回の削除の対象ではない。由来の調査は、`docs/inventory.md` の課題のまま。
+
+### 22.4 ディレクトリが空になる影響
+
+| ディレクトリ | 削除後 | install の行 | 影響・案 |
+|---|---|---|---|
+| `src/so_arm101_description/urdf/` | **空になり、git が追跡しないので消える**（追跡は xacro 3 つだけ） | `CMakeLists.txt:12-17`（`install(DIRECTORY urdf/ … PATTERN "*.urdf" PATTERN "*.xacro")`）。**`OPTIONAL` が無い**ので、ディレクトリが無いと **CMake がエラーになる** | **必須**: この `install` を削除（22.5 の C1）。生成した URDF は `CMakeLists.txt:40` で `share/…/urdf` に install される（変更なし） |
+| `src/so_arm101_description/config/` | 空になり、消える（追跡は yaml 3 つだけ） | `CMakeLists.txt:20-23`（`install(DIRECTORY meshes config launch rviz … OPTIONAL)`） | `OPTIONAL` があるので、**エラーにならない**（`launch/`・`rviz/` は今もディレクトリは空・追跡なしで、同じ状態）。**案: 今回は変更しない**。`config launch rviz` を行から外す整理は任意（次の機会） |
+| `src/so_arm101_description/` の直下 | ファイルが残る（`CMakeLists.txt`、`package.xml`、`meshes/`、`third_party/`、`usd/`、`cmake/`） | — | 影響なし |
+| `src/so_arm101_controller/` | `.flake8` だけが消える。`config/controllers.yaml` ほかは残る | `CMakeLists.txt:11`（`install(DIRECTORY config …)`） | 影響なし |
+| `src/so_arm101_moveit_config/launch/` | `rsp.launch.py` だけが消える。他の 7 つは残る | `CMakeLists.txt:8-12`（`launch` ごと install。`if(EXISTS …)`） | 影響なし |
+
+### 22.5 CMake・package.xml の変更（**承認が要る。ファイル:行、変更前 → 変更後**）
+
+| # | ファイル:行 | 変更前 | 変更後 |
+|---|---|---|---|
+| C1 | `src/so_arm101_description/CMakeLists.txt:11-17` | `# Install URDF files` / `install(` / `DIRECTORY urdf/` / `DESTINATION share/${PROJECT_NAME}/urdf` / `FILES_MATCHING` / `PATTERN "*.urdf"` / `PATTERN "*.xacro")`（7 行。必須。xacro を消すと `urdf/` が無くなり、エラーになるため） | **削除**（後ろの空行は 1 つにまとめる） |
+| C2 | `src/so_arm101_description/package.xml:20-24` | `ign_ros2_control`、`topic_based_ros2_control`、`topic_based_ros2_control_msgs`、`ros_gz_sim`、`ros_gz_bridge` の `<exec_depend>`（5 行） | **削除** |
+| C3 | `src/so_arm101_moveit_config/package.xml:22` の次の行 | （`<exec_depend>moveit_kinematics</exec_depend>` の次に、無い） | `<exec_depend>moveit_servo</exec_depend>` を**追加** |
+
+**変えないもの**（ユーザーの判断）: `CMakeLists.txt:6` の `find_package(urdf REQUIRED)`、`package.xml:14` の `<depend>urdf</depend>`、`package.xml:16-19`・`:26-28` の依存、`CMakeLists.txt:20-23` の `OPTIONAL` の行。
+**将来の注意**: C2 を消すと、Isaac で `topic_based_ros2_control`（`topic_based_ros2_control/TopicBasedSystem`）を使うときに、その依存を**新たに宣言し直す**必要がある。
+
+### 22.6 戻し方
+
+削除の直前のコミットは**この計画のコミット**（hash は、実施のコミットを `docs/inventory.md` に記録するときに書く）。`git show <hash>:<path>` または `git checkout <hash> -- <path>` で取り出せる。
+- **description の `urdf/so101_new_calib.ros2_control.xacro`**（isaac・gazebo・`topic_based` の分岐を持つ）: **将来 Isaac・Gazebo で使うときに、ここから取り出す**。
+- **`joints_properties.xml`**（MuJoCo 用。TheRobotStudio の `Simulation/SO101/joints_properties.xml` と同一）: **将来 MuJoCo で使うときに、ここから取り出す**。
+- `rsp.launch.py` ほかの戻し方も同じ（Setup Assistant の再生成物でもある）。
+
+### 22.7 実施後の確認の手順（実施の承認の後）
+
+**前に取っておく**（ベースライン。2026-11-12 に取得済みのものと、実施の直前にもう一度取る）:
+1. **`robot_description` の sha256（6 通り）**: 手順は `~/so_arm101_check/gen_rd6.sh`（`xacro <moveit_config の urdf.xacro> initial_positions_file:=… use_fake_hardware:=…`。`hardware` 引数は無し）。前（2026-11-12）の値: mock＝`d8eebdcd27762b2b…f61`（`1_mock` と `2_mock_default` は同一）、実機・読み取り専用＝`9bfaceea6da94c16…23f`、実機・書き込み＝`a5160ee8aad290a8…a28`、`apply_servo_config`＝`6bf7aa602dc5b6ad…41`、`probe_lock_sram`＝`7dc2c92cc80f37ed…c0a4`（全文は実施の直前に取り直して記録する）。**前後で完全に同一であること**。
+2. **install/ のファイル一覧**: `find install/so_arm101_description install/so_arm101_moveit_config -type f | sort > before.txt`。
+3. **colcon test**: `colcon test-result --test-result-base build` の合計（**前: 231 件・失敗 10**。内訳: description 2、moveit_config 0、controller 0）と、gtest／pytest（hardware 99、calibration 71 など）の件数。
+4. `ros2 launch so_arm101_bringup bringup.launch.py --show-args` の引数の**個数と名前**（前: **21 個** `mock serial_port calibration_file read_only acceleration torque_limit apply_servo_config probe_lock_sram use_rviz db debug allow_trajectory_execution publish_monitored_planning_scene monitor_dynamics capabilities disable_capabilities rviz_config moveit_warehouse_database_path reset moveit_warehouse_port moveit_warehouse_host`）。
+5. `MoveItConfigsBuilder("so101_new_calib", package_name="so_arm101_moveit_config").to_moveit_configs()` の `planning_pipelines`（前: `['chomp', 'ompl', 'pilz_industrial_motion_planner']`、既定 `ompl`）。
+
+**実施の手順と、後の確認**:
+- **`install/` は colcon が古いファイルを消さない**ので、削除したファイルが `install/` に残る。前後の diff を正しく取るには、`so_arm101_description` と `so_arm101_moveit_config` の `build/<pkg>`・`install/<pkg>` を消して `colcon build --packages-select` し直す**クリーンビルド**が要る（CLAUDE.md: 直前に報告する。`log/` は消さない）。
+- `colcon build`（全体）が通る。
+- 1〜5 を取り直して、前と比べる。**期待**: sha256 は 6 通りとも同一。install/ の diff は、description の `urdf/` の xacro 3 つと `config/` の yaml 3 つ、moveit_config の `launch/rsp.launch.py`（と `__pycache__`）が**消えるだけ**（`urdf/so101_new_calib.urdf` は残る）。colcon test の件数は同じ（231・10）。`--show-args` は 21 個で同じ。pipelines は同じ。
+- 関係するパッケージ（description・moveit_config・controller・bringup）の `colcon test`。失敗があれば、コミットの前に報告する。
+- **その後、ユーザーが実機の読み取り専用の起動を 1 回する**（私は実機・シリアルポート・モックを起動しない。ユーザーの依頼があったときだけ）。
+
+### 22.8 `servo.launch.py` が起動するノード（ファイルを読んだ結果）
+
+- **起動するノードは 1 つだけ**: `launch_ros.actions.Node(package="moveit_servo", executable="servo_node_main", name="servo_node")`（`servo.launch.py:41-52`。`LaunchDescription` は `:39-54`）。
+- **含まない**: `ros2_control_node`、`robot_state_publisher`、spawner（`controller_manager` の `spawner`）、`rviz2`、`move_group`。`MoveItConfigsBuilder(...).to_moveit_configs()`（`:22-28`）は設定を読むだけで、ノードを起動しない。`robot_description` などは `servo_node` の**パラメータ**として渡すだけで、`/robot_description` のトピックは出さない（`:46-51`）。
+- **実機の bringup と同時に起動したときの問題**: コントローラや robot_state_publisher の**二重化は起きない**（上のとおり、含まないため）。ノード名 `servo_node` は 1 つだけ。ただし次の点は残る（4d の課題。**今回は直さない**）:
+  - Servo は `servo.yaml:32` で `is_primary_planning_scene_monitor: false`。**bringup の move_group が動いていること**が前提。
+  - `servo.launch.py` の `robot_description` は引数なしで作る（`:22-28`）。`use_fake_hardware` が既定の true で、`ros2_control` の部分だけ bringup の実機（false）の文字列と違う。運動学は同じ。
+- `bringup.launch.py` は `servo.launch.py` を include していない（`:166-194`）。
+
+### 22.9 実施の段階（案）
+
+1. **この計画のコミット**（docs のみ。完了）。
+2. **承認の後**: 実装 1 コミット = `git rm` 12 ファイル + C1・C2・C3。クリーンビルド（直前に報告）→ `colcon build` → 22.7 の確認 → `colcon test` → コミット。コミットの後に、`docs/inventory.md` に「削除の直前のコミット `<この計画のコミットの hash>` から取り出せる」と書く（docs だけの別コミット）。
+3. ユーザーの実機の読み取り専用の起動 → 結果を記録。

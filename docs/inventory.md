@@ -1952,3 +1952,29 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 1. **`~/.local` の anyio の pytest プラグインが、システムの pytest 6.2.5 と非互換**（`python3 -m pytest` が `ModuleNotFoundError: No module named '_pytest.scope'` で失敗する。`~/.local/lib/python3.10/site-packages/anyio/pytest_plugin.py`）。ユーザー環境の `pip --user` のパッケージの整理は、**後でユーザーが判断する**。bringup の CMake には `PYTEST_DISABLE_PLUGIN_AUTOLOAD` を足して回避している（コミット `35ebba4`。ユーザーが事後承認）。他のパッケージで `ament_add_pytest_test` を足すときも、同じ回避が要る（または環境の整理）。
 2. **過去の `apriltag_test` の pytest の収集エラー**（`inventory.md` 1141 行ほか）が、同じ原因の可能性（**未確認**）。`apriltag_test` は削除済みのため、確認は難しい（タグ `stage2c-done` から取り出せば確認できる）。
 3. **`bringup.launch.py` の既存の lint 違反の修正**（今回は直していない）: copyright 1、flake8 の E501 ×4（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include の 2 行）、pep257 の D400・D415（モジュールの docstring が「。」で終わる）。違反 7 件に CTest のまとめ 3 件を足したものが、bringup の失敗 10 件（`colcon test-result` の件数）。
+
+## 将来の目標と IK の経緯、Servo 統合のときの記録、注意（2026-11-12。**記録のみ。コード・設定は変更していない**。ユーザーの判断）
+
+**将来の目標**
+- AprilTag による Eye-to-Hand のキャリブ（確立済み）を、パッケージ（`so_arm101_calibration`）に統合する。
+- Diff-IK（MoveIt Servo）を統合する。
+
+**IK の経緯**
+- Diff-IK は **MoveIt Servo** を使う。
+- 解析 IK は**自前**。理由: 5 関節のため、姿勢を含めた数値 IK は、初期値に依存して収束しにくい。IK は**ラッパーで解決する案を準備済み**。
+- 最終位置への移動: カメラとのずれを**残差で詰められる** Diff-IK を、**近傍での追従**に使う見込み。
+
+**Servo を統合するときの記録（`original_urdf_plan.md` 22.8 と、チャットの照合 4d・4e。ユーザーの判断で、今は対策不要）**
+- `bringup.launch.py` が `servo.launch.py` を include していない（`:166-194`）。
+- `servo.yaml:17` の `publish_period: 0.034`（約 29.4 Hz）と、JTC の `update_rate: 25`（`controllers.yaml:22`）が合っていない（Servo の方が速い）。
+- Servo は `joint_limits.yaml` を読まない（`servo.launch.py:46-51` に `robot_description_planning` が無い）。URDF の limit（velocity 10）を使う。`joint_limits.yaml` は 5.0、ドライバは 6.0 rad/s で制限。
+- `servo.launch.py` の `robot_description` は引数なし（`:22-28`）で、`use_fake_hardware` が既定の true。運動学は bringup と同じ。
+- 5 関節に 6 次元の Twist を送るときの drift dimensions（2.5.10 には `ChangeDriftDimensions` サービスがある。`servo.yaml` に設定は無い）。影響は動かして確かめる **[推測]**。
+- `start_servo` サービスの要否（`servo_node.h:68` にある。`servo_node_main` が自動で開始するかは未確認 **[推測]**）。
+- フレーム: `robot_link_command_frame`・`planning_frame` は `base_link`（`servo.yaml:36, 39`）、`ee_frame_name` は `gripper_frame_link`（`:38`）。どれも URDF に存在。**カメラのリンクは URDF・SRDF に無い**。Servo の command frame は robot link である必要がある（Panda の設定 `panda_simulated_config.yaml:46` の注記）ので、**カメラ座標の差分は、送る側（Diff-IK のノード）で `base_link` に変換してから送る**案（`[推測]`。Servo のソースは読んでいない）。
+- `forward_position_controller` は無いが、`command_out_type` が JointTrajectory なので（`servo.yaml:21`、出力先 `/arm_controller/joint_trajectory`）今は要らない。Float64MultiArray を使うなら定義と spawn が要る。
+
+**注意**
+- **Setup Assistant で開き直して保存すると、`.setup_assistant:14-18` の `control_xacro` の設定により、自前の `config/so101_new_calib.ros2_control.xacro`・`urdf.xacro`（Sts3215 のパラメータ付き）が上書きされる危険がある。見るだけにして、保存しない。**（`.setup_assistant` の URDF のパス `urdf/so101_new_calib.urdf`（`:3-4`）と SRDF のパス `config/so101_new_calib.srdf`（`:6`）は、今の構成でも正しい。URDF は build 後の install から読まれる）
+- moveit_config の `CMakeLists.txt:12` の `PATTERN "setup_assistant.launch" EXCLUDE` は、`.launch.py` に**効いていない**（`setup_assistant.launch.py` は install される）。記録だけ。
+- 前の報告の訂正: `pilz_cartesian_limits.yaml` は**使われている**（`original_urdf_plan.md` 22.2）。
