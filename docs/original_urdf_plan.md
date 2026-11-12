@@ -555,3 +555,14 @@ src/so_arm101_description/
 ## 18. 補足（10.1 の daemon について）
 
 **[事実]** 15:07 起動の `ros2 daemon`（PID 373597）の親 PID は 11609。今回の launch の親（`setsid` の後の起動元）も 11609 で、**このセッションのシェルと同じ親**。**[推測]** この daemon は、このセッションのシェル（またはその親の端末）から実行された `ros2` コマンドで自動起動されたもの。いつ・誰のコマンドかは確定できない。daemon には触っていない。
+
+## 19. SRDF `:45` の削除（別コミット。2026-11-12）
+
+- 変更: `so_arm101_moveit_config/config/so101_new_calib.srdf` の `<disable_collisions link1="gripper_link" link2="elbow_flex" reason="Never"/>`（`:45`）を**行ごと削除**（1 行の削除のみ。`disable_collisions` 16 → 15 行。XML として読める）。`gripper_link × lower_arm_link`（`:40`）と `gripper_link × upper_arm_link`（`:44`）は既にある。
+- **前後の比較（モック。前 `~/so_arm101_check/srdf_before/`、後 `~/so_arm101_check/srdf_after/`。`/get_planning_scene` の `ALLOWED_COLLISION_MATRIX` と `/move_group` の `robot_description_semantic` を取得）**:
+  - 許可衝突行列（ACM）: リンク名 8 つ・行列とも**前後で完全に同一**（許可されたペア 15 組 → 15 組）。つまり、この行は MoveIt では元から**効いていなかった**。
+  - `robot_description_semantic` の差は、削除した 1 行だけ。
+  - `move_group` の警告 `Link 'elbow_flex' is not known to URDF. Cannot disable/enable collisons.` は 1 件 → **0 件**。WARN/ERROR の他の行は前後で同じ（終了時の `move_group` exit code −11（既知）と、PID の違いだけ）。
+  - コントローラ 3 つ（`joint_state_broadcaster`・`arm_controller`・`gripper_controller`）は前後とも `active`。
+- 試験: `colcon test` 全体 **196 → 196 件・失敗 12 → 12**（description 2、moveit_config 0、controller 0、bringup 16（失敗 12。以前から）、hardware 105、calibration 73）。`colcon build` は成功。
+- 停止の手順で起きたこと（**正直な記録。CLAUDE.md の規則からの逸脱が 1 回**）: 前の起動（`srdf_before`）は、確認用のシェルスクリプトの中で `setsid … &` で起動したため、launch のプロセスが SIGINT を**無視する設定を引き継いだ**（`/proc/<pid>/status` の `SigIgn` で確認）。`kill -INT` が効かなかったので、**自分が起動して PID を控えたものだけ**を対象に、(1) 子ノード 4 つ（PID 380263・380265・380267・380269）に `kill -INT`（3 秒で終了。ただし `robot_state_publisher` は launch が `respawn` で再起動した）、(2) 待機していた launch 本体（PID 380261）に **`kill -TERM`**（規則の `kill -INT` ではない）、(3) 再起動された `robot_state_publisher`（PID 380764）に `kill -INT`。その後、`ps` は空、`ros2 node list --no-daemon` も空。`pkill`・名前での停止は使っていない。次の起動（`srdf_after`）は、起動の前に Python で SIGINT を既定に戻してから `exec` する形に直し、**`kill -INT` で正常に停止**（PID 380964、`ps` 空、`--no-daemon` 空）。`~/so_arm101_check/mock_acm.sh` がそのスクリプト。daemon（PID 373597）には触っていない。

@@ -1840,3 +1840,8 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **ros2_control のソース（2.54.3。インストール版と一致）**: `<ros2_control>` の外の `<transmission>` は読まれない（`parse_control_resources_from_urdf` は `<ros2_control>` の要素だけをたどる）。
 - **モック**（`mock:=true use_rviz:=false`。ログ `~/so_arm101_check/urdf_after_mock.log`）: transmission の警告 0 件、`SO101System` active、コントローラ 3 つ（`joint_state_broadcaster`・`arm_controller`・`gripper_controller`）active、`/joint_states` は初期値。`move_group` の警告は `elbow_flex` の 1 件のみ。停止は PID 379627 に `kill -INT`。`ps` と `ros2 node list --no-daemon` は空。daemon 経由の `ros2 node list` には古い `/move_group` などが残る（既知。**ユーザーの指示で daemon には触らず、そのまま**）。終了時の `move_group` の exit code −11 は既知。
 - 状態: **実機の確認（読み取り専用の起動と W0）はユーザーが行う。** SRDF `:45` は次のコミット。
+
+## SRDF `:45` の削除（2026-11-12。別コミット。実機・シリアルポートには触れていない）
+- `so101_new_calib.srdf:45` の `gripper_link × elbow_flex`（`elbow_flex` は関節名）の 1 行を削除（16 → 15 行）。MoveIt の設定の変更で、承認済み。**削除の直前のコミットから取り出せる**（URDF の置き換えのコミット `56e6111`）。
+- 前後（モック）: 許可衝突行列は**同一**（リンク 8・許可 15 組）、`robot_description_semantic` の差は削除した 1 行だけ、`move_group` の警告 `Link 'elbow_flex' is not known to URDF` は 1 → 0。コントローラ 3 つ active。`colcon test` 196 → 196、失敗 12 → 12（bringup の以前からの lint）。詳細は `docs/original_urdf_plan.md` 19 章。
+- 停止の手順の逸脱の記録（`kill -TERM` を launch 本体に 1 回。自分が起動した PID のみ）は、同 19 章。
