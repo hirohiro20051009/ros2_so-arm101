@@ -611,7 +611,7 @@ SRAM の `torque_limit`（pan・lift・elbow・wrist_flex・roll が 1000、grip
 
 ### 22.2 `git rm` の一覧と、参照がゼロであることの grep
 
-**一覧（12 ファイル）**: `src/so_arm101_description/urdf/` の xacro 3 つ、`src/so_arm101_description/config/` の yaml 3 つ、`src/so_arm101_description/joints_properties.xml`、`src/so_arm101_description/.flake8`、`src/so_arm101_controller/.flake8`、`src/so_arm101_moveit_config/launch/rsp.launch.py`。全部 git で追跡されている。**git 管理外のものは無い**（`git ls-files -o --exclude-standard src` が空）ので、CLAUDE.md の「控え」は要らない。
+**一覧（10 ファイル。計画の本文の「12」は数え間違いで、一覧の 10 が正しい）**: `src/so_arm101_description/urdf/` の xacro 3 つ、`src/so_arm101_description/config/` の yaml 3 つ、`src/so_arm101_description/joints_properties.xml`、`src/so_arm101_description/.flake8`、`src/so_arm101_controller/.flake8`、`src/so_arm101_moveit_config/launch/rsp.launch.py`。全部 git で追跡されている。**git 管理外のものは無い**（`git ls-files -o --exclude-standard src` が空）ので、CLAUDE.md の「控え」は要らない。
 
 grep（リポジトリのルートで。`build/ install/ log/ .git __pycache__ docs/` を除外し、`src tools CLAUDE.md setup_so101.sh` を対象）:
 `grep -rnI --exclude-dir=build --exclude-dir=install --exclude-dir=log --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=docs "<パターン>" src tools CLAUDE.md setup_so101.sh`
@@ -692,5 +692,5 @@ grep（リポジトリのルートで。`build/ install/ log/ .git __pycache__ d
 ### 22.9 実施の段階（案）
 
 1. **この計画のコミット**（docs のみ。完了）。
-2. **承認の後**: 実装 1 コミット = `git rm` 12 ファイル + C1・C2・C3。クリーンビルド（直前に報告）→ `colcon build` → 22.7 の確認 → `colcon test` → コミット。コミットの後に、`docs/inventory.md` に「削除の直前のコミット `<この計画のコミットの hash>` から取り出せる」と書く（docs だけの別コミット）。
+2. **承認の後**: 実装 1 コミット = `git rm` 10 ファイル + C1・C2・C3。クリーンビルド（直前に報告）→ `colcon build` → 22.7 の確認 → `colcon test` → コミット。コミットの後に、`docs/inventory.md` に「削除の直前のコミット `<この計画のコミットの hash>` から取り出せる」と書く（docs だけの別コミット）。
 3. ユーザーの実機の読み取り専用の起動 → 結果を記録。

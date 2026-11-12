@@ -1978,3 +1978,25 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **Setup Assistant で開き直して保存すると、`.setup_assistant:14-18` の `control_xacro` の設定により、自前の `config/so101_new_calib.ros2_control.xacro`・`urdf.xacro`（Sts3215 のパラメータ付き）が上書きされる危険がある。見るだけにして、保存しない。**（`.setup_assistant` の URDF のパス `urdf/so101_new_calib.urdf`（`:3-4`）と SRDF のパス `config/so101_new_calib.srdf`（`:6`）は、今の構成でも正しい。URDF は build 後の install から読まれる）
 - moveit_config の `CMakeLists.txt:12` の `PATTERN "setup_assistant.launch" EXCLUDE` は、`.launch.py` に**効いていない**（`setup_assistant.launch.py` は install される）。記録だけ。
 - 前の報告の訂正: `pilz_cartesian_limits.yaml` は**使われている**（`original_urdf_plan.md` 22.2）。
+
+## 未使用・重複ファイルの削除と依存の整理（2026-11-12。`original_urdf_plan.md` 22 章の実施。実機・シリアルポート・モックは起動していない。ユーザーは実機も launch も動かしていない）
+
+- **戻し方: 削除の直前のコミットは `d7c39b9`。そこから取り出せる**（`git show d7c39b9:<path>`、`git checkout d7c39b9 -- <path>`）。**isaac・gazebo の分岐を持つ description の `urdf/so101_new_calib.ros2_control.xacro`、MuJoCo 用の `joints_properties.xml` を含む**。
+- **`git rm`（10 ファイル。22 章の本文の「12」は数え間違いで、一覧の 10 が正しい。本文も直した）**: `src/so_arm101_description/urdf/` の xacro 3 つ（`so101_new_calib.urdf.xacro`、`so101_new_calib.ros2_control.xacro`、`so101_new_calib_with_transmission.xacro`）、`src/so_arm101_description/config/` の yaml 3 つ（`initial_positions.yaml`、`joint_limits.yaml`、`joint_names_so_arm_urdf.yaml`）、`src/so_arm101_description/joints_properties.xml`、`src/so_arm101_description/.flake8`、`src/so_arm101_controller/.flake8`、`src/so_arm101_moveit_config/launch/rsp.launch.py`。git 管理外のものは無い。
+- **CMake・package.xml（承認の範囲どおり）**: C1 description の `CMakeLists.txt:11-17`（`install(DIRECTORY urdf/ …)`）を削除。C2 description の `package.xml:20-24`（`ign_ros2_control`、`topic_based_ros2_control(_msgs)`、`ros_gz_sim`、`ros_gz_bridge`）を削除。C3 moveit_config の `package.xml` に `<exec_depend>moveit_servo</exec_depend>` を追加（`moveit_kinematics` の次）。`find_package(urdf)`、`<depend>urdf</depend>`、ほかの依存は変更なし。将来 Isaac で `topic_based_ros2_control` を使うときは、依存を宣言し直す。
+- **クリーンビルド**: `install/` は isolated 構成（`.colcon_install_layout` = `isolated`）。`rm -rf build/so_arm101_description build/so_arm101_moveit_config install/so_arm101_description install/so_arm101_moveit_config` の 4 つだけを消して、`colcon build`（6 パッケージ成功）。`log/` は消していない。
+- **確認の結果（前 → 後。すべて予想どおり）**:
+
+| 項目 | 前 | 後 |
+|---|---|---|
+| `robot_description` の sha256（6 通り。mock・mock 既定・実機の読み取り専用・書き込み・`apply_servo_config`・`probe_lock_sram`） | d8eebdcd27762b2b（mock 2 つ）/ 9bfaceea6da94c16 / a5160ee8aad290a8 / 6bf7aa602dc5b6ad / 7dc2c92cc80f37ed | **全 6 件が同一**（全文の比較） |
+| `bringup.launch.py --show-args` | 21 個 | 21 個（名前も順序も同一） |
+| `MoveItConfigsBuilder(...).to_moveit_configs()` の pipelines | `['chomp', 'ompl', 'pilz_industrial_motion_planner']`（既定 ompl） | 同じ |
+| `colcon test-result`（description） | 2 件・失敗 0 | 2 件・失敗 0 |
+| 同（moveit_config） | 0 件 | 0 件 |
+| 同（bringup） | 51 件・失敗 10（lint: copyright 1、flake8 4、pep257 2、CTest 側 3。pytest `test_launch_arg_check` 34 件は成功） | 51 件・失敗 10（同じ内訳） |
+| 同（全体） | 231 件・失敗 10 | 231 件・失敗 10 |
+
+- **install/ の前後の diff（95 → 88 行。消えた 7 行だけ。増えた行は無い）**: description の `config/initial_positions.yaml`・`joint_limits.yaml`・`joint_names_so_arm_urdf.yaml`（`git rm` した yaml 3 つ）、`urdf/so101_new_calib.ros2_control.xacro`・`urdf.xacro`・`with_transmission.xacro`（`git rm` した xacro 3 つ）、moveit_config の `launch/rsp.launch.py`（`git rm`）。`urdf/so101_new_calib.urdf`（生成物）は残っている。
+- 失敗 10 件は、削除前から同じ（`bringup.launch.py` の lint の既存の違反。「残課題」の 3）。今回の変更とは無関係。
+- 次: ユーザーが新しいターミナルで実機の読み取り専用の起動を 1 回する。結果は別途記録する。
