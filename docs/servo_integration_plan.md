@@ -686,7 +686,7 @@ R1. start_servo・drift の設定（読み取り専用）: 出力（forward 系�
     （出発点では、collision_velocity_scale ≈ 0.015 で、動かないことを確認）、status、関節の順の確認
 R2. 小さい Twist を送る（読み取り専用・計算だけ）: 出力 = 期待値（射影した Twist）。腕が動かないこと
 R3. 停止の確認（読み取り専用）: S1、S2、S4 のそれぞれで出力が止まること
-W0. 書き込みモードで起動（JTC 有効、Servo は一時停止）。保持のみ 10 秒（腕が静止）。ドライバの上限の表示（0.06 rad）を確認
+W0. 書き込みモードで起動（JTC 有効、Servo は一時停止）。保持のみ 10 秒（腕が静止）。ドライバの上限の表示を確認（L1 の効き。`WRITE mode:` の WARN に `max_joint_speed=0.75 rad/s x window=0.080 s`、`write mode active:` の INFO に `Per-cycle step limit: 39 ticks`）
 W1. MoveIt（RViz）で出発点から中間姿勢へ（OMPL。Pilz は使わない。出発点の elbow は上限を超えるため。
     Scaling は 0.1。0.125 を超えない = ドライバの上限で削られない）。
     中間姿勢 = 自己衝突までの距離が 10 mm 以上の姿勢（elbow を開いた姿勢）で、真下の接近の作業姿勢の近く
@@ -700,7 +700,7 @@ W2d. list_controllers で、forward_position_controller が active、arm_control
      /joint_states の位置が、切り替えの前後で 0.003 rad 以内（飛ばない）。両方 inactive なら arm_controller を activate（S3）して中止
 W2e. unpause_servo、drift の設定（change_drift_dimensions。pan から rx／ry）
 W3. Python から単発の小さい補正（tools/send_servo_twist.py）: 最初は、重力に従う向き（z の下げ）で 3〜5 mm、
-    次に開く向き（上げ）で 5 mm。**11.1 の測定（Q1〜Q6）を、この段階で行う**
+    次に開く向き（上げ）で 5 mm。**11.1 の測定（Q1〜Q6）を、この段階で行う**。実速度の比（期待に対する実測。モックで 0.47）も記録する
 W4. 停止の試験（実機）: 送信停止、ツールの Ctrl-C、pause_servo、Servo の kill -INT。それぞれで止まり、止まる距離を記録。
     ドライバ・forward 系は止めない
 W5. Servo を止めて JTC に戻す: pause_servo → 止まっていることの確認 → S3（手動で戻す）→ list_controllers。
@@ -918,6 +918,40 @@ V. VR（解析 IK の連続出力。Servo は使わない）
 | 向く用途 | 時間つきの軌道（MoveIt の OMPL、解析 IK の大きな移動の一発） | **連続の目標（VR の追従、Servo）** |
 
 **推奨: 連続出力（VR）は forward 系（streaming）**。理由: (1) 速度の守りと飛びの検知が下の層にある、(2) MoveIt との排他が ros2_control で担保される、(3) Servo と同じモード・同じ守り。**JTC は、時間つきの軌道（大きな移動の一発）に使う**。**注意**: streaming の間、Servo と VR が**同じトピックに出す**ので、`stream` モード（Servo は一時停止）と `servo` モードを、モード管理（M2）が排他にする（9.2）。
+
+## 14. モックの確認の結果（2026-11-12。`mock:=true use_servo:=true use_rviz:=false`。ログ `~/so_arm101_check/servo_mock_1.log`、`use_servo:=false` は `servo_mock_2.log`）
+
+ユーザーは実機を使っていない（確認済み）。実機・シリアルポートは使っていない。止めたのは、自分で起動した launch の PID に `kill -INT`（`pkill` は使っていない）。
+
+| 項目 | 合否 | 結果（数値） |
+|---|---|---|
+| **a 起動** | 合格 | `servo_node` が起動。コントローラ: `arm_controller`・`gripper_controller`・`joint_state_broadcaster` が active、`forward_position_controller` が **inactive**。ログに `No kinematics solver instantiated for group 'arm'. Will use inverse Jacobian for servo calculations instead.`（逆 Jacobian の経路）。`ros2 param get`: `moveit_servo.command_out_topic` = `/forward_position_controller/commands`、`robot_description_planning.joint_limits.elbow_flex.max_velocity` = 0.3、`lower_singularity_threshold` = 40.0 |
+| **b 開始の姿勢** | 合格 | モックの初期姿勢は SRDF の `home`: (pan, lift, elbow, wrist_flex, roll) = (0, −1.57, 1.57, 0.8, 0)、gripper 0。**自己衝突までの距離 15.2 mm（10 mm 以上）、elbow 1.57（1.62 以下）で、すでに中間姿勢の条件を満たす**。それでも、真下の作業姿勢（r = 0.14、z = 0.01）へ JTC の軌道（6 秒。アクション、結果 4 = SUCCEEDED）で動かしてから先へ進んだ: (0, −0.2585, 0.7856, 1.0437, 0)、先端 (0.1788, 0.0000, 0.0100) m、接近軸は真下（quat (0.0243, 0.9997, 0, 0)）|
+| **c 切り替え** | 合格 | 止まっていることを確認（2 回読んで差 0.00000 rad）→ `ros2 control switch_controllers --strict --deactivate arm_controller --activate forward_position_controller` を **1 回**: `Successfully switched controllers`。`list_controllers`: forward が active、arm が inactive。**切り替えの前後で関節の変化 0.00000 rad（飛ばない）**。ログ `[forward_position_controller]: activate successful` |
+| **d Twist（送信ツール）** | 合格（下の注） | 下の表。先端は指令の向きに動き、**ほかの軸は 0.01 mm 以内**、向き（quat）は 4 桁で不変。status は常に 0。Servo の出力は約 29.8 Hz |
+| **e 停止** | 合格 | 最後の Twist から **0.081 秒**で Servo の出力が止まった（`incoming_command_timeout` 0.1 s。残りは 3 メッセージ）。`pause_servo` の間、出力 0。止めた後、`--deactivate forward_position_controller --activate arm_controller`（strict）→ arm が active、forward が inactive、位置は変化 0.00000 rad。`send_joint_delta.py wrist_roll 0.1 --seconds 4`: **通った**（+0.0172 → +0.1172、結果 4） |
+| **f 関節の順** | 合格 | `JointJog` で 1 関節ずつ（pan・lift・elbow・wrist_flex・roll）: **動いた関節と、`/forward_position_controller/commands` の配列の同じ位置が一致**（5 関節とも）。Twist でも、配列の変化（(0, +0.0391, −0.0393, 0.0002, 0)）と `/joint_states` の変化（(0, +0.0397, −0.0399, 0.0002, 0)）が同じ順 |
+| **g `use_servo:=false`** | 合格 | `servo_node` なし、forward controller なし（`list_controllers` は 3 つ active）。ノード一覧に servo 関連なし。ログに servo の行 0 |
+
+**d の数値**（先端 = `gripper_frame_link`、TF `base_link`。各回の前に、止まっていることを確認。入力は unitless、2 秒）:
+
+| 指令 | 期待（`scale` × 時間） | 実測の先端の変位 [mm] | 比 | 関節の最大速度（0.2 秒の窓）[rad/s] |
+|---|---|---|---|---|
+| +x 0.5 | +10.0 | **+4.62〜+4.67**（y・z は 0.00〜0.01） | 0.46 | 0.0224 |
+| +z 0.5 | +10.0 | **+4.7**（x・y は 0.00） | 0.47 | 0.0213 |
+| −z 0.5 | −10.0 | **−4.67** | 0.47 | 0.0213 |
+| +y 0.5 | +10.0 | **+4.72**（x・z は 0.00。pan と roll が動く） | 0.47 | 0.0169 |
+| +z 1.0（`--allow-fast`） | +20.0 | **+9.45** | 0.47 | 0.0426 |
+| 回転 ry 0.5（ピッチ） | 0.05 rad | 約 0.024 rad（quat の w −0.0118）。位置は不変 | 0.47 | — |
+| 回転 rx 0.5（作れない向き） | — | **ツールが拒否**（「100 % が作れない向き」） | — | — |
+
+- **速度は上限（0.3 rad/s）の 1/7〜1/14 以下**。上限の強制そのもの（縮める動作）は、上限に届かないので、**モックでは確認できていない**（速い入力が必要。実機では危険なので、モックで `scale` を一時的に上げる試験は、必要なら別途）。
+- **新しい事実: 実速度が意図の約 0.47 倍になる**（どの向きも同じ）。**計算**: Servo は「測定位置 + delta」を Butterworth の平滑化（`y_k = 0.4(x_k + x_{k-1}) + 0.2 y_{k-1}`）に通すので、測定が指令に追従する閉ループでは、1 周期の増分が `0.571 × delta`（定常）になる。2 秒の送信で立ち上がりを含め約 0.47 倍。**意図した速度は、`scale` × 約 0.5〜0.57**。モックは測定 = 指令なので、実機（遅れ・摩擦）ではさらに小さくなる見込み（11 章）。
+- pan と lift の `JointJog` は、動いた量が小さかった（pan 0.033、lift 0.024 rad に対し、ほかは 0.047 rad。メッセージ数 50・39 に対し 69）。**理由は未調査**（Twist の経路では問題なし）。
+- Servo の起動ログの新しい WARN（内容）: (1) `[moveit_servo.servo_node]: Intra-process communication is disabled, consider enabling it by adding: extra_arguments=[{'use_intra_process_comms' : True}] to the Servo composable node in the launch file`、(2) `[moveit_ros.robot_model_loader]: No kinematics plugins defined. Fill and load kinematics.yaml!`、(3) `[moveit_servo.servo_calcs]: No kinematics solver instantiated for group 'arm'. Will use inverse Jacobian for servo calculations instead.`（意図したとおり）。起動後・動作中の WARN・ERROR は無し（octomap の ERROR は既知）。無視してよい出力への追加は、D14 のとおり、ユーザーの確認の後に決める。
+- 終了時（`kill -INT`）: `use_servo:=true` の run で、`move_group` に加えて **`ros2_control_node` も exit code −11（Segmentation fault）**。`use_servo:=false` の run では `move_group` だけ。**`ros2_control_node` の −11 は新しい**（今まで記録していない）。原因は未調査（Servo・forward controller を spawn した状態の終了時 **[推測]**）。腕の保持・書き込みには関係しない（モック）。終了後は `ps` が空。`ros2 node list` に `/move_group` などが残ったので（既知の挙動）、`ros2 daemon stop; ros2 daemon start` の後に空。
+
+**モックで分からないこと（実機の手順書の項目へ。6.2）**: (1) **L1 の効き**（ドライバの上限 0.06 rad/周期。書き込みモードの起動ログ `WRITE mode:` の `max_joint_speed=0.75 … window=0.080` と `Per-cycle step limit: 39 ticks`。MoveIt Scaling 0.1 の実行で `step limit` の WARN が出ないこと）、(2) **gripper の開閉時間**（上限 0.06 rad/周期で、全開閉が約 0.6 秒。`GripperActionController` が完了すること）、(3) **実機の不感帯・摩擦**（11.1 の Q1〜Q6。実速度の比（モックで 0.47）も実機で測る）、(4) 速度の上限（0.3 rad/s）の強制（モックでは速度が足りず未確認）、(5) 量子化。
 
 ## 付録: Jacobian の条件数の計算（ノード不使用）
 

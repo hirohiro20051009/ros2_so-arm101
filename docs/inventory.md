@@ -2239,3 +2239,12 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 
 - `package.xml`: `<exec_depend>moveit_servo</exec_depend>`（`:18`）と `<exec_depend>forward_command_controller</exec_depend>`（`:19`）を追加（`moveit_configs_utils` の次。moveit_servo は bringup に宣言が無かった）。
 - Servo 関係の試験（34 件）を `test_launch_arg_check.py` から `test_servo_integration.py` に移し、`CMakeLists.txt`（`:37-39`）に `ament_add_pytest_test` を登録。試験の名前は不変（`pytest --collect-only` で移す前後の名前の集合が同一）。pytest の総数は 69（35 + 34）で不変。`colcon test-result` の bringup は 82 → 85（pytest 以外の +3: ファイルごとの copyright・pep257 が各 +1、ctest の登録が +1）。全体 262 → 265、失敗 0。
+
+## Servo のモックの確認（2026-11-12。`mock:=true use_servo:=true use_rviz:=false`。ユーザーは実機を使っていない。詳細は docs/servo_integration_plan.md 14 章）
+
+- 合格: a 起動（servo_node、arm・gripper・jsb が active、forward が inactive、`No kinematics solver … inverse Jacobian`）、b 開始の姿勢（初期姿勢は SRDF の home で、自己衝突の距離 15.2 mm・elbow 1.57 で条件を満たす。真下の作業姿勢へ JTC で移動）、c 切り替え（1 回の strict で入れ替え。前後で 0.00000 rad）、d Twist（+x・+z・−z・+y・ピッチ。先端が指令の向きに動き、他の軸 0.01 mm 以内、速度は 0.04 rad/s 以下。rx は拒否）、e 停止（最後の Twist から 0.081 秒で停止。`pause_servo`、arm に戻して `send_joint_delta.py` が通る）、f 関節の順（5 関節とも一致）、g `use_servo:=false`（servo_node・forward なし、3 コントローラ active）。
+- 新しい事実: 実速度は意図の約 0.47 倍（Servo の「測定 + delta」と Butterworth 平滑化。理論の定常値 0.571）。pan・lift の JointJog の動きが小さい（理由は未調査）。
+- 新しい WARN（Servo）: Intra-process の WARN、`No kinematics plugins defined`、`No kinematics solver instantiated for group 'arm'`（意図どおり）。無視してよい出力への追加は、ユーザーの確認の後。
+- 新しい終了時の挙動: `use_servo:=true` で `ros2_control_node` も exit −11（`use_servo:=false` では move_group だけ）。原因は未調査。
+- 後始末: `kill -INT`（自分で起動した PID。`pkill` なし）。`ps` は空。`ros2 node list` に `/move_group` などが残り、`ros2 daemon stop; ros2 daemon start` の後に空。
+- モックで分からないこと（実機の手順書へ）: L1 の効き、gripper の開閉時間、実機の不感帯・摩擦、Servo の速度上限の強制、量子化。
