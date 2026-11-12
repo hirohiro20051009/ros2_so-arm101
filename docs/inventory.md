@@ -1816,3 +1816,6 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **削除**: `archive/stage1_build/` をディレクトリごと削除（控えは上の tar.gz）。`archive/stage2a/**`（git 管理下の 13 ファイル: `README.md`、`bringup/`（launch 2・rviz 2）、`controller/`（config 1・launch 2）、`description/`（launch 3・rviz 1）、`moveit_config/launch/demo.launch.py`）を `git rm`。**`archive/` ディレクトリは無くなった**。
 - **戻し方**: `stage2a/**`（管理下）は、**削除の直前のコミット**から取り出す（例: `git checkout <この削除の 1 つ前のコミット> -- archive/stage2a`。1 つ前は `759893f`）。補足: タグ `stage2c-done` からも取り出せる。`stage1_build/`（管理外）は、`tar xzf ~/so_arm101_check/archive_stage1_build_20261112.tar.gz -C <展開先>`（展開すると `stage1_build/` ができる。`archive/` に戻すなら `-C ~/ros2_so-arm101/archive`。ただし、`.gitignore` の対象で、colcon は `archive/` を見ない）。
 - **`.gitignore:21`（`archive/stage1_build/`）**: 対象のディレクトリが無くなったので不要になったが、今回は変えていない（削除の対象ではない。再び作られたときの保険として残る）。
+
+## 後始末（2026-11-12。コードは変更なし）
+- `.gitignore:21` の `archive/stage1_build/` の行を削除（対象の `archive/` が無くなったため）。`CLAUDE.md` の削除の規則の例を「（例: 「削除の直前のコミット <hash> から取り出せる」）」に変更（旧: 「タグ stage2c-done から取り出せる」。ほかの文面は変更なし）。
