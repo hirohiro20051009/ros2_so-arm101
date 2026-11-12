@@ -1734,3 +1734,16 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - **変更していないもの**: SRDF の `elbow_flex` の行（URDF の作り直しの段階で直す）、C++ のロジック、URDF、関節リミット、yaml、`LICENSE.so101_ros2`。`so_arm101_hardware` の package.xml の `std_msgs`・`sensor_msgs` への依存は、bridge の削除で不要になった可能性があるが、**今回は変えていない**（後の整理の候補）。
 - **残っている LeRobot への言及（L3 で扱う）**: `[diag]` の文言、試験データ名、plugin xml のファイル名、docs の手順（`LECONDA_SITE_PACKAGES` を使う節など。「歴史的」の注記）。
 - **未実施**: L2 の後の、ユーザーによる読み取り専用の起動（`Sts3215System` が読み込めることの確認）。L3 は、その後。
+
+## L2 の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。読み取り専用の起動 1 回。ログ `~/so_arm101_check/L2_readonly.log`）
+- `Loading hardware 'SO101System'` → `[Sts3215System]: initialized: port=/dev/ttyACM0`（**L2 の後でも `Sts3215System` を読み込めた**。bridge のライブラリを消した影響なし）。
+- EEPROM vs yaml **6/6 match**（`MATCH` が 6 行）、`servo settings vs LeRobot` **6/6 match**（文言は L3 まで旧いまま）。コントローラ 3 つ（joint_state_broadcaster・gripper_controller・arm_controller）が `Configured and activated`。
+- 停止時: `deactivated (no register was written). reads=663 retried=0 failed_cycles=0`、bus はすべて 0、exit=0。
+- 結論: L2（bridge・道具・candidate B の削除、CMake・plugin xml の変更）は、実機の読み取りの挙動に影響していない。
+
+## `setup_so101.sh` から削除した 2 行の元の文面（git 管理外・タグ `stage2c-done` にも無いので、ここに残す。2026-11-12）
+`setup_so101.sh` は `.gitignore`（24 行目）の対象。L2 で、`# lerobot python path` の行から空行までの 3 行（2 行 + 空行）を削除した。元の文面（`source ~/ros2_so-arm101/install/setup.bash` の `# workspace` の前、`RCUTILS_COLORIZED_OUTPUT` の行の後にあった）:
+```
+# lerobot python path
+export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages
+```
