@@ -4,7 +4,7 @@
   <name>so_arm101_calibration</name>
   <version>0.2.0</version>
   <description>SO-ARM101 servo calibration tools (EEPROM backup / restore / measure / apply). Run by the user with ros2_control stopped.</description>
-  <maintainer email="hirohiro20051009@gmail.com">hirokazu</maintainer>
+  <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

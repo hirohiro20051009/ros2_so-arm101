@@ -4,8 +4,9 @@
   <name>so_arm101_controller</name>
   <version>0.1.1</version>
   <description>ROS 2 controllers and configuration for the SO101 arm.</description>
-  <maintainer email="nimicu21@gmail.com">Nimrod</maintainer>
+  <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
   <license>MIT</license>
+  <author email="nimicu21@gmail.com">Nimrod</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>

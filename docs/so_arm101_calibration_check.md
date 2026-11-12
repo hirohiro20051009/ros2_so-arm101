@@ -358,7 +358,7 @@ ls calibration_records/2026-11-11/
    ```bash
    ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/calib_C3_readonly.log; echo "exit=${PIPESTATUS[0]}"
    ```
-   起動ログの 1 行目（`initialized: port=… calibration=… [ros_calibrated, measure_file=calibration_records/2026-11-11/measure_C1c_1.json, backup_file=…, applied_at=…, applied_by=so_arm101_calib 0.2.0]`）に、yaml の出所（`apply` が書いた `source`）が出ること（`?` が出ない）。`[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs LeRobot: 6/6 joints match`、全関節 `torque_enable=0`、`MISMATCH` の行なし。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
+   起動ログの 1 行目（`initialized: port=… calibration=… [ros_calibrated, measure_file=calibration_records/2026-11-11/measure_C1c_1.json, backup_file=…, applied_at=…, applied_by=so_arm101_calib 0.2.0]`）に、yaml の出所（`apply` が書いた `source`）が出ること（`?` が出ない）。`[diag] EEPROM vs yaml: 6/6 joints match`、`servo settings vs reference: 6/6 joints match`（L3 以降の文言。L2 までは `servo settings vs LeRobot: 6/6 joints match`）、全関節 `torque_enable=0`、`MISMATCH` の行なし。（EEPROM と yaml が違うと、読み取り専用では WARN のまま起動し、書き込みモードは起動を拒否する。）
 5. **腕に触れずに**（手順 0 と同じ姿勢のまま）、新しい座標での値を読む（手順 4 の起動のまま）:
    ```bash
    ros2 topic echo /joint_states --once 2>&1 | tee -i ~/so_arm101_check/calib_C3_start_pose.log; echo "exit=${PIPESTATUS[0]}"

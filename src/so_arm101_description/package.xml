@@ -5,9 +5,10 @@
   <version>0.1.1</version>
   <description>SO-ARM101 Description Resources</description>
 
-  <maintainer email="nimicu21@gmail.com">Nimrod</maintainer>
+  <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
 
   <license>BSD</license>
+  <author email="nimicu21@gmail.com">Nimrod</author>
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>urdf</depend>

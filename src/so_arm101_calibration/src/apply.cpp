@@ -68,7 +68,7 @@ std::string render_calibration_yaml(
     << "source:\n  kind: ros_calibrated\n  measure_file: " << measure_path << "\n  backup_file: " << backup_path
     << "\n  applied_at: " << applied_at << "\n  applied_by: " << tool_id() << "\n"
     << "bus: {baudrate: " << old["bus"]["baudrate"].as<int>() << ", protocol: " << old["bus"]["protocol"].as<int>() << "}\n"
-    << "# LeRobot 等価（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。\n"
+    << "# 基準の実装（LeRobot 0.4.2）と同じ（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。\n"
     << "conversion: {angle_ticks: " << old["conversion"]["angle_ticks"].as<int>() << "}\n"
     << "joints:\n";
   for (const auto & j : m.joints) {

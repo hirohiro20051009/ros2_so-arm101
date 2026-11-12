@@ -18,8 +18,8 @@ namespace so_arm101_hardware
 
 enum class JointKind
 {
-  Angle,          // LeRobot の DEGREES
-  LinearPercent,  // LeRobot の RANGE_0_100（gripper）
+  Angle,          // 基準の実装（LeRobot 0.4.2）の DEGREES
+  LinearPercent,  // 基準の実装の RANGE_0_100（gripper）
 };
 
 /// 起動時診断専用。変換には使わない。
@@ -60,17 +60,17 @@ Calibration load_calibration(const std::string & path);
 /// raw（符号デコード済みの Present_Position）→ rad。
 /// Angle: ((raw − center)·360 / angle_ticks) 度 → rad（clamp なし）。
 /// LinearPercent: clamp(raw, min, max) → 0..100% → rad = radians(%)。
-/// 演算の順序は LeRobot の _normalize と math.radians に合わせている（浮動小数まで一致させるため）。
+/// 演算の順序は基準の実装（LeRobot 0.4.2）の _normalize と math.radians に合わせている（浮動小数まで一致させるため）。
 double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw);
 
 /// rad → raw（Goal_Position 用。段階2b-3a で追加。まだ書き込みには使っていない）。
-/// raw_to_rad の逆。LeRobot の MotorsBus._unnormalize() と同じ式（angle: val·ticks/360 + center、
+/// raw_to_rad の逆。基準の実装（LeRobot 0.4.2）の MotorsBus._unnormalize() と同じ式（angle: val·ticks/360 + center、
 /// gripper: 0..100 に clamp して min..max へ）だが、**最後の丸めだけ四捨五入**にしている
-/// （LeRobot は int() で切り捨て。差は常に 0 か +1 tick。raw→rad→raw が恒等になり、
+/// （基準の実装は int() で切り捨て。差は常に 0 か +1 tick。raw→rad→raw が恒等になり、
 /// 保持指令が 1 tick ずれるのを避けるため）。Angle は clamp しない（限界の clamp は呼び出し側）。
 int rad_to_raw(const JointCalibration & j, int angle_ticks, double rad);
 
-/// rad_to_raw の途中値（丸める前の連続値）。LeRobot の切り捨てとの比較試験用。
+/// rad_to_raw の途中値（丸める前の連続値）。基準の実装の切り捨てとの比較試験用。
 double rad_to_raw_continuous(const JointCalibration & j, int angle_ticks, double rad);
 
 /// 1 tick に相当する rad（診断・比較用）。Angle: 2π/angle_ticks、LinearPercent: radians(100/(max−min))。

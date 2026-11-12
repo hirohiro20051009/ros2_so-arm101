@@ -1,5 +1,8 @@
 # 実機確認手順: hardware:=feetech（読み取り専用）と LeRobot 経路の比較（段階2b-2）
 
+> **【歴史的】** この文書のうち、LeRobot 側の記録を取る手順（0.5・1・4 と、LECONDA_SITE_PACKAGES・`lerobot_readonly_state.py` を使う部分、2.5 の LeRobot 関連の確認、3.5）は再現できない。LeRobot 経路（`hardware:=lerobot`・`so_arm101_lerobot_bridge`・`tools/lerobot_readonly_state.py` など）は **2026-11-12 の段階 L1〜L2 で削除した**（`hardware:=lerobot` は launch がエラーで止まる）。この手順は、**タグ `stage2c-done`（1a3628e）の状態でだけ再現できる**。今の起動ログの文言は「reference」（`servo settings vs reference`、`MATCH (reference)`、`DIFFERS from reference values`）。
+
+
 対象: `bringup.launch.py mock:=false hardware:=feetech`（STS3215 を直接読む。レジスタには一切書き込まない。トルクにも触れない）。
 目的: 「`so101_follower.json` を使った LeRobot 経由の `/joint_states`」と、自前ドライバ（`follower_calibration.yaml`）の `/joint_states` が一致することを確認する。
 **実機を動かす操作は含まない。** 腕を動かすのは、ユーザーが手で動かす場合だけ。

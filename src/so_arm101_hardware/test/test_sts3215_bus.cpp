@@ -208,7 +208,7 @@ TEST(Serial, SecondOpenIsRefusedByExclusiveLock)
   SerialPort a, b;
   std::string err;
   ASSERT_TRUE(a.open(f.path(), 1000000, &err)) << err;
-  EXPECT_FALSE(b.open(f.path(), 1000000, &err));  // LeRobot bridge など他のプロセスが開いていたら失敗する
+  EXPECT_FALSE(b.open(f.path(), 1000000, &err));  // 他のプロセスが開いていたら失敗する
 }
 
 TEST_F(BusTest, SyncReadReturnsAllPositions)

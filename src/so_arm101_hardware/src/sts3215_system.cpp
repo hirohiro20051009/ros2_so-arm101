@@ -270,7 +270,7 @@ bool Sts3215System::run_servo_config_diagnostics()
     diag_[i].diffs = diffs;
     if (!read_only_ && goal_vel != 0) {
       RCLCPP_ERROR(
-        logger(), "[diag] %s id=%d: Goal_Velocity=%d (expected 0, the state LeRobot ran with). Refusing to start; "
+        logger(), "[diag] %s id=%d: Goal_Velocity=%d (expected 0, the reference state). Refusing to start; "
         "the driver does not rewrite it", c.name.c_str(), int(c.id), goal_vel);
       fatal = true;
     }
@@ -286,29 +286,29 @@ bool Sts3215System::run_servo_config_diagnostics()
     switch (config_action(diffs, read_only_, apply_servo_config_)) {
       case ConfigAction::Apply:
         RCLCPP_WARN(
-          logger(), "%s: DIFFERS from LeRobot values:%s -> apply_servo_config:=true: will be written at activation "
+          logger(), "%s: DIFFERS from reference values:%s -> apply_servo_config:=true: will be written at activation "
           "(torque OFF, Lock=0)", line.str().c_str(), to_string(diffs).c_str());
         break;
       case ConfigAction::Ok:
         ++matched;
-        RCLCPP_INFO(logger(), "%s: MATCH (LeRobot)", line.str().c_str());
+        RCLCPP_INFO(logger(), "%s: MATCH (reference)", line.str().c_str());
         break;
       case ConfigAction::Warn:
         RCLCPP_WARN(
-          logger(), "%s: DIFFERS from LeRobot values:%s%s", line.str().c_str(), to_string(diffs).c_str(),
+          logger(), "%s: DIFFERS from reference values:%s%s", line.str().c_str(), to_string(diffs).c_str(),
           has_operating_mode_diff(diffs) ?
           " -> Operating_Mode is not 0 (position control): write mode would refuse to enable torque" :
           " -> read-only mode continues; write mode (read_only:=false) would refuse to start");
         break;
       case ConfigAction::Abort:
         RCLCPP_ERROR(
-          logger(), "%s: DIFFERS from LeRobot values:%s -> refusing to start (torque is not enabled)",
+          logger(), "%s: DIFFERS from reference values:%s -> refusing to start (torque is not enabled)",
           line.str().c_str(), to_string(diffs).c_str());
         fatal = true;
         break;
     }
   }
-  RCLCPP_INFO(logger(), "[diag] servo settings vs LeRobot: %d/%zu joints match", matched, cal_.size());
+  RCLCPP_INFO(logger(), "[diag] servo settings vs reference: %d/%zu joints match", matched, cal_.size());
   return !fatal;
 }
 
@@ -721,7 +721,7 @@ bool Sts3215System::activate_write_mode()
     if (!diag_[i].diffs.empty()) {
       if (!apply_servo_config_ || has_operating_mode_diff(diag_[i].diffs)) {
         RCLCPP_ERROR(
-          logger(), "%s: servo settings differ from LeRobot values:%s. Torque is not enabled (apply_servo_config:=true "
+          logger(), "%s: servo settings differ from reference values:%s. Torque is not enabled (apply_servo_config:=true "
           "writes them; Operating_Mode is never written)", c.name.c_str(), to_string(diag_[i].diffs).c_str());
         return false;
       }
@@ -871,7 +871,7 @@ bool Sts3215System::shutdown_servos(const char * why)
         "with torque ON: power it off", why, c.name.c_str(), int(c.id), bus_->last_error().c_str());
     }
   }
-  // 2. 全関節の Lock=1 に戻す（読み戻し、3 回まで）。LeRobot は Lock=0 のまま残していた。EEPROM を保護する
+  // 2. 全関節の Lock=1 に戻す（読み戻し、3 回まで）。基準の実装（LeRobot 0.4.2）は Lock=0 のまま残していた。EEPROM を保護する
   for (size_t i = 0; i < cal_.size(); ++i) {
     const JointCalibration & c = *cal_[i];
     bool done = false;

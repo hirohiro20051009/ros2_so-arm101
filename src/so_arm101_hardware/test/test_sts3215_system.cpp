@@ -332,7 +332,7 @@ TEST(WriteMode, RefusesWhenOperatingModeIsNotPositionControl)
 TEST(WriteMode, ConfigMismatchAbortsUnlessApplyRequested)
 {
   Rig r;
-  r.servos.set_eeprom(2, 21, 32);  // P=32（LeRobot の 16 と違う）
+  r.servos.set_eeprom(2, 21, 32);  // P=32（基準の値 16 と違う）
   ASSERT_TRUE(r.init());
   EXPECT_EQ(r.configure(), CallbackReturn::ERROR);
   EXPECT_TRUE(r.servos.writes().empty());

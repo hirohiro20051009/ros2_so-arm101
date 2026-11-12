@@ -1,5 +1,7 @@
 # 段階2c 計画（サーボキャリブ。2026-11-11 承認版）
 
+> **【注記】** この計画の「LeRobot 経路と bridge を `archive/` へ移す」は、**実施しなかった**。2026-11-12 の方針で、`archive/` は作らず **`git rm` で削除**した（段階 L1〜L2。`docs/lerobot_removal_plan.md`）。戻すときはタグ `stage2c-done` から取り出す。
+
 目的: 脱力 → 中央 → MIN/MAX の手順で、EEPROM の `Homing_Offset` と `Min/Max_Position_Limit` を書き、yaml に保存する。LeRobot のコードにもキャリブファイルにも依存しない。
 規則: 実機（シリアルポートを開く操作を含む。EEPROM の読み出しも）を動かすのはユーザーだけ。Claude は偽サーボ（pty）までを実行する。EEPROM への最初の書き込み（C0.5）の前に、ユーザーの確認を取る。
 

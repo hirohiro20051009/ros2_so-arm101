@@ -53,7 +53,7 @@ Calibration load_calibration(const std::string & path)
   }
   if (root["source"]) {
     // ログ用の出所の説明（動作には使わない）。
-    //  旧形式（LeRobot の json からの変換）: kind, file, file_date（無い項目は ?）。表示は従来のまま。
+    //  旧形式（LeRobot の json からの変換。読み込みの互換のため残す）: kind, file, file_date（無い項目は ?）。表示は従来のまま。
     //  新形式（so_arm101_calib の apply が書く）: kind, measure_file, backup_file, applied_at, applied_by（ある項目だけ）。
     const auto s = root["source"];
     auto text = [&s](const char * key) {return s[key].as<std::string>();};
@@ -121,7 +121,7 @@ Calibration load_calibration(const std::string & path)
 
 double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw)
 {
-  double value;  // LeRobot の _normalize の戻り値（angle: 度、gripper: 0..100）
+  double value;  // 基準の実装（LeRobot 0.4.2）の _normalize の戻り値（angle: 度、gripper: 0..100）
   if (j.kind == JointKind::Angle) {
     // DEGREES: (val − mid) * 360 / max_res。clamp しない（motors_bus.py:790-793）
     value = (static_cast<double>(raw) - j.center) * 360.0 / static_cast<double>(angle_ticks);

@@ -1,8 +1,8 @@
 // Copyright 2026 so_arm101 authors. MIT License.
 //
-// サーボの設定（EEPROM）が LeRobot の値と一致しているかの判定（段階2b-3a。読み取りだけ）。
+// サーボの設定（EEPROM）が基準の値（LeRobot 0.4.2 が書く値）と一致しているかの判定（段階2b-3a。読み取りだけ）。
 //
-// 期待値は LeRobot 0.4.2 (Apache-2.0, Copyright 2024 The HuggingFace Inc. team) が書く値:
+// 期待値（基準の値）は LeRobot 0.4.2 (Apache-2.0, Copyright 2024 The HuggingFace Inc. team) が書く値:
 //   lerobot/robots/so101_follower/so101_follower.py  SO101Follower.configure()（149-171 行）
 //   lerobot/motors/feetech/feetech.py                FeetechMotorsBus.configure_motors()（222-230 行）
 // 出典と対応は docs/third_party.md。値は docs/inventory.md「段階2b-3 の計画 v3」の表。

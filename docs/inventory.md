@@ -1747,3 +1747,29 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 # lerobot python path
 export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages
 ```
+
+## L3 実施: 名前・文言・試験の整理（2026-11-12。挙動・比較の基準値・yaml の形式は変えていない。実機・シリアルポートには触れていない）
+- **事前の確認（本番 `follower_calibration.yaml` のコメントを変える前）**: yaml 全体のハッシュ・文字列の比較は、ドライバ・`so_arm101_calib`（compare・apply・backup）・試験のどこにも無い。`bytes_checksum`・`measure_checksum` はバックアップ／測定ファイルの json 用、ほかはパケットのチェックサム。本番の yaml は `YAML::LoadFile`／`load_calibration` による構造の読み込みだけ（コメントは無視される）。`test_measure_apply.cpp` の `yaml_text()` は一時ディレクトリの yaml の前後比較で、`TheRenderedYamlKeepsTheOldFormat` は `conversion: {angle_ticks: 4095}` などの部分文字列を検査し、コメント行は見ない。`test_calibration.cpp:396` は package.xml の `<version>` だけを読む。
+- **ログの文言（`sts3215_system.cpp`）**: `[diag] servo settings vs LeRobot: n/6 joints match` → `... vs reference: ...`、`MATCH (LeRobot)` → `MATCH (reference)`、`DIFFERS from LeRobot values:` → `DIFFERS from reference values:`（3 か所）、`servo settings differ from LeRobot values:` → `... from reference values:`、`(expected 0, the state LeRobot ran with)` → `(expected 0, the reference state)`。**比較の基準値（`servo_config`）・判定（`config_action`）は変えていない**。出典（LeRobot 0.4.2、Apache-2.0）の記載は `servo_config.hpp`・`calibration.hpp`・`sts3215_bus.hpp` に残した。
+- **コメントなど**: `calibration.hpp`・`calibration.cpp`・`servo_config.hpp`・`fake_servo.hpp`・`test_sts3215_bus.cpp`・`test_sts3215_system.cpp`・`measure.cpp` の文言。旧形式 `kind: converted_from_lerobot_json` の**読み込みは残した**（`calibration.cpp` のコメントに「互換のため残す」）。
+- **yaml のコメント**: `apply.cpp:71` と本番 `follower_calibration.yaml:12`: `# LeRobot 等価（分母 4095）。` → `# 基準の実装（LeRobot 0.4.2）と同じ（分母 4095）。`（キー・値・形式は変更なし）。
+- **固定ファイルの改名**: `test/data/follower_calibration_lerobot_json_20260907.yaml` → `follower_calibration_fixture_20260907.yaml`（`git mv`。**git の判定で 100% の改名、中身の差は 0**）。CMake の 4 か所（hardware 2、calibration 2）を更新。黄金表（`conversion_golden.csv`・`unnormalize_golden.csv`）は名前を変えず、**変更はヘッダ 2 行ずつだけ**（1 行目のコメントを「LeRobot 0.4.2 … (Apache-2.0) から生成。生成スクリプトは削除済み（タグ stage2c-done の `tools/gen_conversion_golden.py`）」に、2 行目の列名 `lerobot_value`→`reference_value`、`lerobot_raw`→`reference_raw`）。数値の行は変更なし。試験は列を位置で読むので、列名の変更に影響されない。
+- **plugin xml**: `so101_hardware_bridge_plugins.xml` → `so_arm101_hardware_plugins.xml`（`git mv`）。`package.xml` の `plugin_description_file` と、`CMakeLists.txt` の `pluginlib_export_plugin_description_file` を更新。`Sts3215System` の `<description>` を今の挙動に（「既定（read_only:=true）は読み取り専用。read_only:=false でトルク ON と Goal_Position の書き込み」）。最初の通常ビルドでは、`install/` に古い名前の宙ぶらりんのリンクが 1 つ残ったので、ユーザーの条件どおり `build/` と `install/` だけを消してクリーンビルドした（`log/` は消していない）。クリーンビルド後: 古い名前のファイル 0、宙ぶらりんのリンク 0、ament index（`hardware_interface__pluginlib__plugin/so_arm101_hardware`）は `share/so_arm101_hardware/so_arm101_hardware_plugins.xml` だけ、`xmllint` OK、`<class>` は `Sts3215System` の 1 つ、`So101` は 0、`nm -DC` で `registerPlugin<so_arm101_hardware::Sts3215System,...>`、`ros2 pkg list` に lerobot なし。
+- **package.xml**: maintainer を `hiro <hirohiro20051009@gmail.com>` に（bringup・controller・description・hardware・calibration・moveit_config の 6 つ。**license 欄は変更なし**）。変更前: bringup・controller・description・hardware は `Nimrod <nimicu21@gmail.com>`、calibration は `hirokazu <hirohiro20051009@gmail.com>`、moveit_config は `hirok <chimay_beer@outlook.jp>`。**`apriltag_test` は変更なし**（package.xml も setup.py も。候補 A として後で削除する）。Nimrod 由来の 4 パッケージ（bringup・controller・description・hardware）には、元の作者の記録として `<author email="nimicu21@gmail.com">Nimrod</author>` を `<license>` の直後に追加。
+- **手順書**: `feetech_servo_config_check.md`（`servo settings vs reference`、`DIFFERS from reference values`、「基準の値」。旧文言は「L2 までは…」と併記）、`so_arm101_calibration_check.md:361`（同）。「歴史的」の注記: `feetech_readonly_check.md`（冒頭）、`feetech_servo_config_check.md`（記録 A の節）、`stage2c_plan.md`（archive を実施せず `git rm` にした注記）、`feetech_write_check.md:18`。**`inventory.md` の過去の記録は書き換えていない**。`tools/` の docstring（`lerobot_P1.csv` などの例）は今回触れていない。
+- **試験名の対応表**（`--gtest_list_tests` の前後比較。hardware 99 → 99、calibration 71 → 71。差分は下の 7 件の名前だけで、追加・削除なし）:
+
+| 変更前 | 変更後 |
+|---|---|
+| `Conversion.MatchesLeRobotGoldenTable` | `Conversion.MatchesReferenceGoldenTable` |
+| `Conversion.GripperIsClampedToRangeLikeLeRobot` | `Conversion.GripperIsClampedToRangeLikeReference` |
+| `Conversion.AngleIsNotClampedLikeLeRobot` | `Conversion.AngleIsNotClampedLikeReference` |
+| `Conversion.YamlMatchesLeRobotJsonSource` | `Conversion.YamlMatchesFixtureSource` |
+| `SignMagnitude.DecodesLikeLeRobot` | `SignMagnitude.DecodesLikeReference` |
+| `InverseConversion.MatchesLeRobotUnnormalizeWithinOneTick` | `InverseConversion.MatchesReferenceUnnormalizeWithinOneTick` |
+| `ServoConfig.ExpectedValuesAreLeRobotConfigure` | `ServoConfig.ExpectedValuesAreReferenceConfigure` |
+
+  変数名: `lerobot_arm()`/`lerobot_gripper()` → `reference_arm()`/`reference_gripper()`、`lerobot_raw` → `reference_raw`。calibration の試験の一覧は前後で同一。
+- **試験の件数（前 → 後。クリーンビルドの後）**: hardware gtest **99 → 99**、test-result **105 → 105**。calibration gtest **71 → 71**、**73 → 73**。失敗 0。moveit_config 0 → 0。bringup（lint）**16 件・失敗 12 → 16 件・失敗 12**（変化なし）。
+- **残り（L3 では触れていない）**: `[diag] EEPROM vs yaml`（変更なし）、`sts3215_system.hpp` など出典・Apache-2.0 の帰属、`LICENSE.so101_ros2`、SRDF の `elbow_flex`、`tools/` の docstring・コメントの LeRobot の語（`fake_sts3215.py` など）、`bringup.launch.py` の `apply_servo_config` の description の「LeRobot の値」（launch の文言なので、次の機会）。
+- **未実施**: L3 の後の、ユーザーによる読み取り専用の起動と W0（新しい文言 `servo settings vs reference: 6/6 joints match`、`MATCH (reference)` が 6 行、`[diag] EEPROM vs yaml: 6/6 joints match`、`startup_read_retries=0`、全カウンタ 0、停止後 `torque_enable=0 lock=1 acceleration=50`）。

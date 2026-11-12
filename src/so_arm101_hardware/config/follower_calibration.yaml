@@ -9,7 +9,7 @@ source:
   applied_at: 2026-11-11T19:43:04
   applied_by: so_arm101_calib 0.2.0
 bus: {baudrate: 1000000, protocol: 0}
-# LeRobot 等価（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。
+# 基準の実装（LeRobot 0.4.2）と同じ（分母 4095）。物理的には 4096 の可能性があり、変える場合は別途決める。
 conversion: {angle_ticks: 4095}
 joints:
   shoulder_pan: {id: 1, kind: angle, direction: 1, center: 2089, min: 724, max: 3454, eeprom: {homing_offset: 144, min_limit: 724, max_limit: 3454}}

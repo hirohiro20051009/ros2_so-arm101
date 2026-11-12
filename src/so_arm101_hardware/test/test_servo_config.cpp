@@ -15,22 +15,22 @@ JointCalibration joint(JointKind k)
   return j;
 }
 
-ServoSettings lerobot_arm()
+ServoSettings reference_arm()
 {
   ServoSettings s;
   s.operating_mode = 0; s.p = 16; s.i = 0; s.d = 32; s.return_delay = 0;
   return s;
 }
 
-ServoSettings lerobot_gripper()
+ServoSettings reference_gripper()
 {
-  ServoSettings s = lerobot_arm();
+  ServoSettings s = reference_arm();
   s.max_torque_limit = 500; s.protection_current = 250; s.overload_torque = 25;
   return s;
 }
 }  // namespace
 
-TEST(ServoConfig, ExpectedValuesAreLeRobotConfigure)
+TEST(ServoConfig, ExpectedValuesAreReferenceConfigure)
 {
   // so101_follower.py configure(): mode 0, P 16, I 0, D 32; configure_motors(): Return_Delay_Time 0;
   // gripper: Max_Torque_Limit 500, Protection_Current 250, Overload_Torque 25
@@ -50,14 +50,14 @@ TEST(ServoConfig, ExpectedValuesAreLeRobotConfigure)
 
 TEST(ServoConfig, MatchGivesNoDiffs)
 {
-  EXPECT_TRUE(compare_servo_config(expected_servo_config(joint(JointKind::Angle)), lerobot_arm()).empty());
-  EXPECT_TRUE(compare_servo_config(expected_servo_config(joint(JointKind::LinearPercent)), lerobot_gripper()).empty());
+  EXPECT_TRUE(compare_servo_config(expected_servo_config(joint(JointKind::Angle)), reference_arm()).empty());
+  EXPECT_TRUE(compare_servo_config(expected_servo_config(joint(JointKind::LinearPercent)), reference_gripper()).empty());
 }
 
 TEST(ServoConfig, ArmIgnoresGripperOnlyRegisters)
 {
-  ServoSettings s = lerobot_arm();
-  s.max_torque_limit = 1000;  // 腕の既定（LeRobot は腕には書かない）
+  ServoSettings s = reference_arm();
+  s.max_torque_limit = 1000;  // 腕の既定（基準の実装は腕には書かない）
   s.protection_current = 500;
   s.overload_torque = 80;
   EXPECT_TRUE(compare_servo_config(expected_servo_config(joint(JointKind::Angle)), s).empty());
@@ -65,7 +65,7 @@ TEST(ServoConfig, ArmIgnoresGripperOnlyRegisters)
 
 TEST(ServoConfig, GripperChecksItsLimits)
 {
-  ServoSettings s = lerobot_gripper();
+  ServoSettings s = reference_gripper();
   s.max_torque_limit = 1000;  // 既定のまま
   const auto d = compare_servo_config(expected_servo_config(joint(JointKind::LinearPercent)), s);
   ASSERT_EQ(d.size(), 1u);
@@ -76,7 +76,7 @@ TEST(ServoConfig, GripperChecksItsLimits)
 
 TEST(ServoConfig, DiffsAreReportedWithNames)
 {
-  ServoSettings s = lerobot_arm();
+  ServoSettings s = reference_arm();
   s.p = 32;            // 工場出荷の P
   s.return_delay = 250;
   const auto d = compare_servo_config(expected_servo_config(joint(JointKind::Angle)), s);
@@ -89,7 +89,7 @@ TEST(ServoConfig, DiffsAreReportedWithNames)
 
 TEST(ServoConfig, OperatingModeDiffIsDetected)
 {
-  ServoSettings s = lerobot_arm();
+  ServoSettings s = reference_arm();
   s.operating_mode = 1;  // 速度制御
   const auto d = compare_servo_config(expected_servo_config(joint(JointKind::Angle)), s);
   ASSERT_EQ(d.size(), 1u);
@@ -98,13 +98,13 @@ TEST(ServoConfig, OperatingModeDiffIsDetected)
 
 TEST(ServoConfig, MismatchOnlyWarnsInReadOnlyAndAbortsWhenWriting)
 {
-  ServoSettings s = lerobot_arm();
+  ServoSettings s = reference_arm();
   s.p = 32;
   const auto d = compare_servo_config(expected_servo_config(joint(JointKind::Angle)), s);
   EXPECT_EQ(config_action(d, /*read_only=*/true), ConfigAction::Warn);     // 2b-3a・リーダーアーム
   EXPECT_EQ(config_action(d, /*read_only=*/false), ConfigAction::Abort);   // 書き込みモードは起動しない
   // Operating_Mode が 0 以外でも同じ（read_only は WARN のみ、書き込みモードは中止）
-  s = lerobot_arm();
+  s = reference_arm();
   s.operating_mode = 1;
   const auto m = compare_servo_config(expected_servo_config(joint(JointKind::Angle)), s);
   EXPECT_EQ(config_action(m, true), ConfigAction::Warn);

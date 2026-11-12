@@ -1,8 +1,9 @@
 // Copyright 2026 so_arm101 authors. MIT License.
 //
 // raw → rad の変換が LeRobot 0.4.2 の変換と一致することを確認する（ハード不要）。
-// 正解表 test/data/conversion_golden.csv は tools/gen_conversion_golden.py が LeRobot 0.4.2 の
-// MotorsBus._normalize()（Apache-2.0, Copyright 2024 The HuggingFace Inc. team）で生成したもの。
+// 正解表 test/data/conversion_golden.csv は LeRobot 0.4.2 の
+// MotorsBus._normalize()（Apache-2.0, Copyright 2024 The HuggingFace Inc. team）で生成したもの
+// （生成スクリプトは削除済み。タグ stage2c-done の tools/gen_conversion_golden.py にある）。
 // raw は 0..4095 の全値 + 範囲外 (-100, 4096, 5000)、全 6 関節。
 //
 // 一致の基準: |Δrad| <= 1e-12。どちらも IEEE754 double で数回の四則演算しかしない（演算順序も
@@ -28,7 +29,7 @@ constexpr double kTol = 1e-12;
 constexpr double kPi = 3.14159265358979323846;
 }  // namespace
 
-TEST(Conversion, MatchesLeRobotGoldenTable)
+TEST(Conversion, MatchesReferenceGoldenTable)
 {
   const Calibration cal = load_calibration(CALIBRATION_YAML);
   std::ifstream f(GOLDEN_CSV);
@@ -65,7 +66,7 @@ TEST(Conversion, MatchesLeRobotGoldenTable)
   EXPECT_EQ(total, 6u * 4099u);
 }
 
-TEST(Conversion, GripperIsClampedToRangeLikeLeRobot)
+TEST(Conversion, GripperIsClampedToRangeLikeReference)
 {
   const Calibration cal = load_calibration(CALIBRATION_YAML);
   const JointCalibration * g = cal.find("gripper");
@@ -78,7 +79,7 @@ TEST(Conversion, GripperIsClampedToRangeLikeLeRobot)
   EXPECT_NEAR(raw_to_rad(*g, cal.angle_ticks, 5000), kPi / 180.0 * 100.0, 1e-15);
 }
 
-TEST(Conversion, AngleIsNotClampedLikeLeRobot)
+TEST(Conversion, AngleIsNotClampedLikeReference)
 {
   const Calibration cal = load_calibration(CALIBRATION_YAML);
   const JointCalibration * p = cal.find("shoulder_pan");
@@ -101,10 +102,10 @@ TEST(Conversion, GripperTickInRad)
   EXPECT_NEAR(tick_in_rad(*g, cal.angle_ticks), (100.0 / 1485.0) * kPi / 180.0, 1e-15);
 }
 
-// CALIBRATION_YAML は、試験専用の固定ファイル（test/data/follower_calibration_lerobot_json_20260907.yaml。旧校正＝
+// CALIBRATION_YAML は、試験専用の固定ファイル（test/data/follower_calibration_fixture_20260907.yaml。旧校正＝
 // LeRobot の json から変換した値）。本番の yaml は C3 で更新されたので、この試験は本番の yaml を読まない
 // （この試験は LeRobot の json そのものは読まない。json の値は、固定ファイルの値としてここに書いてある）。
-TEST(Conversion, YamlMatchesLeRobotJsonSource)
+TEST(Conversion, YamlMatchesFixtureSource)
 {
   const Calibration cal = load_calibration(CALIBRATION_YAML);
   EXPECT_EQ(cal.schema_version, 1);
@@ -226,7 +227,7 @@ TEST(CalibrationSource, NoSourceStaysEmpty)
   EXPECT_EQ(source_of(""), "");
 }
 
-TEST(SignMagnitude, DecodesLikeLeRobot)
+TEST(SignMagnitude, DecodesLikeReference)
 {
   // encoding_utils.py: decode_sign_magnitude(encoded, sign_bit)
   EXPECT_EQ(decode_sign_magnitude(0x0000, 15), 0);
@@ -239,7 +240,7 @@ TEST(SignMagnitude, DecodesLikeLeRobot)
 
 // ---- 段階2b-3a: 逆変換 rad → raw（まだ書き込みには使わない） ----
 
-TEST(InverseConversion, MatchesLeRobotUnnormalizeWithinOneTick)
+TEST(InverseConversion, MatchesReferenceUnnormalizeWithinOneTick)
 {
   // unnormalize_golden.csv は LeRobot 0.4.2 の MotorsBus._unnormalize()（int() で切り捨て）の結果。
   // こちらは最後の丸めだけ四捨五入なので、差は 0 か +1 tick（切り捨て ≤ 四捨五入）でなければならない。
@@ -258,27 +259,27 @@ TEST(InverseConversion, MatchesLeRobotUnnormalizeWithinOneTick)
     const JointCalibration * j = cal.find(joint);
     ASSERT_NE(j, nullptr) << joint;
     const double value = std::stod(val_s);         // 度（angle）または 0..100（gripper）
-    const int lerobot_raw = std::stoi(raw_s);
+    const int reference_raw = std::stoi(raw_s);
     const double rad = value * (kPi / 180.0);     // bridge.py: math.radians(値)
     const int got = rad_to_raw(*j, cal.angle_ticks, rad);
-    const int diff = got - lerobot_raw;
+    const int diff = got - reference_raw;
     const double x = rad_to_raw_continuous(*j, cal.angle_ticks, rad);
     if (x >= 0.0) {
-      // 切り捨て ≤ 四捨五入: 差は 0 か +1。連続値は [lerobot_raw, lerobot_raw + 1)
-      EXPECT_TRUE(diff == 0 || diff == 1) << joint << " value=" << value << " got=" << got << " lerobot=" << lerobot_raw;
-      EXPECT_GE(x, lerobot_raw - 1e-6) << joint << " value=" << value;
-      EXPECT_LT(x, lerobot_raw + 1.0 + 1e-6) << joint << " value=" << value;
+      // 切り捨て ≤ 四捨五入: 差は 0 か +1。連続値は [reference_raw, reference_raw + 1)
+      EXPECT_TRUE(diff == 0 || diff == 1) << joint << " value=" << value << " got=" << got << " reference=" << reference_raw;
+      EXPECT_GE(x, reference_raw - 1e-6) << joint << " value=" << value;
+      EXPECT_LT(x, reference_raw + 1.0 + 1e-6) << joint << " value=" << value;
     } else {
       // raw が負になる範囲外（実機では出ない。Goal_Position は呼び出し側で clamp する）。
       // int() は 0 へ向けて切り捨てるので向きが逆。差は 0 か −1
-      EXPECT_TRUE(diff == 0 || diff == -1) << joint << " value=" << value << " got=" << got << " lerobot=" << lerobot_raw;
+      EXPECT_TRUE(diff == 0 || diff == -1) << joint << " value=" << value << " got=" << got << " reference=" << reference_raw;
     }
     ++rows[joint];
     if (diff == 1) {++plus_one[joint];}
   }
   EXPECT_EQ(rows.size(), 6u);
   for (const auto & kv : rows) {
-    std::printf("[inverse] %-14s rows=%zu (+1 tick vs LeRobot truncation: %zu)\n", kv.first.c_str(), kv.second,
+    std::printf("[inverse] %-14s rows=%zu (+1 tick vs reference truncation: %zu)\n", kv.first.c_str(), kv.second,
       plus_one[kv.first]);
   }
 }

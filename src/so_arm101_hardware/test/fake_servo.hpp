@@ -3,7 +3,7 @@
 // 試験用の偽 STS3215（pty のマスタ側）。実機・実ポートは開かない。
 //   - READ / SYNC_READ / WRITE / SYNC_WRITE / PING に応答する。レジスタはサーボごとのメモリ。
 //   - 受けた命令と書き込み（命令・ID・アドレス・データ）を順番に記録する（書き込み順の検査用）。
-//   - 電源投入直後の状態（2b-3a の実機確認で得た値）から始める: EEPROM は LeRobot の設定済み、
+//   - 電源投入直後の状態（2b-3a の実機確認で得た値）から始める: EEPROM は基準の設定済み（LeRobot 0.4.2 の値）、
 //     SRAM は Acceleration=0・Lock=1・Torque_Enable=0・Torque_Limit=Max_Torque_Limit・Goal_Velocity=0、
 //     Goal_Position=0（実機では不明なので、わざと 0 にして「古い目標」で動かないことを確かめる）。
 //   - EEPROM（アドレス < 40）への書き込みは Lock=1 のとき無視する（実機の仕様の想定）。

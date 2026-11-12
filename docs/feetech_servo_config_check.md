@@ -21,6 +21,8 @@ cd ~/ros2_so-arm101 && colcon build --symlink-install     # 最新のビルド�
 - conda を activate していない新しいターミナルを使う。
 
 ## 1. 記録 A: LeRobot が設定した直後（電源を切る前）
+> **【歴史的】** この節の手順 2（LeRobot 経路の起動）は再現できない。LeRobot 経路（`hardware:=lerobot`・`so_arm101_lerobot_bridge`・`tools/lerobot_readonly_state.py` など）は **2026-11-12 の段階 L1〜L2 で削除した**（`hardware:=lerobot` は launch がエラーで止まる）。この手順は、**タグ `stage2c-done`（1a3628e）の状態でだけ再現できる**。今の起動ログの文言は「reference」（`servo settings vs reference`、`MATCH (reference)`、`DIFFERS from reference values`）。
+
 LeRobot の `configure()` を一度走らせて、設定を書かせた直後の状態を読む。
 
 1. 腕を折りたたみ姿勢にして、片手を添える。
@@ -33,7 +35,7 @@ LeRobot の `configure()` を一度走らせて、設定を書かせた直後の
    ```bash
    ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_A.log
    ```
-   `[diag] ... EEPROM: ...` が 6 行と `servo settings vs LeRobot: n/6 joints match` が出る。
+   `[diag] ... EEPROM: ...` が 6 行と `servo settings vs reference: n/6 joints match`（L3 以降の文言。L2 までは `servo settings vs LeRobot: n/6 joints match`）が出る。
 
 ## 2. 電源の入れ直し
 1. 腕を折りたたみ姿勢にして**しっかり支える**（サーボの電源を切ると、保持されなくなる）。
@@ -60,14 +62,14 @@ grep -a "READ-ONLY\|ERROR\|cannot" ~/so_arm101_check/servo_config_B.log | head
 
 | 項目 | A と B で同じ | A と B で違う |
 |---|---|---|
-| P / I / D、Operating_Mode、Return_Delay、gripper の 3 項目 | **EEPROM と確認**（電源を切っても残る）。LeRobot の値のまま（A が MATCH なら B も MATCH） | 想定外。区分の推定が違う。2b-3 の設計を見直す |
+| P / I / D、Operating_Mode、Return_Delay、gripper の 3 項目 | **EEPROM と確認**（電源を切っても残る）。基準の値（LeRobot 0.4.2 の値）のまま（A が MATCH なら B も MATCH） | 想定外。区分の推定が違う。2b-3 の設計を見直す |
 | `acceleration`、`torque_limit`、`goal_velocity`、`lock`、`torque_enable` | 電源を切っても残る（SRAM の推定と違う）。設計を見直す | **SRAM と確認**。B の値が電源投入時の既定値 |
 | `maximum_acceleration` | 同じなら EEPROM 相当 | 違えば SRAM 相当（区分が未確認だった項目の確認） |
 
 - A の `acceleration` は 254（LeRobot が書いた値）のはず。B の値が既定値。
 - B の `torque_limit`（電源投入時の値）が 1000 なら、「腕の関節は LeRobot でも Torque_Limit を下げていない」という前提と一致。
 - B の `goal_velocity` が 0 なら、2b-3 で書かなくてよい根拠の 1 つ（0 の意味は別途確認）。
-- B で LeRobot の値と違う項目があると `DIFFERS from LeRobot values: ...` の WARN が出る。**read-only なので起動は続く**。書き込みモード（2b-3b）では、同じ状況は起動の中止になる。
+- B で LeRobot の値と違う項目があると `DIFFERS from reference values: ...`（L3 以降の文言。L2 までは `DIFFERS from LeRobot values: ...`） の WARN が出る。**read-only なので起動は続く**。書き込みモード（2b-3b）では、同じ状況は起動の中止になる。
 - `status`、`voltage`、`temperature` は参考（`status` が 0 以外ならサーボの保護が働いている）。
 - `cannot read servo settings (...)` が出たら通信の問題（電源投入直後でサーボがまだ起動していない場合は数秒待って再実行）。
 

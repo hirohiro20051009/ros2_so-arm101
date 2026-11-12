@@ -4,8 +4,9 @@
   <name>so_arm101_hardware</name>
   <version>0.1.1</version>
   <description>ros2_control hardware interface for the SO101 robot.</description>
-  <maintainer email="nimicu21@gmail.com">Nimrod</maintainer>
+  <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
   <license>MIT</license>
+  <author email="nimicu21@gmail.com">Nimrod</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
@@ -25,6 +26,6 @@
   <export>
     <build_type>ament_cmake</build_type>
     <!-- This tag exports the plugin definition file -->
-    <hardware_interface plugin_description_file="so101_hardware_bridge_plugins.xml"/>
+    <hardware_interface plugin_description_file="so_arm101_hardware_plugins.xml"/>
   </export>
 </package>

@@ -4,7 +4,7 @@
            type="so_arm101_hardware::Sts3215System"
            base_class_type="hardware_interface::SystemInterface">
       <description>
-        Feetech STS3215 を直接読む SystemInterface。段階2b-2 は読み取り専用（レジスタに書き込まない、command は破棄）。
+        Feetech STS3215 を直接制御する SystemInterface。既定（read_only:=true）は読み取り専用（レジスタに書き込まない、command は破棄）。read_only:=false で、トルク ON と Goal_Position の書き込みを行う。
       </description>
     </class>
   </library>
