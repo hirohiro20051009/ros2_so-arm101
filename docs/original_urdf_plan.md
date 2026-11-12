@@ -573,3 +573,8 @@ src/so_arm101_description/
 - **`usd/` は残す**（Isaac Sim／Isaac Lab で使う予定）。12 章の削除の候補から外した（#7）。由来（どのツールで、どの URDF から作ったか）は、後で調べる課題（`docs/inventory.md` に記録）。
 - **ユーザー自身のコードのライセンスは MIT にする**。今回は実施しない。ルートの `LICENSE`（MIT）の追加と、各 `package.xml` の `<license>` の案（`third_party` の Apache-2.0、nimiCurtis 由来の MIT、LeRobot 0.4.2 由来の基準値（正解表・`third_party.md` の Apache-2.0）の扱いを含む）は、**URDF の作業が終わった後に、計画として出す**（13 章を、この判断に合わせて作り直す）。
 - 12 章のほかの削除の範囲は、後でユーザーが判断する。
+
+## 21. 実機の確認の結果（2026-11-12。ユーザーの報告。合格）
+
+詳細は `docs/inventory.md` の「URDF の置き換え・SRDF の削除の後の実機確認: 合格」。読み取り専用（6/6・6/6、コントローラ 3 つ active、`reads=7711 retried=0 failed_cycles=0`）、W0（保持・probe ACCEPTED・`torque OFF and Lock=1 confirmed`・`reads=1406 goal_writes=1406`）、W0 の後（6/6 match）とも、`transmission`・`FAULT`・`ERROR`・`mismatch`・`not known to URDF` は 0 件。**11.5 の実機確認の範囲（読み取り専用の起動と W0）を満たした。A 案の S1〜S3 と SRDF `:45` は完了。**
+SRAM の `torque_limit`（pan・lift・elbow・wrist_flex・roll が 1000、gripper が 500）は、コードの仕様どおり（`torque_limit` の既定は 1000。500 は `torque_limit:=500` で起動したときの値）。説明は `inventory.md` の同名の節。

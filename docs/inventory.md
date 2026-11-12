@@ -1851,3 +1851,34 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **後で調べる課題（usd/ の由来）**: どのツール（Isaac Sim の URDF Importer など）で、どの URDF（nimiCurtis の `so101_description`、あるいは TheRobotStudio の `so101_new_calib.urdf`）から作ったか。**[事実]** TheRobotStudio の `Simulation/SO101` には usd が無い。**[事実]** nimiCurtis の `so101_description/usd` に同名のファイルがあるかは未確認（取得済みのクローン `/tmp/orig_nimi/repo` で確認できる。`/tmp` なので消えうる）。**[推測]** nimiCurtis 由来。USD のメタデータ（作成ツール・元の URDF のパス）を読めば分かる可能性がある。置き換えた URDF（385e8d7 と同一内容）と USD の関節の 0 の位置・リミット・リンク名が合うかも、Isaac で使う前に確認する。
 - **ユーザー自身のコードのライセンスは MIT にする**（今回は実施しない）。ルートの `LICENSE`（MIT）の追加と、各 `package.xml` の `<license>` の案は、URDF の作業が終わった後に計画として出す（`third_party` の Apache-2.0、nimiCurtis 由来の MIT、LeRobot 由来の基準値の Apache-2.0 の扱いを含む）。
 - 12 章のほかの削除の範囲は、後で判断する。
+
+## `kill -TERM` を使った件の記録: 原因と、起動の仕方の修正（2026-11-12。docs のみ。実機・シリアルポートには触れていない。ROS のプロセスは起動していない）
+- **何が起きたか**: SRDF `:45` の削除の前後比較の「前」のモックの起動（PID 380261）が、`kill -INT` で止まらなかった。規則（CLAUDE.md: 自分が起動した PID を `kill -INT` するだけ）から外れて、**launch 本体（PID 380261）に `kill -TERM` を 1 回**使った。詳細な手順は `docs/original_urdf_plan.md` 19 章。
+- **原因 [事実]**: 確認用のシェルスクリプトの中で `setsid ros2 launch … &` と**バックグラウンド起動**した。ジョブ制御の無い（非対話の）bash は、バックグラウンドの子プロセスの **SIGINT を無視する設定（SIG_IGN）にして起動する**。この設定は `exec` の後も引き継がれ、launch（Python）の `/proc/<pid>/status` の `SigIgn` に SIGINT のビットが立っていた（`SigIgn: 0000000001001006`。`0x2` が SIGINT）。launch は SIGINT も SIGTERM もキャッチしていなかった（`SigCgt` に無い）ので、`kill -INT` は何も起こさなかった。子ノード（`robot_state_publisher` など 4 つ）は rclcpp が自分で SIGINT を捕まえるので、`kill -INT` で止まった。ただし `robot_state_publisher` は launch の `respawn=True` で再起動された。
+- **止めた手順（自分が起動して PID を控えたものだけ。`pkill`・名前での停止は不使用）**: (1) 子ノード 4 つ（380263・380265・380267・380269）に `kill -INT`、(2) 待機していた launch 本体（380261）に `kill -TERM`（**規則からの逸脱はここ**）、(3) 再起動された `robot_state_publisher`（380764）に `kill -INT`。その後、`ps`（`ros2_control_node|move_group|robot_state_publisher|static_transform_publisher|spawner|ros2 launch`）は空、`ros2 node list --no-daemon` も空。daemon（PID 373597）には触っていない。
+- **過去に同じことがあった [事実]**: 本ファイルの 1041 行（「バックグラウンド起動した launch は SIGINT が効かず、SIGTERM と PID 指定で停止した」）と 1513 行（その反省で、SIGINT を既定に戻してから `exec` する Python ラッパーで起動し、`kill -INT` で止めた）。**今回、そのラッパーを使わずに起動したことが再発の原因**（記録を見返していなかった）。
+- **起動の仕方の修正**: モックを起動するときは、必ず SIGINT を既定に戻してから `exec` する形にする: `setsid python3 -I -c "import signal,os; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp('ros2',['ros2','launch','so_arm101_bringup','bringup.launch.py','mock:=true','use_rviz:=false'])" > <log> 2>&1 &`。起動の直後に、`/proc/<launch の PID>/status` の `SigIgn` に SIGINT（`0x2`）が**立っていない**ことを確認してから先へ進む（立っていたら、その場で止める手順を考える）。停止は `kill -INT <PID>` のみ。この修正は `~/so_arm101_check/mock_acm.sh`（git 管理外。起動の行を修正済み）で行い、その後の「後」の起動（PID 380964）は `kill -INT` で正常に停止した（`ps` 空、`--no-daemon` 空）。
+- **再発防止**: 今後の起動の手順（`docs/feetech_write_check.md` などの記述とは別に）は、上の形を使う。ROS のプロセスの起動は、ユーザーが実機の確認を終えたと伝えるまで行わない（2026-11-12 のユーザーの指示）。
+- 状態: **未コミット**（ユーザーの実機の確認の後にコミットしてよい、との指示）。
+
+## URDF の置き換え・SRDF の削除の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/` の `urdfA_readonly.log`・`urdfA_W0.log`・`urdfA_W0_after.log`。私はポートを開いていない）
+- **対象**: URDF の置き換え（`56e6111`）と SRDF `:45` の削除（`0442e06`）の後の、読み取り専用の起動と W0。
+- **読み取り専用**: `initialized: port=/dev/ttyACM0`、EEPROM vs yaml 6/6、servo settings vs reference 6/6、SRAM `torque_enable=0 lock=1 acceleration=50`、コントローラ 3 つ active、`reads=7711 retried=0 failed_cycles=0`、bus のカウンタすべて 0、exit=0。位置: pan −0.0967、lift −1.4968、elbow +1.6901、wrist_flex +0.4204、roll −0.0453、gripper +0.0246（wrist_flex の差は、手でたたんだときの置き方の差。ユーザーの報告）。
+- **W0**: 腕は動かず保持（約 27 秒）、`probe ACCEPTED on all joints`、`startup_read_retries=0`、`[deactivate] torque OFF and Lock=1 confirmed`、`reads=1406 goal_writes=1406 monitors=27`、`rate_limited=0 port_contention=0`、bus のカウンタすべて 0、exit=0。
+- **W0 の後**: SRAM 6 関節とも `torque_enable=0 lock=1 acceleration=50`、6/6 match、`reads=2209`、カウンタすべて 0。
+- **3 つのログとも** `transmission`・`FAULT`・`ERROR`・`mismatch` は 0 件。`not known to URDF` も 0 件（SRDF `:45` の削除が効いた）。
+- 意味: URDF の置き換え（`<transmission>` ×6 が増えた robot_description）で、実機の `ros2_control`（`Sts3215System`）の起動・保持・停止に変化は無い。
+- **SRAM の `torque_limit` の件**（ユーザーの質問。コードとログを読んだ。ポートは開いていない）: 下の節。
+
+## SRAM の `torque_limit`: pan・lift・elbow・wrist_flex・roll が 1000、gripper が 500 は正しい（2026-11-12。コードとログの読み取りのみ）
+- **結論 [事実]**: 今回の値（1000・1000・1000・1000・1000・500）は、**コードの仕様どおり**。引き継ぎの「pan・roll・gripper が 500」は、**`torque_limit:=500` を付けて起動した W1・W2・W4・C4 の記録**のこと。今回の W0 は付けていない（既定の 1000）。どちらも正しい。
+- **コード**（`so_arm101_hardware/src/sts3215_system.cpp:704-711`）: `lift`・`elbow_flex`・`wrist_flex`（重力を受ける 3 関節）は**常に 1000**（`kDefaultTorqueLimit`。下げるとトルク ON でも沈むため）。`gripper`（`LinearPercent`）は **`min(torque_limit, 500)`**（`kGripperTorqueLimit=500`）。`pan`・`wrist_roll` は **`torque_limit` の値そのもの**。トルク ON の前に、現在値と違うときだけ書き（`:774-776`）、読み戻す（`:819`）。`sts3215_system.hpp:36-37`。
+- **`torque_limit` の既定は 1000**（4 か所で一致）: ドライバのパラメータの既定（`sts3215_system.cpp:62`、`kDefaultTorqueLimit`）、xacro の引数（`so101_new_calib.urdf.xacro:13`）、launch の引数（`bringup.launch.py:120`）、`inventory.md` の設計表（626・766 行）。**W0 の `torque_limit:=1000` が既定なので、`torque_limit` を付けずに起動すると 1000**。W0 のログにも `WRITE mode: … Acceleration=50 torque_limit=1000 …`（`urdfA_W0.log:52`）。
+- **引き継ぎの「500」**: `feetech_write_check.md` の W1・W2・W4 と C4 の起動は `torque_limit:=500`（155・161・179・238・255 行）。このとき pan・roll は 500、gripper は `min(500, 500)=500`、lift・elbow・wrist_flex は 1000。`inventory.md` 950 行（W1）が「pan・roll・gripper が `torque_limit=500`（gripper は元から 500）、lift・elbow・wrist_flex は 1000」と書いている。設計表（626 行）も「pan / roll: 1000、W1〜W2 の初回だけパラメータで 500」。**つまり「500」は、その実行のときだけの値**。
+- **ログの確認 [事実]**: 3 つのログ（`urdfA_readonly`・`urdfA_W0`・`urdfA_W0_after`）の `[diag]` の SRAM `torque_limit` は、すべて pan・lift・elbow・wrist_flex・roll = 1000、gripper = 500。EEPROM の `max_torque_limit` は、腕 1000、gripper 500（`expected` と一致。6/6）。
+- **注意すべき点 [事実]**: ドライバは、停止時に `Torque_Limit` を**元に戻さない**（`shutdown_servos` が書くのは `Torque_Enable=0` と `Lock=1` だけ。`:864-890`）。SRAM の値は、次に書くか電源を切るまで残る。**`torque_limit:=500` で起動した後に読み取り専用で起動すると、pan・roll は 500 と表示される**（引き継ぎの記録はこの状態を見たもの）。今回の読み取り専用の起動で 1000 だったのは、直前の書き込みモードの起動が既定（1000）だったか、電源の入れ直しがあったため **[推測]**（どちらかは未確認）。
+- 安全上の意味: 今回の W0 は、腕の関節を設計どおり 1000 で保持した（異常なし）。W1 のように pan・roll を弱くしたいときは `torque_limit:=500` を付ける（pan・roll と gripper にだけ効く）。
+- **引き継ぎの表現の修正案**: 「`torque_limit:=500` のときは pan・roll・gripper が 500（lift・elbow・wrist_flex は 1000）。既定（1000）のときは gripper だけ 500」。
+
+## 計画: launch の `hardware` 引数の削除（2026-11-12。計画のみ。実装はしていない）
+- `docs/hardware_arg_removal_plan.md`。要点: **[事実]** `ros2 launch` は宣言していない引数を無言で受け付ける（`launch` 1.0.15 `include_launch_description.py:48-52,179-184`）。引数を単に消すと、古い `hardware:=lerobot` がエラー無しで feetech として起動する（`read_only:=false` 付きなら書き込みモード）。推奨は **案 B**（宣言と mappings は削除し、`launch_configurations` を見る検査は残す: 無し→何もしない、`feetech`→警告つきで続行、それ以外→今と同じエラー）。手順書の起動コマンドの `hardware:=feetech` は削除、`feetech_write_check.md` 6 行目の古い LeRobot の記述は修正案を示した、過去の記録は書き換えず読み替えを追記する。
