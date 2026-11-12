@@ -187,3 +187,7 @@ SIGINT を既定に戻すラッパー（`inventory.md` の `kill -TERM` の件�
 2. 既存の lint 違反（E501 ×4、D400・D415 ×2 の 1 か所、copyright）は今回は直さない（pep257 の 2 件は削除する関数の分だけ減る）でよいか。
 3. エラーの文面（日本語と英語の併記か、日本語のみか）。
 4. 7.5 の launch の挙動の確認で、ノードを起動する 2 件（#1・#2）と `--show-args` をしてよいか（ユーザーが実機を使っていないときに実施。起動の前に確認を求める）。
+
+
+## 10. 実施の記録（D3。コミット 1。2026-11-12）
+実装した（`bringup.launch.py`・moveit_config の xacro 2 つ・bringup の `CMakeLists.txt`/`package.xml`・新規 `test/test_launch_arg_check.py`）。確認の結果（試験の件数 196 → 231・失敗 12 → 10（pep257 の 2 件は「消滅」）、bringup 16 → 51、pytest 34 件、6 通りの robot_description の sha256 一致、launch の挙動 9 通り、`mock:=true` の 2 回の起動と `kill -INT` での停止、`ps` 空）は `docs/inventory.md` の「`hardware` 引数の削除（D 案）の実装」に書いた。pytest が登録されなかった原因（`~/.local` の anyio プラグインとシステムの pytest 6.2.5 の非互換）と対処（`PYTEST_DISABLE_PLUGIN_AUTOLOAD`）も同じ場所。**手順書の更新（7.6・D4）はコミット 2**。

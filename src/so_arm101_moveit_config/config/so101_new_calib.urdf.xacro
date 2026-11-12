@@ -3,12 +3,11 @@
     <xacro:arg name="initial_positions_file" default="initial_positions.yaml" />
     <!-- 追加：　fake/real切り替え引数 -->
     <xacro:arg name="use_fake_hardware" default="true" />
-    <!-- 実機(use_fake_hardware=false)のハードウェア。feetech だけ（それ以外は ros2_control.xacro のマクロがエラーで止める） -->
-    <xacro:arg name="hardware" default="feetech" />          <!-- feetech のみ -->
-    <xacro:arg name="serial_port" default="/dev/ttyACM0" />  <!-- feetech のみ -->
-    <xacro:arg name="calibration_file" default="" />         <!-- feetech のみ -->
-    <xacro:arg name="read_only" default="true" />            <!-- feetech のみ。false で書き込みモード（段階2b-3b） -->
-    <!-- 段階2b-3b: 書き込みモード（read_only=false）のパラメータ。feetech のみ -->
+    <!-- 実機(use_fake_hardware=false)のハードウェアは Sts3215System（STS3215 を直接制御）だけ -->
+    <xacro:arg name="serial_port" default="/dev/ttyACM0" />  <!-- 実機のみ -->
+    <xacro:arg name="calibration_file" default="" />         <!-- 実機のみ -->
+    <xacro:arg name="read_only" default="true" />            <!-- 実機のみ。false で書き込みモード（段階2b-3b） -->
+    <!-- 段階2b-3b: 書き込みモード（read_only=false）のパラメータ。実機のみ -->
     <xacro:arg name="acceleration" default="50" />           <!-- 1..254。0 は拒否 -->
     <xacro:arg name="torque_limit" default="1000" />         <!-- pan と roll だけに効く（lift/elbow/wrist_flex は常に 1000）。gripper は min(値, 500) -->
     <xacro:arg name="apply_servo_config" default="false" />  <!-- true のときだけ EEPROM の差を書く -->
@@ -25,7 +24,6 @@
         name="SO101System"
         initial_positions_file="$(arg initial_positions_file)"
         use_fake_hardware="$(arg use_fake_hardware)"
-        hardware="$(arg hardware)"
         serial_port="$(arg serial_port)"
         calibration_file="$(arg calibration_file)"
         read_only="$(arg read_only)"

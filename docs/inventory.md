@@ -1888,3 +1888,50 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **[事実]** 検査の対象は `context.argv`（利用者が打った引数）だけにして、`launch_configurations`（内部の設定）は見ない。「宣言された引数」は `ld.get_launch_arguments()` で得る（include した launch の引数を含む 22 個。`hardware` を消すと 21 個。`monitor_dynamics`・`rviz_config` などは通り抜けて効くので許す）。直接起動する launch は `bringup.launch.py` だけ（docs と bash 履歴で確認）。
 - **[事実]** `so_arm101_bringup` の lint の 16 件・失敗 12 は、すべて `bringup.launch.py` 1 ファイルの違反（copyright 1、flake8 の E501 ×4、pep257 の D400・D415 ×2 か所）。違反 1 つ = 1 件なので、ファイルを直すと件数が動く（`_require_feetech` の削除で pep257 が −2 の予想）。
 - D 案では `hardware:=feetech` も起動前にエラーになる。手順書の 11 コマンドの更新は、実装と別のコミット（実装の直後）。
+
+## `hardware` 引数の削除（D 案）の実装（2026-11-12。コミット 1。実機・シリアルポートには触れていない。ノードの起動は `mock:=true` の 2 回だけ）
+- 計画: `docs/hardware_arg_removal_plan.md` の 7〜9 章（ユーザーの承認済み）。手順書の更新は**別のコミット**（コミット 2）。
+- **変更**: `bringup.launch.py`（`hardware` の宣言・mappings・`_require_feetech` を削除。`_check_launch_arguments` を **LaunchDescription の最初の動作**に追加。判定は `context.argv` のみ、宣言の一覧は末尾で `ld.get_launch_arguments()`（21 個）から作る。文面は英語のみ）、moveit_config の xacro 2 つ（`hardware` の引数・マクロ引数・`xacro.fatal`・`xacro:if` を削除）、bringup の `CMakeLists.txt`・`package.xml`（`ament_cmake_pytest`）、新規 `so_arm101_bringup/test/test_launch_arg_check.py`（MIT ヘッダ）。
+- **試験の件数（前 → 後）**: `colcon test-result` 全体 **196 → 231**、失敗 **12 → 10**。bringup **16 → 51**、失敗 **12 → 10**。description 2 → 2、moveit_config 0 → 0、controller 0 → 0、hardware 105 → 105（gtest 99 → 99）、calibration 73 → 73（gtest 71 → 71）。
+  - bringup の内訳（前 → 後）: pytest（新規）**0 → 34**（全件成功）、copyright 1（失敗 1）→ 2（失敗 1。新しいファイルの 1 件が成功）、flake8 4（失敗 4）→ 4（失敗 4。E501 は `bringup.launch.py` の既存の 4 行のまま）、pep257 4（失敗 4）→ 3（失敗 2。新しいファイルの 1 件が成功）、lint_cmake 1 → 1、xmllint 1 → 1、CTest のまとめ 5（失敗 3）→ 6（失敗 3。`test_launch_arg_check` の 1 件が成功）。増加 +35 = 34 + 1（copyright）+ 1（pep257 の新ファイル）+ 1（CTest）− 2（pep257 の消滅）。
+  - **失敗の 12 → 10 は「解消」ではなく「消滅」**: 削除した `_require_feetech` の docstring にあった pep257 の D400・D415 の 2 件が、関数ごと無くなっただけ。残る既存の lint 違反（copyright 1、E501 ×4、モジュールの docstring の D400・D415）は**直していない**（指示どおり）。新しいコードは lint を足していない（新しい docstring は D213 の形に直した。最初は D213 違反を足していたのを、コミット前に直した）。
+- **pytest が登録されなかった件（原因と対処）**: `ament_add_pytest_test` が「The Python module 'pytest' was not found」と警告して**無言でテストを飛ばした**。原因は、**ユーザー領域 `~/.local/lib/python3.10/site-packages/anyio` の pytest プラグインが、システムの pytest 6.2.5（`/usr/lib/python3/dist-packages`）と非互換**（`ModuleNotFoundError: No module named '_pytest.scope'`）で、`python3 -m pytest --version` 自体が失敗するため。**ユーザー環境（`~/.local`）には触れていない**。対処は bringup の `CMakeLists.txt` で、`set(ENV{PYTEST_DISABLE_PLUGIN_AUTOLOAD} 1)`（configure 時）と `ament_add_pytest_test(... ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)`（実行時）。**[推測]** 過去の記録にある `apriltag_test` の「pytest の収集エラー」（`inventory.md` 1141 行ほか）も、同じ原因の可能性がある（未確認）。
+- **6 通りの robot_description の sha256（前 = `urdf_after/`、`hardware:=feetech` 付き、付けない）**: 6 通りとも**3 つが一致**（先頭 16 桁）: 1・2 `d8eebdcd27762b2b`、3 `9bfaceea6da94c16`、4 `a5160ee8aad290a8`、5 `6bf7aa602dc5b6ad`、6 `7dc2c92cc80f37ed`。`xacro` は宣言していない引数（`hardware:=feetech`）を無言で無視する（`hardware:=lerobot` も rc=0 になった。launch では `bringup.launch.py` の検査が止める）。`tools/pose_margin.py` の URDF のリミットも前と同じ。
+- **launch の挙動（実行。ログ `~/so_arm101_check/hwarg_*.log`）**:
+
+| # | 引数 | 結果 |
+|---|---|---|
+| 3 | `mock:=true use_rviz:=false foo:=bar` | **exit=1**、`process started` **0 行**。`Undeclared launch argument(s): foo. Declared arguments: …`（21 個） |
+| 4 | `… hardware:=feetech` | **exit=1**、0 行。`Undeclared launch argument(s): hardware. …  The 'hardware' argument was removed (with the removal of the LeRobot path; git tag stage2c-done). Remove it and run again.` |
+| 5 | `… hardware:=lerobot` | 同上（**exit=1**、0 行） |
+| 6 | `… read_olny:=false` | **exit=1**、0 行。`read_olny (did you mean: read_only?)` |
+| 7 | `mock:=true use_rvis:=false` | **exit=1**、0 行。`use_rvis (did you mean: use_rviz?)` |
+| 8 | `… read_only:=flase`（宣言済みの引数の値の誤り） | **exit=1**、0 行。今までと同じ `choices` のエラー（検査の対象外） |
+| 1 | `mock:=true use_rviz:=false`（宣言済みのみ） | **起動**。コントローラ 3 つ active。`Undeclared` 0 件。`kill -INT`（PID 385336、3 秒で終了）。`SigIgn` に SIGINT なし（ラッパーで確認） |
+| 2 | `mock:=true use_rviz:=false monitor_dynamics:=false`（include 先の引数の通り抜け） | **誤判定せず起動**。コントローラ 3 つ active。`kill -INT`（PID 385626、3 秒で終了） |
+| 9 | `--show-args` | 21 個。`hardware` は**無い** |
+
+  - 3〜8 は、ノードが 1 つも起動せず（`process started` 0 行）、0 以外（1）の終了コードで終わった。**検査が最初の動作**であること（`test_check_is_the_first_action`）と合わせて確認。
+  - 起動前後とも、`ps`（`ros2_control_node|move_group|robot_state_publisher|static_transform_publisher|bringup.launch`）は空、`ros2 node list --no-daemon` も空。`mock:=false` では起動していない（確認用の `~/so_arm101_check/mock_start.sh` は `mock:=false` を拒否する）。
+  - ros2 daemon: 起動時（15:07、PID 373597）のものは**既にいなくなり**、16:01:20 起動の PID 382676 に変わっている（**私は触っていない**。ユーザーの実機の確認の前後のどこかで入れ替わった **[推測]**）。
+- **`~/so_arm101_check/gen_rd6.sh`（git 管理外）の書き換え**: 規則に従い、直す前の全文をここに控える（コピー `~/so_arm101_check/hwarg_before/gen_rd6.sh.orig` も有る）。直した内容は、`gen` の行から ` hardware:=feetech` を外しただけ。直す前の全文:
+
+```bash
+#!/bin/bash
+# usage: gen_rd6.sh OUTDIR   (xacro only; no launch, no hardware)
+set -e
+OUT=$1; mkdir -p $OUT
+R=/home/hirok/ros2_so-arm101
+X=$R/src/so_arm101_moveit_config/config/so101_new_calib.urdf.xacro
+IP=initial_positions_file:=$R/src/so_arm101_moveit_config/config/initial_positions.yaml
+CAL=calibration_file:=$R/src/so_arm101_hardware/config/follower_calibration.yaml
+gen(){ n=$1; shift; xacro $X $IP "$@" > $OUT/$n.urdf 2> $OUT/$n.err; echo "$n rc=$?"; }
+gen 1_mock_feetech      use_fake_hardware:=true hardware:=feetech serial_port:=/dev/ttyACM0
+gen 2_mock_default      use_fake_hardware:=true
+gen 3_feetech_ro        use_fake_hardware:=false hardware:=feetech serial_port:=/dev/ttyACM0 $CAL read_only:=true
+gen 4_feetech_rw        use_fake_hardware:=false hardware:=feetech serial_port:=/dev/ttyACM0 $CAL read_only:=false
+gen 5_feetech_rw_apply  use_fake_hardware:=false hardware:=feetech serial_port:=/dev/ttyACM0 $CAL read_only:=false apply_servo_config:=true
+gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=/dev/ttyACM0 $CAL read_only:=false probe_lock_sram:=true
+```
+- 確認用に追加した git 管理外のスクリプト: `~/so_arm101_check/mock_start.sh`（`mock:=true` だけ。SIGINT を既定に戻して起動し、PID を控えて `kill -INT`）。
+- 状態: 実機の確認（読み取り専用の起動 1 回。ユーザー）は、手順書の更新（コミット 2）の後。

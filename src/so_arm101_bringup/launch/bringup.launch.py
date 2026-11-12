@@ -2,19 +2,20 @@
 SO-ARM101 統合ランチャー（ルート名前空間）。
 
   mock:=true  (既定) : mock_components/GenericSystem でシミュレーション
-  mock:=false        : 実機（hardware:=feetech）
+  mock:=false        : 実機（Sts3215System。STS3215 を直接制御。LeRobot を使わない）
+                       read_only:=true (既定) は読み取り専用で、サーボのレジスタには書き込まない。
+                       書き込みモード（トルク ON。腕が動く）は read_only:=false を明示したときだけ
+                       （手順は docs/feetech_write_check.md）
 
-  hardware:=feetech (既定。これだけが使える) : Sts3215System（STS3215 を直接制御。LeRobot を使わない）
-                               read_only:=true (既定) は読み取り専用で、サーボのレジスタには書き込まない。
-                               書き込みモード（トルク ON。腕が動く）は read_only:=false を明示したときだけ
-                               （手順は docs/feetech_write_check.md）
-  hardware:=feetech 以外（lerobot など）は、mock:=true / false のどちらでも、起動前にエラーで止まる
-  （LeRobot 経路は削除した。タグ stage2c-done に残っている）。
+宣言していない引数（打ち間違いや、削除した hardware 引数など）が渡されたら、どのノードも起動する前に
+エラーで止まる（_check_launch_arguments。LaunchDescription の最初の動作）。
+LeRobot 経路は削除した（タグ stage2c-done に残っている）。
 
 robot_state_publisher / ros2_control_node / move_group は1つずつ、
 コントローラ名・トピックは mock / 実機で共通（/arm_controller, /gripper_controller, /joint_states）。
 """
 
+import difflib
 import os
 
 from ament_index_python.packages import get_package_share_directory
@@ -30,22 +31,42 @@ from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launch_utils import DeclareBooleanLaunchArg
 
 
-def _require_feetech(context, *args, **kwargs):
-    """hardware:=feetech 以外は、はっきりしたエラーで止める（mock:=true のときも検査する）。"""
-    value = context.perform_substitution(LaunchConfiguration("hardware"))
-    if value != "feetech":
-        raise RuntimeError(
-            f"hardware:={value} is not supported. The LeRobot path (hardware:=lerobot) was "
-            "removed from this workspace; use hardware:=feetech (the default). "
-            "The removed code is in git tag stage2c-done "
-            "(e.g. git checkout stage2c-done -- src/so_arm101_lerobot_bridge)."
+# Names added by "ros2 launch" itself (--launch-prefix / --launch-prefix-filter).
+_ROS2LAUNCH_OPTION_ARGS = ("launch-prefix", "launch-prefix-filter")
+
+
+def _check_launch_arguments(context, declared_names, *args, **kwargs):
+    """
+    Stop before any node starts if an argument that is not declared was given.
+
+    Only the arguments typed by the user (context.argv) are checked. Values set inside the
+    launch description (included launch files, OpaqueFunction, ...) live in
+    context.launch_configurations and are never looked at.
+    """
+    given = [a.split(":=", 1)[0] for a in context.argv if ":=" in a]
+    allowed = set(declared_names) | set(_ROS2LAUNCH_OPTION_ARGS)
+    unknown = sorted({name for name in given if name not in allowed})
+    if not unknown:
+        return []
+    parts = []
+    for name in unknown:
+        close = difflib.get_close_matches(name, sorted(allowed), n=2)
+        hint = f" (did you mean: {', '.join(close)}?)" if close else ""
+        parts.append(f"{name}{hint}")
+    message = (
+        "Undeclared launch argument(s): " + ", ".join(parts) + ". "
+        "Declared arguments: " + ", ".join(sorted(declared_names)) + "."
+    )
+    if "hardware" in unknown:
+        message += (
+            " The 'hardware' argument was removed (with the removal of the LeRobot path; "
+            "git tag stage2c-done). Remove it and run again."
         )
-    return []
+    raise RuntimeError(message)
 
 
 def generate_launch_description():
     mock = LaunchConfiguration("mock")
-    hardware = LaunchConfiguration("hardware")
     serial_port = LaunchConfiguration("serial_port")
     calibration_file = LaunchConfiguration("calibration_file")
     read_only = LaunchConfiguration("read_only")
@@ -61,7 +82,6 @@ def generate_launch_description():
         .robot_description(
             mappings={
                 "use_fake_hardware": mock,
-                "hardware": hardware,
                 "serial_port": serial_port,
                 "calibration_file": calibration_file,
                 "read_only": read_only,
@@ -79,17 +99,12 @@ def generate_launch_description():
     )
 
     ld = LaunchDescription()
+    # 宣言していない引数の検査。最初の動作（どのノードより前）。宣言の一覧は、末尾で埋める
+    declared_names = []
+    ld.add_action(OpaqueFunction(function=_check_launch_arguments, args=[declared_names]))
     ld.add_action(
         DeclareBooleanLaunchArg(
-            "mock", default_value=True, description="true=mock / false=実機（hardware:=feetech）"
-        )
-    )
-    ld.add_action(
-        DeclareLaunchArgument(
-            "hardware",
-            default_value="feetech",
-            description="feetech だけ受け付ける（STS3215 を直接制御。既定。read_only で読み取り専用/書き込みを選ぶ）。"
-            "それ以外は、mock の値に関わらず、起動前にエラーで止まる。mock:=true のときは使われない",
+            "mock", default_value=True, description="true=mock / false=実機（STS3215 を直接制御）"
         )
     )
     ld.add_action(DeclareLaunchArgument("serial_port", default_value="/dev/ttyACM0"))
@@ -99,13 +114,13 @@ def generate_launch_description():
             default_value=os.path.join(
                 get_package_share_directory("so_arm101_hardware"), "config", "follower_calibration.yaml"
             ),
-            description="hardware:=feetech のキャリブレーション yaml",
+            description="キャリブレーション yaml",
         )
     )
     ld.add_action(
         DeclareLaunchArgument(
             "read_only", default_value="true", choices=["true", "false"],
-            description="hardware:=feetech のみ。true=読み取り専用（既定）/ false=書き込みモード（トルク ON。腕が動く。"
+            description="true=読み取り専用（既定）/ false=書き込みモード（トルク ON。腕が動く。"
             "read_only:=false を明示したときだけ有効。手順は docs/feetech_write_check.md）",
         )
     )
@@ -147,9 +162,6 @@ def generate_launch_description():
             condition=condition,
         )
 
-    # hardware の検査（宣言した引数の後、ノードの起動の前）。feetech 以外はここで止まる
-    ld.add_action(OpaqueFunction(function=_require_feetech))
-
     # world -> base_link (SRDF の virtual_joint)
     ld.add_action(include("static_virtual_joint_tfs.launch.py"))
 
@@ -180,5 +192,8 @@ def generate_launch_description():
     ld.add_action(include("move_group.launch.py"))
     ld.add_action(include("moveit_rviz.launch.py", condition=IfCondition(LaunchConfiguration("use_rviz"))))
     ld.add_action(include("warehouse_db.launch.py", condition=IfCondition(LaunchConfiguration("db"))))
+
+    # 宣言された引数の一覧（include した launch の引数を含む）。検査の関数が実行時に使う
+    declared_names.extend(sorted({arg.name for arg in ld.get_launch_arguments()}))
 
     return ld
