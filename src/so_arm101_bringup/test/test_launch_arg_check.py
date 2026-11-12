@@ -468,3 +468,83 @@ def test_servo_node_parameters():
         assert f'robot_description_planning.joint_limits.{joint}.max_velocity' in names
     # No kinematics solver for Servo: the inverse Jacobian path (needed for the drift dimensions).
     assert not [n for n in names if n.startswith('robot_description_kinematics')]
+
+
+# ---------------------------------------------------------------------------------------------
+# tools/send_servo_twist.py (docs/servo_integration_plan.md, stage 3). Only the pure functions
+# are tested; nothing is sent.
+# ---------------------------------------------------------------------------------------------
+def _load_twist_tool():
+    spec = importlib.util.spec_from_file_location(
+        'send_servo_twist_under_test', REPO / 'tools' / 'send_servo_twist.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TOOL = _load_twist_tool()
+SCALES = (SERVO['scale.linear'], SERVO['scale.rotational'])
+
+
+def _check_request(linear, angular, seconds=2.0, frame='base_link', allow_fast=False):
+    TOOL.check_request(linear, angular, seconds, frame, SCALES[0], SCALES[1], allow_fast)
+
+
+def test_twist_tool_accepts_a_small_request():
+    _check_request([0.0, 0.0, -0.5], [0.0, 0.0, 0.0])
+    _check_request([0.5, 0.0, 0.0], [0.0, 0.2, 0.0], seconds=3.0, frame='gripper_frame_link')
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'linear': [0.0, 0.0, 0.6], 'angular': [0.0, 0.0, 0.0]},
+    {'linear': [0.0, 0.0, 0.5], 'angular': [0.0, 0.0, 0.0], 'seconds': 3.5},
+    {'linear': [0.0, 0.0, 0.5], 'angular': [0.0, 0.0, 0.0], 'seconds': 0.0},
+    {'linear': [0.5, 0.5, 0.5], 'angular': [0.0, 0.0, 0.0], 'seconds': 3.0},
+    {'linear': [0.0, 0.0, 0.0], 'angular': [0.5, 0.5, 0.5], 'seconds': 3.0},
+    {'linear': [0.0, 0.0, 0.5], 'angular': [0.0, 0.0, 0.0], 'frame': 'camera_link'},
+    {'linear': [float('nan'), 0.0, 0.0], 'angular': [0.0, 0.0, 0.0]},
+    {'linear': [0.0, 0.0, 0.0], 'angular': [0.0, 0.0, 0.0]},
+])
+def test_twist_tool_refuses_requests_over_the_limits(kwargs):
+    with pytest.raises(TOOL.Refused):
+        _check_request(**kwargs)
+
+
+def test_twist_tool_allow_fast_raises_only_the_component_limit():
+    with pytest.raises(TOOL.Refused):
+        _check_request([0.0, 0.0, 0.8], [0.0, 0.0, 0.0])
+    _check_request([0.0, 0.0, 0.8], [0.0, 0.0, 0.0], seconds=2.0, allow_fast=True)
+    with pytest.raises(TOOL.Refused):
+        _check_request([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], seconds=3.0, allow_fast=True)
+
+
+def _plan(linear, angular, frame='base_link', pan=0.4, pose=TOP_DOWN_POSES[2]):
+    return TOOL.plan_command(CHAIN, _top_down_q(pose, pan), linear, angular, frame,
+                             SCALES[0], SCALES[1], 2.0)
+
+
+def test_twist_tool_plan_for_a_pure_z_request():
+    plan = _plan([0.0, 0.0, -0.5], [0.0, 0.0, 0.0])
+    assert plan['lost_fraction'] < 1e-6
+    assert plan['drift'] == 'rx'
+    assert plan['command'][2] < -0.4
+    assert abs(plan['expected_translation'][2] - (-0.5 * SCALES[0] * 2.0)) < 0.002
+    assert 'drift: rx' in TOOL.describe(plan, 2.0, 20.0)
+
+
+def test_twist_tool_refuses_a_rotation_about_the_unreachable_axis():
+    pan = 0.4
+    axis = [np.cos(pan), -np.sin(pan), 0.0]
+    with pytest.raises(TOOL.Refused):
+        _plan([0.0, 0.0, 0.0], [0.5 * a for a in axis], pan=pan)
+    # a rotation about a reachable axis (about base z-direction is coupled with the pan) is kept
+    plan = _plan([0.0, 0.0, 0.0], [0.5 * np.sin(pan), 0.5 * np.cos(pan), 0.0], pan=pan)
+    assert plan['lost_fraction'] < 0.5
+
+
+def test_twist_tool_converts_the_gripper_frame_to_base_link():
+    # The approach axis (gripper z) points straight down: +z in the gripper frame is -z in base.
+    plan = _plan([0.0, 0.0, 0.5], [0.0, 0.0, 0.0], frame='gripper_frame_link')
+    assert plan['command'][2] < -0.4
+    assert abs(plan['command'][0]) < 0.01
+    assert abs(plan['command'][1]) < 0.01
