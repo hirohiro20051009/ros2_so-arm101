@@ -1,8 +1,15 @@
 # ros2_control コントローラ設定（mock / 実機 共通、ルート名前空間）
 #
-# 統合元:
-#   - so_arm101_moveit_config/config/ros2_controllers.yaml （MoveIt Setup Assistant 生成。無変更・未使用）
-#   - 旧 so101_controllers.yaml の /follower ブロック（実機側。値は全て引き継ぎ）
+# 【このファイルが使われる】ros2_control_node がコントローラの設定として実行時に読むのは、
+# このファイルだけ（so_arm101_bringup の bringup.launch.py が渡す）。hardware の試験も
+# update_rate を読む。
+# 【別物】so_arm101_moveit_config/config/ros2_controllers.yaml は MoveIt Setup Assistant の
+# 生成物で、実行時にも試験でも使われない（編集しても動作は変わらない）。
+#
+# 出典: nimiCurtis/so101_ros2（MIT License）の so101_controllers.yaml の /follower ブロックに
+# 基づく（LICENSE.so101_ros2、THIRD_PARTY_NOTICES.md）。上流（コミット b50872d）との値の差は、
+# arm_controller の open_loop_control: true を足した 1 項目だけ（docs/inventory.md に記録）。
+# 旧 so_arm101_controller パッケージから git mv で移した（履歴は git log --follow）。
 # /follower と /leader の名前空間は廃止した。
 controller_manager:
   ros__parameters:

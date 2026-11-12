@@ -2129,3 +2129,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **ログの検索**: `so_arm101_controller` の文字列は 0 件、`is not known to URDF` も 0 件（`grep -c` で確認）。終了時の `move_group` の exit code -11（Segmentation fault。`CallbackGroup::~CallbackGroup()`）は既知の挙動（「無視してよい出力の一覧」）。
 - **後始末**: 停止後、`ps` は空。`ros2 node list` に `/move_group` と `/moveit_simple_controller_manager` が残ったが、ユーザーが `ros2 daemon` を入れ直した後は空になった（ユーザーの報告）。
 - 計画（`docs/controllers_yaml_move_plan.md`）の 8 章 3 は完了。残りは E4（`controllers.yaml` の冒頭コメント。承認済み。別コミット）。
+
+## E4（`controllers.yaml` の冒頭コメントの更新。2026-11-12。値は変えない）
+
+- 変更: 冒頭の「統合元」の 3 行を、(1) `ros2_control_node` が**コントローラの設定として**実行時に読むのはこのファイルだけ（hardware の試験も `update_rate` を読む）、(2) `so_arm101_moveit_config/config/ros2_controllers.yaml` は Setup Assistant の生成物で別物（実行時にも試験でも使われない）、(3) 出典（nimiCurtis/so101_ros2、MIT）、(4) 旧 `so_arm101_controller` から `git mv` で移したこと、に置き換えた。`controller_manager:` 以降（7 行目から）は 1 バイトも変えていない（`diff` で確認）。yaml を読み込んだ値は前後で等しい。
+- sha256: `8515d643d6c60175b3216da52cc66ee1a52982fc3e4af6187ed892bbccf20308` → `bd20974e034d08435bdc5695cde1ea7b8d760ac96fe44043e40db7c5e087e092`（src と install で同一）。
+- **出典の根拠（値の比較）**: 以前の冒頭コメントの「旧 `so101_controllers.yaml` の /follower ブロック（値は全て引き継ぎ）」は、そのままでは正確でなかったので書き直した。比較した結果: (a) git 履歴の `29ff6bf`（Stage 1 の取り込み）の `src/so101_controller/config/so101_controllers.yaml` の `/follower` ブロックは、今の `controllers.yaml` と**値が一致**（yaml を読み込んで比較。`3bc04f8` で名前空間を外して統合）。旧ワークスペース `~/ros2_so101/src/so101_ros2/so101_controller/config/so101_controllers.yaml` の `/follower` も一致。(b) nimiCurtis の clone（`/tmp/orig_nimi/repo`、HEAD `b50872d`）の `/follower` との差は、**`arm_controller` の `open_loop_control: true` の 1 項目だけ**（今の方が多い。旧ワークスペースに `so101_controllers.yaml.bak_before_openloop` があり、こちらで足したものと整合する **[推測]**。`/tmp` の clone は消えうる）。`/leader` ブロックは取り込まず、統合の時に廃止。
+- `colcon build`・`colcon test`（E1 と同一）: 全体 231 件・失敗 10。bringup 51（失敗 10。`launch/bringup.launch.py` の lint のみ。名前も同一）、calibration 73、description 2、hardware 105、moveit_config 0。
