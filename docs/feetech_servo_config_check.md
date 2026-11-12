@@ -27,6 +27,7 @@ LeRobot の `configure()` を一度走らせて、設定を書かせた直後の
 
 1. 腕を折りたたみ姿勢にして、片手を添える。
 2. LeRobot 経路を起動して止める（`LECONDA_SITE_PACKAGES` を設定した端末で）:
+   > 【歴史的・実行不可】`hardware` 引数は削除済み。付けると起動前にエラーで止まる（タグ `stage2c-done` に LeRobot 経路が残る）。
    ```bash
    ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_lerobot_launch.log
    ```

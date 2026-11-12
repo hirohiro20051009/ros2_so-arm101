@@ -2136,3 +2136,8 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - sha256: `8515d643d6c60175b3216da52cc66ee1a52982fc3e4af6187ed892bbccf20308` → `bd20974e034d08435bdc5695cde1ea7b8d760ac96fe44043e40db7c5e087e092`（src と install で同一）。
 - **出典の根拠（値の比較）**: 以前の冒頭コメントの「旧 `so101_controllers.yaml` の /follower ブロック（値は全て引き継ぎ）」は、そのままでは正確でなかったので書き直した。比較した結果: (a) git 履歴の `29ff6bf`（Stage 1 の取り込み）の `src/so101_controller/config/so101_controllers.yaml` の `/follower` ブロックは、今の `controllers.yaml` と**値が一致**（yaml を読み込んで比較。`3bc04f8` で名前空間を外して統合）。旧ワークスペース `~/ros2_so101/src/so101_ros2/so101_controller/config/so101_controllers.yaml` の `/follower` も一致。(b) nimiCurtis の clone（`/tmp/orig_nimi/repo`、HEAD `b50872d`）の `/follower` との差は、**`arm_controller` の `open_loop_control: true` の 1 項目だけ**（今の方が多い。旧ワークスペースに `so101_controllers.yaml.bak_before_openloop` があり、こちらで足したものと整合する **[推測]**。`/tmp` の clone は消えうる）。`/leader` ブロックは取り込まず、統合の時に廃止。
 - `colcon build`・`colcon test`（E1 と同一）: 全体 231 件・失敗 10。bringup 51（失敗 10。`launch/bringup.launch.py` の lint のみ。名前も同一）、calibration 73、description 2、hardware 105、moveit_config 0。
+
+## 手順書の注記（2026-11-12。docs のみ。コマンドは書き換えていない）
+
+- `docs/feetech_readonly_check.md`（節 1 の `hardware:=lerobot` のコマンドブロックの直前）と `docs/feetech_servo_config_check.md`（節 1 の手順 2 のコマンドブロックの直前）に、1 行の注記「【歴史的・実行不可】`hardware` 引数は削除済み。付けると起動前にエラーで止まる（タグ `stage2c-done` に LeRobot 経路が残る）。」を足した。冒頭の【歴史的】の注記はあるが、コマンドの近くには無く、コピーして実行すると起動前にエラーで止まるため。
+- 調べた結果: 実行するコマンドで `hardware:=` が残っているものは無い（`05789e7` で更新済み）。残りは、歴史的と明記された手順・表・節（`feetech_readonly_check.md` :28・35・37・153 など）、`feetech_write_check.md` :6（「付けると起動前にエラー」という説明）、`stage2c_plan.md` :85（計画の記録）。`so_arm101_calibration_check.md` には無い。`:37` の比較表などは、歴史的な比較表なのでそのまま。

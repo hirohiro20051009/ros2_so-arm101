@@ -48,6 +48,7 @@ LeRobot 側の基準は、**姿勢によって使うものが違う**。
 腕を **home の折りたたみ姿勢**（機械的に静止する姿勢）にしておく。
 
 ターミナル1（LeRobot 用の環境変数を設定して起動）:
+> 【歴史的・実行不可】`hardware` 引数は削除済み。付けると起動前にエラーで止まる（タグ `stage2c-done` に LeRobot 経路が残る）。
 ```bash
 export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python3.10/site-packages
 ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=lerobot use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/lerobot_launch.log
