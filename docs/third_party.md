@@ -55,3 +55,11 @@ LeRobot 経路と、そのための道具・ブリッジを、リポジトリか
 - 正解表 `conversion_golden.csv`・`unnormalize_golden.csv` は**残している**（LeRobot 0.4.2 の出力の数値。Apache-2.0 の帰属はこの文書とヘッダに残す。ヘッダの文言の中立化は L3）。
 - 表の「so_arm101_lerobot_bridge の `bridge.py`」の行は、削除したパッケージ内のコードへの言及（元は nimiCurtis/so101_ros2、MIT）。
 - `LICENSE.so101_ros2`（nimiCurtis、MIT）は、description の urdf・meshes・controller の出所が確定するまで残す。
+
+## SO-ARM100（TheRobotStudio）の URDF とメッシュ（2026-11-12、URDF の置き換え）
+
+- 場所: `src/so_arm101_description/third_party/SO-ARM100/`（`so101_new_calib.urdf`、`LICENSE`、`SOURCE.md`、`SHA256SUMS`）と `src/so_arm101_description/meshes/`（13 個）。
+- 取得元: https://github.com/TheRobotStudio/SO-ARM100 の `Simulation/SO101/so101_new_calib.urdf`。ファイルの最終変更は `385e8d7c68e24945df6c60d9bd68837a4b7411ae`（2025-07-02）。取得時の HEAD は `a758567c3978dfeefe282ede0500085a48fe8f78`。URDF の sha256 は `3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c`。
+- ライセンス: **Apache License 2.0**（`third_party/SO-ARM100/LICENSE` に同じ版のコピー。NOTICE は無い）。
+- 扱い: URDF と `meshes/*.stl`（13 個。385e8d7 の `Simulation/SO101/assets/*.stl` とバイト一致）は**無変更**。`SHA256SUMS` と試験（`urdf_original_checksums`）で保護。インストールされる URDF は、ビルド時に `cmake/gen_urdf.cmake` が**メッシュのパスの接頭辞だけ**を置換して生成する別ファイル（先頭に変更の旨のコメント 1 行）。試験 `urdf_generated_matches_original` が、逆置換でオリジナルとバイト一致することを確かめる。
+- 以前の URDF は nimiCurtis/so101_ros2（MIT）経由のコピー。内容は TheRobotStudio の 385e8d7 と同一（`docs/original_urdf_plan.md`）。

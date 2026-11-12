@@ -1830,3 +1830,13 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **未確認**: ros2_control が `<ros2_control>` の外の `<transmission>` を無視するか（ソース・モックで確認する）、`assets/` の相対パスが RViz・MoveIt で解決できないか。
 - **プロセス [事実]**: 調査中に `ps` で見えた ros 関連の 1 件は `ros2 daemon`（PID 373597、15:07 起動）で、触っていない。私は launch を一度も起動していない。
 - 状態: **計画の承認待ち**（実施は未。削除も未）。
+
+## URDF の置き換え（A 案）の実施: S1〜S3（2026-11-12。実機・シリアルポートには触れていない）
+- 計画と結果の詳細: `docs/original_urdf_plan.md` の 15〜18 章。**1 コミット = URDF の置き換えだけ**（SRDF `:45`・description の未使用ファイルの削除・ライセンスは別。`usd/` は保留）。
+- 追加: `src/so_arm101_description/third_party/SO-ARM100/`（オリジナルの URDF 385e8d7・LICENSE・SOURCE.md・SHA256SUMS（メッシュ 13 個を含む））、`cmake/gen_urdf.cmake`・`check_checksums.cmake`・`check_generated.cmake`。変更: `CMakeLists.txt`（ビルド時に `assets/` → `package://so_arm101_description/meshes/` だけを置換した URDF を生成して、同じパス・同じ名前でインストール。試験 2 件）。
+- **削除（`git rm`）**: `src/so_arm101_description/urdf/so101_new_calib.urdf`（nimiCurtis 版。内容は 385e8d7 と同一で、メッシュのパス・transmission・world のコメントだけ違った）。**削除の直前のコミット `92e9a05` から取り出せる**（`git show 92e9a05:src/so_arm101_description/urdf/so101_new_calib.urdf`）。git 管理外のものの削除は無し。
+- **試験の件数（前 → 後）**: `colcon test-result` 全体 **194 → 196**（description 0 → 2）。失敗は **12 → 12**（bringup の以前からの lint。bringup は 16 → 16）。gtest: hardware **99 → 99**、calibration **71 → 71**。test-result: hardware 105 → 105、calibration 73 → 73、moveit_config 0 → 0、controller 0 → 0。
+- **robot_description 6 通りの前後（`xacro`。保存先 `~/so_arm101_check/urdf_before/`・`urdf_after/`、スクリプト `~/so_arm101_check/gen_rd6.sh`）**: メッシュのパス 34 か所・リンク・関節・`<ros2_control>` は同一。差は `<transmission>` ×6 の増加と、`world` のコメント 2 ブロックの消失だけ（6 通りとも同じ）。`check_urdf` は成功。
+- **ros2_control のソース（2.54.3。インストール版と一致）**: `<ros2_control>` の外の `<transmission>` は読まれない（`parse_control_resources_from_urdf` は `<ros2_control>` の要素だけをたどる）。
+- **モック**（`mock:=true use_rviz:=false`。ログ `~/so_arm101_check/urdf_after_mock.log`）: transmission の警告 0 件、`SO101System` active、コントローラ 3 つ（`joint_state_broadcaster`・`arm_controller`・`gripper_controller`）active、`/joint_states` は初期値。`move_group` の警告は `elbow_flex` の 1 件のみ。停止は PID 379627 に `kill -INT`。`ps` と `ros2 node list --no-daemon` は空。daemon 経由の `ros2 node list` には古い `/move_group` などが残る（既知。**ユーザーの指示で daemon には触らず、そのまま**）。終了時の `move_group` の exit code −11 は既知。
+- 状態: **実機の確認（読み取り専用の起動と W0）はユーザーが行う。** SRDF `:45` は次のコミット。

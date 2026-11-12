@@ -491,3 +491,67 @@ src/so_arm101_description/
 3. 13 章の `<license>` の案（特にユーザー自身のコードのライセンス）。
 4. 「実機を使っていない」の返答のタイミング（S1 のモックの基準ログの前）。
 5. 11.4 の 1（ros2_control のソースの確認）を、先に Claude が行ってよいか（GitHub のソースを読むだけ。リポジトリは変えない）。
+
+---
+---
+
+# 追記（2026-11-12、第 3 回。ros2_control のソースの確認と、A 案の S1〜S3 の実施の記録）
+
+## 15. `<ros2_control>` の外の `<transmission>` は無視されるか（ソースの確認）
+
+**結論 [事実]**: **無視される**（ros2_control 2.54.3 のソースで確認。モックでも確認: 17 章）。
+
+- 読んだソース: https://github.com/ros-controls/ros2_control の **タグ `2.54.3`**（コミット `65d389596953cb4656c4216a3f0bc08a73230739`）。ブランチ `humble` の先端（`31f0b868043ea0a3a23d538e8596f4d4a3beb435`、2026-11-06）も取得したが、読んだのは 2.54.3 のタグ。ファイル `hardware_interface/src/component_parser.cpp`。
+- インストール版 [事実]（`dpkg -l`）: `ros-humble-hardware-interface 2.54.3-1jammy.20261005.211947`、`ros-humble-controller-manager 2.54.3-1jammy.20261005.213325`、`ros-humble-ros2-control 2.54.3-1jammy.20261005.220306`、`ros-humble-transmission-interface 2.54.3-1jammy.20261005.212908`。**タグとインストール版のバージョンが一致**。
+- 根拠（`component_parser.cpp`）:
+  - `parse_control_resources_from_urdf()`（約 567 行〜）は、`robot_it->FirstChildElement("ros2_control")` と `NextSiblingElement("ros2_control")` だけをたどる。`<robot>` 直下の `<transmission>` は**見ない**。
+  - `<transmission>` を読む `parse_transmission_from_xml()`（407 行）は、`parse_resource_from_xml()`（`<ros2_control>` の子を順に見るループ。547 行の `else if (kTransmissionTag == child->Name())`）からだけ呼ばれる。つまり**`<ros2_control>` の中の `<transmission>` だけ**。
+  - 「Missing `<plugin>` tag of `<transmission>` element」（416 行）は、その `<ros2_control>` の中の `<transmission>` に対する検査。
+  - `controller_manager/src/*.cpp` と `hardware_interface/src/resource_manager.cpp` には `transmission` の語が**無い**（grep）。
+- 残る確認: robot_state_publisher（urdfdom）・MoveIt・RViz が `<transmission>` を無視すること（urdfdom は `<transmission>` を無視 **[推測]**）。モックで確認した（17 章）。RViz は未起動（実機確認で見る）。
+
+## 16. 実施の記録（S1〜S3。1 コミット = URDF の置き換えだけ）
+
+実施前の基準（S1）:
+- `colcon test`（全 6 パッケージ）: **194 件・失敗 12**。内訳（`colcon test-result`）: description 0、moveit_config 0、controller 0、bringup 16（失敗 12。lint の copyright/flake8/pep257 と ctest の 3 件。**以前から同じ**。`inventory.md` の L1〜L4 の記録と同じ）、hardware 105（gtest 99）、calibration 73（gtest 71）。
+- robot_description 6 通りを `~/so_arm101_check/urdf_before/` に保存（スクリプト `~/so_arm101_check/gen_rd6.sh`。`xacro` のみ。launch・実機は使わない）。
+
+変更（コミットに入るもの）:
+- 新規 `src/so_arm101_description/third_party/SO-ARM100/`: `so101_new_calib.urdf`（385e8d7 を `git show` で取得。無変更）、`LICENSE`（Apache-2.0）、`SOURCE.md`、`SHA256SUMS`（URDF・LICENSE・`meshes/*.stl` 13 個の 15 行。385e8d7 と一致することの記録）。
+- 新規 `src/so_arm101_description/cmake/gen_urdf.cmake`（生成）、`check_checksums.cmake`・`check_generated.cmake`（試験）。
+- 変更 `src/so_arm101_description/CMakeLists.txt`（生成・インストール・試験 2 件）。パッケージの外のファイルは CMake が読まない（すべて `src/so_arm101_description/` の中）。
+- 削除（`git rm`）`src/so_arm101_description/urdf/so101_new_calib.urdf`（nimiCurtis 版）。**戻し方: 削除の直前のコミット `92e9a05` から取り出せる**（`git show 92e9a05:src/so_arm101_description/urdf/so101_new_calib.urdf`）。
+- moveit_config の xacro・SRDF・`.setup_assistant`・launch・`tools/` は**変更なし**（生成物を同じパス・同じ名前でインストールするため）。
+
+結果:
+- 生成: `gen_urdf.cmake: wrote …/urdf/so101_new_calib.urdf (34 mesh paths replaced)`。installed: `install/so_arm101_description/share/so_arm101_description/urdf/so101_new_calib.urdf`、`third_party/SO-ARM100/` も share にインストール。
+- 試験（description）: 0 → **2 件**（`urdf_original_checksums`: 15 ファイル・メッシュ 13 個 OK／`urdf_generated_matches_original`: 34 参照・13 種のメッシュ OK）。**変造の検出を `/tmp` のコピーで確認**: URDF の末尾に空白 1 つ→生成が sha256 不一致で失敗、STL に 1 行追記→チェックサムの試験が失敗、`meshes/` に余分な STL→失敗、生成物の質量を 0.147→0.148 に変更→生成物の試験が失敗。正しい状態では 2 件とも通過。
+- `colcon test`（全体）: **194 → 196 件・失敗 12 → 12**（description 0 → 2、他は同じ: moveit_config 0、controller 0、bringup 16（失敗 12）、hardware 105（gtest 99）、calibration 73（gtest 71））。失敗は bringup の以前からの lint だけ。
+- robot_description 6 通りの前後: 下の表。**メッシュのパス（34 か所）・リンク・関節・`<ros2_control>` のブロックは同一**。差は (a) `<transmission>` ×6 の増加（6 通りとも同じ 6 要素）、(b) `world` のコメント 2 ブロックの消失、だけ。出所のコメント 1 行は、`<?xml?>` と `<robot>` の間にあり、xacro の出力には出ない（インストールされたファイルには有る）。構造比較（許容差 0）の不一致は、6 通りとも `ONLY_B transmission` ×6 のみ。`check_urdf` は 6 通りとも成功。`tools/pose_margin.py` の URDF のリミットは前と同じ。
+
+| 引数の組 | 前の sha256（先頭 16 桁） | 後の sha256（先頭 16 桁） |
+|---|---|---|
+| 1 mock + hardware:=feetech | d49d109d657d564b… | d8eebdcd27762b2b… |
+| 2 mock（hardware 未指定） | d49d109d657d564b… | d8eebdcd27762b2b… |
+| 3 feetech read_only:=true | 9cac4b9748b8f90f… | 9bfaceea6da94c16… |
+| 4 feetech read_only:=false | ab402331d817819e… | a5160ee8aad290a8… |
+| 5 同 + apply_servo_config:=true | a792d24e8c020a17… | 6bf7aa602dc5b6ad… |
+| 6 同 + probe_lock_sram:=true | 4bc148cb8c48c78c… | 7dc2c92cc80f37ed… |
+
+（1 と 2 が同一の出力なのは、`hardware` の既定が `feetech` のため。以前の 7 通りのうち description 側の `mode:=real|isaac|gazebo` の 3 通りは、description の xacro を削除しない今回は対象外。それらは `include` するファイルが変わった（transmission が増える）ので、同じ差が出る [推測]。誰も読まない）
+
+## 17. モックでの確認（2026-11-12。ユーザーが「実機は使っていない」と返答済み。ログ `~/so_arm101_check/urdf_after_mock.log`）
+
+- 起動: `ros2 launch so_arm101_bringup bringup.launch.py mock:=true use_rviz:=false`（`setsid` で起動。launch の本体 PID **379627**、子は同じプロセスグループ。起動前に `ps` と `ros2 node list --no-daemon` で ROS のノードが無いことを確認）。
+- **transmission**: ログに `transmission` の語が **0 件**（警告・エラーなし）。`/robot_state_publisher` の `robot_description` に `<transmission>` 6 個、`package://so_arm101_description/meshes/` 34 か所、`assets/` の残り 0、`<ros2_control>` 1 個。
+- **ハードウェア**: `SO101System`（`mock_components/GenericSystem`）が `active`。6 関節のコマンドインターフェースが available・claimed。
+- **コントローラ 3 つ**: `joint_state_broadcaster`・`arm_controller`・`gripper_controller` がすべて `active`（spawner のログも「Configured and activated」）。
+- `/joint_states`: 6 関節、位置 (0.0, −1.57, 1.57, 0.8, 0.0, 0.0)（mock の初期値）。
+- `move_group`: SRDF の警告は `Link 'elbow_flex' is not known to URDF. Cannot disable/enable collisons.` の **1 件のみ**（変化なし。次の SRDF のコミットで消す）。メッシュの読み込みエラーは無い（`mesh|resource|Unable to open` の grep で 0）。ほかの WARN/ERROR は従来と同じ種類（kdl_parser の root の inertia、octomap の 3D センサー未設定、`allow_nonzero_velocity_at_trajectory_end`、controller_manager の robot_description の非推奨）。
+- 停止: `kill -INT 379627` のみ。3 秒で launch が終了。**終了時に `move_group` が exit code −11**（既知。`inventory.md` 932 行・`feetech_write_check.md` 296 行と同じ）。
+- 確認: `ps`（`ros2_control_node|move_group|robot_state_publisher|static_transform_publisher|spawner|ros2 launch`）は**空**。`ros2 node list --no-daemon` も**空**。`ros2 node list`（daemon 経由）には `/move_group` と `/moveit_simple_controller_manager` が**残っている**（既知の古いキャッシュ。`inventory.md` 1127 行と同じ）。**ユーザーの指示（ros2 daemon には触らない）により、`ros2 daemon stop/start` は実施していない**。10 秒待って再確認しても同じ。daemon（PID 373597、15:07 起動）はそのまま。
+- 起動前（置き換え前）のモックの基準ログは取っていない（実施前に取らなかった）。代わりに、robot_description の前後の構造比較（上）と、過去の起動のログ（`inventory.md`）の記録との一致で確認した。
+
+## 18. 補足（10.1 の daemon について）
+
+**[事実]** 15:07 起動の `ros2 daemon`（PID 373597）の親 PID は 11609。今回の launch の親（`setsid` の後の起動元）も 11609 で、**このセッションのシェルと同じ親**。**[推測]** この daemon は、このセッションのシェル（またはその親の端末）から実行された `ros2` コマンドで自動起動されたもの。いつ・誰のコマンドかは確定できない。daemon には触っていない。
