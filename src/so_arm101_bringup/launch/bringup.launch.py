@@ -1,4 +1,25 @@
+# Copyright 2026 hiro
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 """
+Unified launcher for the SO-ARM101 (root namespace).
+
 SO-ARM101 統合ランチャー（ルート名前空間）。
 
   mock:=true  (既定) : mock_components/GenericSystem でシミュレーション
@@ -112,7 +133,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "calibration_file",
             default_value=os.path.join(
-                get_package_share_directory("so_arm101_hardware"), "config", "follower_calibration.yaml"
+                get_package_share_directory("so_arm101_hardware"),
+                "config",
+                "follower_calibration.yaml",
             ),
             description="キャリブレーション yaml",
         )
@@ -133,7 +156,8 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "torque_limit", default_value="1000",
-            description="書き込みモードの Torque_Limit。shoulder_pan と wrist_roll だけに効く（lift / elbow / wrist_flex は常に 1000、"
+            description="書き込みモードの Torque_Limit。shoulder_pan と wrist_roll だけに効く"
+            "（lift / elbow / wrist_flex は常に 1000、"
             "gripper は min(値, 500)）。W1〜W2 の初回は 500",
         )
     )
@@ -190,8 +214,18 @@ def generate_launch_description():
     ld.add_action(TimerAction(period=3.0, actions=[include("spawn_controllers.launch.py")]))
 
     ld.add_action(include("move_group.launch.py"))
-    ld.add_action(include("moveit_rviz.launch.py", condition=IfCondition(LaunchConfiguration("use_rviz"))))
-    ld.add_action(include("warehouse_db.launch.py", condition=IfCondition(LaunchConfiguration("db"))))
+    ld.add_action(
+        include(
+            "moveit_rviz.launch.py",
+            condition=IfCondition(LaunchConfiguration("use_rviz")),
+        )
+    )
+    ld.add_action(
+        include(
+            "warehouse_db.launch.py",
+            condition=IfCondition(LaunchConfiguration("db")),
+        )
+    )
 
     # 宣言された引数の一覧（include した launch の引数を含む）。検査の関数が実行時に使う
     declared_names.extend(sorted({arg.name for arg in ld.get_launch_arguments()}))
