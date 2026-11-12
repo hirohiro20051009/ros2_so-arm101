@@ -1819,3 +1819,14 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 
 ## 後始末（2026-11-12。コードは変更なし）
 - `.gitignore:21` の `archive/stage1_build/` の行を削除（対象の `archive/` が無くなったため）。`CLAUDE.md` の削除の規則の例を「（例: 「削除の直前のコミット <hash> から取り出せる」）」に変更（旧: 「タグ stage2c-done から取り出せる」。ほかの文面は変更なし）。
+
+## URDF をオリジナルへ置き換える調査と計画（2026-11-12。**docs のみ**。コード・xacro・URDF・SRDF・CMake・package.xml は変更していない。実機・シリアルポートには触れていない）
+- 詳細は `docs/original_urdf_plan.md`（調査: 初回コミット `fcd9260`。補足と A 案の計画: 10〜14 章）。`docs/lerobot_removal_plan.md` 10 章の「調査」にあたる。
+- **取得元 [事実]**: https://github.com/TheRobotStudio/SO-ARM100 、`Simulation/SO101/so101_new_calib.urdf`。ファイルの最終変更は `385e8d7c68e24945df6c60d9bd68837a4b7411ae`（2025-07-02）、取得時の HEAD は `a758567c3978dfeefe282ede0500085a48fe8f78`。URDF の sha256 `3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c`。ライセンスは Apache-2.0（NOTICE なし）。取得先は `/tmp/orig_so100`（`/tmp` なので消える。リポジトリには入れていない）。
+- **結果 [事実]**: 今の `so101_new_calib.urdf` は、オリジナル（385e8d7）と、`material` 2・`link` 8・`joint` 7 が**完全一致**（許容差 0、構造比較）。メッシュ 13 個の sha256 も一致（385e8d7 の時点とも）。差は、メッシュのパスの書き方（34 か所）、`<transmission>` ×6、`world` のコメントだけ。`so101_old_calib.urdf` とは別物。
+- **由来 [事実]**: 今の URDF・メッシュは nimiCurtis/so101_ros2 のもの（パッケージ名以外は同一）で、nimiCurtis の URDF は TheRobotStudio の 385e8d7 と一致。このリポジトリで加えた変更はパッケージ名の置換だけ。
+- **動く経路 [事実]**: moveit_config の `config/so101_new_calib.urdf.xacro` が description の `urdf/so101_new_calib.urdf` を include。description の xacro 3 つ・`config/*`・`usd/`・`joints_properties.xml` は、どの launch・試験・tools・CMake からも読まれない（L1 の修正と 7 通りの比較は、`xacro` を手で実行したもので、矛盾しない）。
+- **SRDF の照合 [事実]**: `disable_collisions` 16 行のうち、誤りは `:45`（`elbow_flex` は関節名）の 1 件だけ。`virtual_joint` の `world` は URDF に無く、`static_virtual_joint_tfs` が TF で出す（置き換えで変わらない）。
+- **未確認**: ros2_control が `<ros2_control>` の外の `<transmission>` を無視するか（ソース・モックで確認する）、`assets/` の相対パスが RViz・MoveIt で解決できないか。
+- **プロセス [事実]**: 調査中に `ps` で見えた ros 関連の 1 件は `ros2 daemon`（PID 373597、15:07 起動）で、触っていない。私は launch を一度も起動していない。
+- 状態: **計画の承認待ち**（実施は未。削除も未）。

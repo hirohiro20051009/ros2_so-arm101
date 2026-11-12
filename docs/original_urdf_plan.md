@@ -54,7 +54,7 @@
 | visual / material | `3d_printed`（黄）、`sts3215`（黒） | 同じ | ✔ | |
 | `gripper_frame_link`（TCP のダミー） | 有（固定関節 `gripper_frame_joint`、origin `-0.0079 -0.000218121 -0.0981274` rpy `0 3.14159 0`） | 同じ | ✔ | **今の側だけではない**。SRDF の `arm` グループの tip・servo.yaml の `ee_frame_name` が使う |
 | `<link name="gripper_frame_link">` の中の `<origin>` | 有 | 有 | ✔ | URDF としては不正な要素だが、urdfdom は読む（`check_urdf` 成功）。そのまま |
-| メッシュのパス | `package://so_arm101_description/meshes/xxx.stl`（全 26 か所） | `assets/xxx.stl`（相対） | **✘** | 差 ① |
+| メッシュのパス | `package://so_arm101_description/meshes/xxx.stl`（全 34 か所（visual と collision。2026-11-12 の再確認で訂正。初版は 26 と誤記）） | `assets/xxx.stl`（相対） | **✘** | 差 ① |
 | メッシュのファイル | `src/so_arm101_description/meshes/*.stl` 13 個 | `Simulation/SO101/assets/*.stl`（18 個。残り 5 つは leader・カメラ用） | ✔ | 13 個とも sha256 一致（下） |
 | `<transmission>` | **無い**（URDF から除去され、`so101_new_calib_with_transmission.xacro` に分離。この xacro は動く経路で include されない） | 有（6 個。`transmission_interface/SimpleTransmission`、`hardware_interface/PositionJointInterface`、motor1〜6） | **✘** | 差 ② |
 | `world` リンクと `world_to_base` 固定関節 | **コメントアウト**（生成物にコメントとして残る） | 無い | **✘（コメントだけ）** | 差 ③。URDF の意味は同じ（根は `base_link`） |
@@ -286,3 +286,208 @@ URDF の内容は同一なので、**動作の確認は軽くてよい**が、�
 ### 9.1 実施の段階（案。承認後）
 
 1. （計画の承認）→ 2. オリジナルの取り込みと LICENSE・出典の記録（`docs/third_party.md`）→ 3. CMake の置換と薄い xacro → 4. 6.1 の確認（xacro の diff、`colcon build`・`colcon test`、モック、`ps` と `ros2 node list`）→ 5. コミット（1 段階ごと）→ 6. 6.2 のユーザーの実機確認。
+
+---
+---
+
+# 追記（2026-11-12、第 2 回。調査の補足と、A 案の実施計画。コード・xacro・URDF・SRDF・CMake・package.xml は変更していない）
+
+## 10. 補足の確認（ユーザーの 1〜4 への回答）
+
+### 10.1 `ps` で見えた ros 関連のプロセス 1 件（触っていない）
+
+**[事実]** 該当行（`ps -eo pid,ppid,lstart,cmd`）:
+
+```
+ 373597   11609 Thu Nov 12 15:07:11 2026 /usr/bin/python3 -c from ros2cli.daemon.daemonize import main; main() --name ros2-daemon --ros-domain-id 0 --rmw-implementation rmw_fastrtps_cpp
+```
+
+- 起動と終了の操作はしていない（止めていない・触っていない）。これは **ros2 の daemon**（`ros2 node list` などが自動で起動する常駐プロセス）で、launch したノードではない。**[推測]** 起動した時刻（15:07）は、私の調査の時間帯ではなく、ユーザーの端末の `ros2` コマンド（`ros2 node list` など）が起動したものと思われる。私は `ros2` コマンドを一度も実行していない（`xacro`・`check_urdf`・`git`・`python3`・`sha256sum` だけ）。**確定はできない**（ppid 11609 の中身は確認していない）。
+
+### 10.2 「description の xacro・config は未使用」と、L1 の修正・7 通りの比較との関係
+
+**食い違いではない。「未使用」は「どの launch・試験・tools・CMake も読まない」という意味**。L1 で description の xacro を直したのは「読まれてはいないが、`So101HardwareBridge` の参照を残さない」ための安全側の修正で、7 通りの比較は **launch を通さず `xacro` コマンドを手で実行**して行ったもの（`inventory.md` 1698 行・1801 行）。L1 の記録にも「この xacro を実行時に読むものは無いことを grep で確認した」とある。**今回の grep（`xacro|urdf|robot_description|MoveItConfigsBuilder|so_arm101_description|get_package_share` を `src`・`tools`・`setup_so101.sh` に対して）でも同じ結果**。
+
+launch ファイルごとの、読む xacro・URDF（**[事実]** 起動はせず、grep とファイル読みだけ）:
+
+| launch ファイル | robot_description の作り方 | 読む xacro | その先で読む URDF |
+|---|---|---|---|
+| `so_arm101_bringup/launch/bringup.launch.py` | `MoveItConfigsBuilder("so101_new_calib", "so_arm101_moveit_config").robot_description(mappings={use_fake_hardware, hardware, serial_port, calibration_file, read_only, acceleration, torque_limit, apply_servo_config, probe_lock_sram})`。rsp と `ros2_control_node` に同じ `moveit_config.robot_description` を渡す | **moveit_config** の `config/so101_new_calib.urdf.xacro`（`.setup_assistant` に `modified_urdf.xacros` があり、`MoveItConfigsBuilder` が `config/<robot_name>.urdf.xacro` を選ぶ。moveit_configs_builder.py:170） | **description の `urdf/so101_new_calib.urdf`**（`$(find so_arm101_description)/urdf/so101_new_calib.urdf` を `xacro:include`） |
+| 同 `include()` で起動する `static_virtual_joint_tfs.launch.py`、`spawn_controllers.launch.py`、`move_group.launch.py`、`moveit_rviz.launch.py`、`warehouse_db.launch.py`（moveit_config の launch） | `MoveItConfigsBuilder(...).to_moveit_configs()`（`.robot_description(mappings=…)` を**呼ばない**） | 同じ moveit_config の xacro（引数は xacro の既定値: `use_fake_hardware=true` など。`move_group` などは ros2_control のブロックを使わないので影響なし **[推測]**） | 同じ |
+| `so_arm101_moveit_config/launch/rsp.launch.py` | `.robot_description(mappings={"use_fake_hardware": …})` | 同じ moveit_config の xacro | 同じ |
+| `servo.launch.py`、`setup_assistant.launch.py` | `.to_moveit_configs()` | 同じ moveit_config の xacro | 同じ |
+| `so_arm101_description/launch/`、`so_arm101_controller/launch/` | （ディレクトリが空。git 管理にも無い） | — | — |
+| `tools/pose_margin.py`（launch ではない） | `xacro <xacro> use_fake_hardware:=true` を実行 | moveit_config の xacro（既定値） | 同じ |
+
+- **description の `urdf/*.xacro` 3 つ、`config/*`、`usd/`、`joints_properties.xml` を読む launch・試験・tools・CMake は無い**。description の CMake は `urdf/`・`meshes`・`config`・`launch`・`rviz` を**インストールするだけ**（読む側ではない）。
+- 使われているのは description の **`urdf/so101_new_calib.urdf`（plain）と `meshes/*.stl`（13 個）だけ**。
+- `package.xml` の `exec_depend so_arm101_description`（bringup・controller・moveit_config）は、この URDF とメッシュのため。
+- `.setup_assistant` は `urdf: package: so_arm101_description, relative_path: urdf/so101_new_calib.urdf` を持つ（Setup Assistant 用のメタデータ。実行時の経路ではない）。**URDF のパス・名前を変えると、この記述も合わなくなる**ので、A 案では**生成した URDF を同じパス・同じ名前でインストールする**（11.2）。
+
+### 10.3 「全要素が一致」の比べ方（初回の方法の弱点と、やり直した結果）
+
+**初回（`/tmp/orig_so100/cmp.py`）の方法 [事実]**: `xml.etree.ElementTree` で読み、`<link>`・`<joint>` ごとに `ET.tostring` した文字列から**空白を全て削除**し、`package://so_arm101_description/meshes/` を `assets/` に置換してから**文字列として完全一致**を見た。数値の許容差は**無し**（文字列一致）。コメント・`<material>`・`<transmission>`・`<ros2_control>` は対象外。
+**弱点 [事実]**: 空白を全部消すため、`xyz="1 2"` と `xyz="12"` のような差を見逃す可能性があった（実際に差があるわけではない）。属性の順序にも依存した。
+
+**やり直し（`/tmp/orig_so100/cmp2.py`。リポジトリには入れていない）**:
+- 方法: 要素ごとに、タグ・属性（値は空白で分割し、数として読めるものは `float`）・テキスト（前後の空白のみ除去）・子要素を**再帰的に**比べる（子の順序も一致を要求）。名前を持つ最上位の要素（`material`・`link`・`joint`・`transmission`・`ros2_control`）を**名前で対応づけ**、片方にしか無いものも報告する。`filename` の `package://so_arm101_description/meshes/` だけ `assets/` に正規化。コメントは XML パーサが捨てる（比較外）。
+- 許容差: **0（完全一致）、1e-9、1e-6 の 3 通りで実行**。
+- 感度の確認: 生成物の elbow の上限を `1.69` → `1.6901` に書き換えると、許容差 1e-6 では**不一致として検出**され、許容差 1e-3 では検出されない（意図どおり）。
+- 結果 **[事実]**（385e8d7 のオリジナル vs 今の moveit_config の xacro の生成物）: 3 通りとも**同じ**。`material` 2・`link` 8・`joint` 7 は**全て完全一致**。不一致は `transmission` ×6（オリジナルにだけ有る）と `ros2_control`（今の側にだけ有る。xacro が追加）の 7 件のみ。
+
+**`so101_old_calib.urdf` との違い [事実]**（同じ `cmp2.py` で比較）:
+- 今の URDF と old_calib は一致しない（不一致 29 件）。old_calib は**リンク名が `base`・`shoulder`・`upper_arm`・`lower_arm`・`wrist`・`gripper`・`jaw`**（`_link` 無し）で、`gripper_frame_joint` が無い。
+- 関節の範囲も違う（old: elbow −0.1745〜+3.1416、shoulder_lift −3.3161〜+0.1745、wrist_roll ±2.79253、gripper −0.174533〜1.74533、pan ±1.91986、wrist_flex ±1.65806。今: elbow ±1.69、lift ±1.74533、wrist_roll −2.74385〜+2.84121 …）。関節の origin の rpy も違う（0 の位置が違う。new は「範囲の中央が 0」、old は「水平に伸ばした姿勢が 0」）。
+- したがって、**今の URDF は `so101_new_calib.urdf` に一致し、`so101_old_calib.urdf` とは別物**。校正の方式（0 rad は範囲の中央）とも合うのは new のほう。
+
+### 10.4 `inventory.md` への記録
+
+**[事実]** 初回の調査の後、`docs/inventory.md` には**記録を入れていなかった**（`grep original_urdf` で 0 件）。今回、最終の節に追記する（docs のみ）。
+
+### 10.5 初版の訂正
+
+- メッシュの参照は**全 34 か所**（初版の「26」は誤り。`grep -c 'filename="assets/'` で 34。オリジナルも 34）。3 章の分類・結論には影響しない。
+- ユーザーの「差は mesh のパスと transmission だけになるはず」について: **変更の前後（今の moveit_config の xacro の生成物と、置き換え後の生成物）**では、メッシュのパスは**同じ**になる（生成物が今と同じ `package://so_arm101_description/meshes/…` を出すため）。差になるのは (a) `<transmission>` ×6、(b) `world` のコメント 2 ブロックの消失、(c) 生成物に入れる出所のコメント 1 行 だけ。「オリジナルとの差」としては、メッシュのパスと transmission、world のコメント。
+
+---
+
+## 11. A 案の実施計画（承認前。実施は承認後。1 段階ごとに「承認 → `colcon build` → 関係パッケージの `colcon test` → 試験の件数の前後比較 → コミット」）
+
+### 11.1 オリジナルを無変更で置く場所と、記録の方法
+
+```
+src/so_arm101_description/
+  third_party/SO-ARM100/
+    so101_new_calib.urdf   ← オリジナル（385e8d7）を 1 バイトも変えずに置く
+    LICENSE                ← SO-ARM100 の LICENSE（Apache-2.0）のコピー
+    SOURCE.md              ← 取得元・コミット・日付・ファイルの対応・「無変更」の宣言
+    SHA256SUMS             ← sha256sum 形式。URDF 1 つと、メッシュ 13 個
+  meshes/                  ← 今のまま。オリジナルの Simulation/SO101/assets の 13 個と同一（sha256 一致を確認済み）。移動しない
+```
+
+- **メッシュは動かさない**: 今の `meshes/*.stl` が、385e8d7 の時点の `assets/*.stl` と**バイト一致**であることを確認した **[事実]**（13 個とも `git show 385e8d7:… | sha256sum` と一致）。コピーを増やさず（16 MB）、`meshes/` を「SO-ARM100 の assets（13/18）の無変更のコピー」と `SOURCE.md` に明記し、`SHA256SUMS` に載せる。
+- **記録する値 [事実]**:
+  - 取得元: https://github.com/TheRobotStudio/SO-ARM100 、パス `Simulation/SO101/so101_new_calib.urdf`、固定リンク `…/blob/385e8d7c68e24945df6c60d9bd68837a4b7411ae/Simulation/SO101/so101_new_calib.urdf`。
+  - コミット: ファイルの最終変更 `385e8d7c68e24945df6c60d9bd68837a4b7411ae`（2025-07-02）。取得時の HEAD `a758567c3978dfeefe282ede0500085a48fe8f78`（2026-10-06）。HEAD まで同じ内容。
+  - URDF: git blob `9552a231d8b23bed68ec15779eba620c5d875ec4`、sha256 `3a65d2d35e68a8d2f0c2cc176d19b884506543c93ba72980145b80abe276022c`、34 か所のメッシュ参照（すべて `filename="assets/`）。
+  - LICENSE の sha256: `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`（385e8d7 と HEAD で同一）。
+  - メッシュ 13 個の sha256: 2.1 節の一覧と、実施時に `sha256sum` で `SHA256SUMS` に書く。
+- **記録の方法**: 取得は `git show 385e8d7:<path> > <dest>` のように**コミットを固定して**行う（作業ツリーの HEAD ではなく）。`SOURCE.md` に取得の手順と日付、`docs/third_party.md` に出典の表（ライセンス・場所）、`docs/inventory.md` に実施の記録（戻すためのコミット）を書く。
+- **置き換えで消えるファイル**: 今の `urdf/so101_new_calib.urdf`（nimiCurtis 版）は `git rm`（承認制）。**戻し方は `docs/inventory.md` に「削除の直前のコミット `<hash>` から取り出せる」と書く**（CLAUDE.md の規則）。git 管理外のものは対象に無い。
+
+### 11.2 パスの置換は「ビルド時に生成する別ファイル」にだけ行う
+
+- `third_party/SO-ARM100/so101_new_calib.urdf` は**書き換えない**。置換は `so_arm101_description/CMakeLists.txt` が行い、**ビルドツリー（`build/`）に別ファイルを生成**して `share/so_arm101_description/urdf/so101_new_calib.urdf` にインストールする。
+- **インストール先のパスと名前は今と同じ**にする（`$(find so_arm101_description)/urdf/so101_new_calib.urdf`）。これにより **moveit_config の xacro（= 薄い xacro）・`.setup_assistant`・launch・`tools/pose_margin.py` は変更不要**（A 案でも moveit_config の xacro は今のまま。「薄い xacro」はすでにその形）。
+- 置換の仕様（`cmake -P` で実行する小さなスクリプト `cmake/gen_urdf.cmake`。`file(READ)`・`string(REPLACE)`・`file(WRITE)` だけで、Python 等に依存しない）:
+  1. `filename="assets/` → `filename="package://so_arm101_description/meshes/` の**この 1 種類だけ**。
+  2. 置換前に `filename="assets/` が**ちょうど 34 か所**、`assets` を含む行も 34 か所であることを検査し、違えば**ビルドを失敗**させる（オリジナルが変わったときに気づくため）。
+  3. 生成物の 2 行目（`<?xml …?>` の次）に出所のコメントを 1 行入れる（例: `<!-- GENERATED at build time from third_party/SO-ARM100/so101_new_calib.urdf (sha256 …, SO-ARM100 385e8d7, Apache-2.0). Only change: mesh filename prefix assets/ -> package://so_arm101_description/meshes/ -->`）。これは Apache-2.0 の「変更の明記」を兼ねる（7 章）。
+  4. 入力の sha256 が `SHA256SUMS` と違えば、ビルドを失敗させる（無変更の保証）。
+- CMake の骨子（案。実施時に確定）: `add_custom_command(OUTPUT …/urdf/so101_new_calib.urdf COMMAND ${CMAKE_COMMAND} -DIN=… -DOUT=… -P cmake/gen_urdf.cmake DEPENDS …)`、`add_custom_target(gen_urdf ALL DEPENDS …)`、`install(FILES …/urdf/so101_new_calib.urdf DESTINATION share/${PROJECT_NAME}/urdf)`。`install(DIRECTORY urdf/ …)` は、`urdf/` に何も残らなければ削除（12 章の候補を承認した場合）。`--symlink-install` でも、生成ファイルは `build/` から `install/` に**コピー**されるので、挙動は同じ **[推測]**（実施時に確認）。
+
+### 11.3 置いたファイルの sha256 を見る試験
+
+- `so_arm101_description` の `BUILD_TESTING` に、`add_test()` で **CMake スクリプトの試験**を 2 つ追加（`ament_cmake` のみ。Python 不要）:
+  1. **`urdf_original_checksums`**: `third_party/SO-ARM100/SHA256SUMS` の全行（URDF 1 つ、メッシュ 13 個、LICENSE）について、`file(SHA256 …)` の結果が記録値と一致すること。ファイルの欠け・余りも検出（`meshes/` の STL が 13 個ちょうどで、`SHA256SUMS` と同じ集合であること）。
+  2. **`urdf_generated_matches_original`**: 生成された URDF の 2 行目（出所のコメント）を除き、`package://so_arm101_description/meshes/` → `assets/` と**逆置換**したものが、オリジナルと**バイト一致**すること。生成物のメッシュ参照が 34 か所で、参照先のファイルが全て `meshes/` に存在すること。
+- 現在の `so_arm101_description` の試験は lint のみ（`ament_lint_auto`）。**件数の前後を記録**する（前: 実施前に `colcon test` で数える。後: 追加の 2 件＋ lint）。
+- 手動の確認用に、`tools/urdf_compare.py`（10.3 の `cmp2.py` を整えたもの。新規ファイル。`xacro` の出力を入力にでき、許容差と無視する要素を引数で指定）を提案する。試験（colcon test）には入れない。
+
+### 11.4 `<transmission>` ×6 は無変更を優先して残し、ros2_control が無視することを確かめる手順
+
+方針: **オリジナルの `<transmission>` を除かずに残す**。もし問題が出たら、そのときに初めて、生成の置換に「`<transmission>` を除く」を**追加**する（その場合は 11.3 の逆置換の試験も、その差を許す形に直す。**無変更を優先する方針は、問題が無い限り変えない**）。
+
+確認の手順（**モックを使う手順は、ユーザーが「実機を使っていない」と返答するまで実施しない**）:
+
+1. **オフライン（今すぐ可。起動なし）**: ros2_control（Humble 2.54.3）の URDF の読み込みのコードの範囲を確認する。**[事実]** `libhardware_interface.so` に "Missing <plugin> tag of <transmission> element in your URDF." という文字列がある。これは `<ros2_control>` の中の `<transmission>` の検査の文言と **[推測]**。`<ros2_control>` の外の `<transmission>` を読むかは、**ソースで確認できていない**（`apt` のソースは無い。GitHub の ros2_control の humble ブランチの `component_parser.cpp` を読む予定）。
+2. **モック（ユーザーの返答の後）**: 置き換えの**前**に、基準の起動を 1 回行う（`ros2 launch so_arm101_bringup bringup.launch.py mock:=true use_rviz:=false`。自分で起動して **PID を控え**、`kill -INT <PID>` だけで止める。`pkill` 等は使わない。止めた後は `ps` と `ros2 node list` の両方で残りが無いこと、`ros2 node list` だけ残るなら `ros2 daemon stop; ros2 daemon start` の後にもう一度）。ログを `~/so_arm101_check/urdf_before_mock.log` に保存。
+3. 置き換えの**後**に、同じ起動を行い `~/so_arm101_check/urdf_after_mock.log` に保存して、次を確かめる:
+   - `ros2_control_node` のログに、`transmission` を含む警告・エラーが**無い**（`grep -i transmission`）。
+   - `ros2 control list_hardware_components` が、前と同じ（`SO101System`、mock、active）。`ros2 control list_controllers` が前と同じ（`joint_state_broadcaster`・`arm_controller`・`gripper_controller` が active）。
+   - `ros2 topic echo /joint_states --once` が前と同じ関節名・初期値。
+   - `ros2 param get /robot_state_publisher robot_description` に `<transmission>` が 6 つ、メッシュが `package://…` であること。
+   - `move_group` のログの警告が、前と**同じ**（`Link 'elbow_flex' …` の 1 件のみ。増えていない）。
+   - メッシュを読めない旨のエラーが無い（`move_group`・RViz のログ）。
+4. 上の 3 つのいずれかが失敗したら、変更を戻して（`git revert`。または未コミットのまま破棄）報告する。
+
+### 11.5 変更の前後で robot_description を比べる方法と、実機での確認の範囲の案
+
+**robot_description の前後の比較（オフライン。launch は使わない）**:
+- **前（基準）**を、置き換えの**前に**生成して `~/so_arm101_check/urdf_before/` に保存し、sha256 を `docs/inventory.md` に記録する。組み合わせ（launch と同じ引数）: ①`use_fake_hardware:=true`（mock）、②mock で `hardware` 未指定、③`use_fake_hardware:=false hardware:=feetech read_only:=true calibration_file:=<yaml>`、④同 `read_only:=false`（`acceleration`・`torque_limit`・`apply_servo_config`・`probe_lock_sram` の既定のまま）。さらに `apply_servo_config:=true`、`probe_lock_sram:=true` を各 1 通り。計 6 通り（以前の 7 通りのうち description 側の 3 通り（`mode:=real|isaac|gazebo`）は、12 章の削除を承認する場合は対象外。承認しない場合は、同じ 3 通りも前後で比べる）。
+- **後**を同じ引数で生成し、①`diff`（テキスト）、②`tools/urdf_compare.py`（構造比較。許容差 0）で比べる。
+- **期待する差（これ以外が出たら中止して報告）**: (a) `<transmission>` ×6 が増える、(b) `world` のコメントの 2 ブロックが消える、(c) 出所のコメント 1 行が増える、(d) xacro が付ける先頭の生成コメント（xacro のパスの行）。**メッシュのパス・リンク・関節・`<ros2_control>` は同一**。今回の試験（`/tmp` で、`world` のコメントと transmission 以外は同一）で、この形になることを**事前に確認済み [事実]**（2.2 節）。
+- あわせて、`xacro` の出力の `check_urdf` が成功すること、`tools/pose_margin.py` の出力（URDF のリミットの列）が前と同じこと。
+
+**実機での確認の範囲の案（ユーザーが行う。Claude は実機を動かさない。URDF の幾何は同一なので、L1〜L3 と同じ最小限）**:
+- **必須**: 読み取り専用の起動 1 回（`read_only:=true`、RViz あり）。`[diag]` と `/joint_states` が従来どおり／RViz のモデルの形・向きが実機の姿勢と一致（メッシュが全て表示される）／`ros2_control` のログに `transmission` の警告なし。
+- **必須**: 書き込みモードの W0（保持のみ 10 秒）1 回と、その前後の読み値の比較（L1〜L3 と同じ。`write_<段階>_W0.log`・`_W0_after.log`）。
+- **任意（推奨はしない）**: W4（MoveIt の Plan & Execute）。URDF の幾何・リミット・向きが同一で、MoveIt 本体の設定も変えないので、**省略してよい**とする案。行うなら pan を +1°、または elbow を開く向きに小さく、の 1 項目だけ（OMPL を使う。`elbow_flex` の出発点が上限を 0.00009 rad 超える件は従来どおり）。
+- W1〜W3（関節ごとの動作）は、ros2_control の経路と URDF の関節名・向きが変わらないので**不要**。
+
+### 11.6 SRDF `:45` は行ごと削除する（URDF とは別のコミット）
+
+- 対象: `so101_new_calib.srdf:45` の `<disable_collisions link1="gripper_link" link2="elbow_flex" reason="Never"/>` の**1 行**。
+- 削除でよい理由 **[事実]**: `elbow_flex` はリンクではなく関節名で、`move_group` が起動のたびに警告して、この行は**無視される**（行の効果は元から無い）。`gripper_link` との組は、すでに `:40`（`gripper_link × lower_arm_link`）と `:44`（`gripper_link × upper_arm_link`）がある。`elbow_flex` が指す意図だったリンク（`upper_arm_link` か `lower_arm_link`）の行が既にあるので、情報は失われない。
+- 変更の性質: MoveIt の設定（SRDF）の変更なので**承認制**。**URDF の置き換えとは別のコミット**にする（順序は、URDF の置き換えのコミットの**後**。URDF の前後比較に SRDF の変更が混ざらないようにするため）。
+- 確認: モックの `move_group` のログから `Link 'elbow_flex' is not known to URDF` が**消え**、他の警告が増えていないこと。`disable_collisions` が 15 行になること（`grep -c`）。XML として読めること（`python3 -c` の `ET.parse`）。計画（Plan）は、モックで RViz から 1 回（任意）。実機の確認は、次の実機確認（11.5）に**まとめてよい**（警告が消えるだけで、衝突判定は変わらない）。
+
+---
+
+## 12. description の未使用ファイルの削除の候補と理由（**削除はしない**。承認制。`git rm`、戻し方は `docs/inventory.md` に記録）
+
+10.2 の結果（読む launch・試験・tools・CMake が無い）に基づく。**別のコミット**にする（URDF の置き換え・SRDF とは分ける）。
+
+| # | 候補 | 理由 [事実] | 削除した場合の影響・注意 |
+|---|---|---|---|
+| 1 | `urdf/so101_new_calib.urdf`（今の nimiCurtis 版） | A 案で、生成物に**置き換わる**（候補ではなく、置き換えの一部） | 11.1 のとおり。戻し方を記録 |
+| 2 | `urdf/so101_new_calib.urdf.xacro`（description 側） | どの launch も読まない（moveit_config の xacro が別にある）。`mode`・`joint_states_gui` の引数は誰も使わない | 無し。**残すと、A 案で `<transmission>` を持つ URDF を include して、`with_transmission.xacro` と二重になる**ので、紛らわしい |
+| 3 | `urdf/so101_new_calib.ros2_control.xacro`（description 側） | moveit_config 側に同名の自前版がある。description 側は `isaac`・`gazebo`・`topic_based` 用で、動く経路は `mode:=real`（L1 で `<ros2_control>` を出さなくした） | Isaac・Gazebo を将来使うなら、タグ `stage2c-done` か削除直前のコミットから取り出す |
+| 4 | `urdf/so101_new_calib_with_transmission.xacro` | description の xacro からしか include されない。A 案の URDF が `<transmission>` を持つので、**役目が重なる** | 無し |
+| 5 | `config/initial_positions.yaml`、`config/joint_limits.yaml`、`config/joint_names_so_arm_urdf.yaml` | 参照は #2 の xacro の既定値（`initial_positions.yaml`）だけ。moveit_config 側に同名で別の値のものがあり、そちらが使われる（description 側は lift −1.75 など、値も違う） | #2 を消すなら不要。値が違うので、**間違って読まれる危険**もある |
+| 6 | `joints_properties.xml` | オリジナル（`Simulation/SO101/joints_properties.xml`）と同一（末尾の改行以外）。MuJoCo 用で、ROS 側から読まない | 無し |
+| 7 | `usd/`（5 ファイル、約 23 MB） | Isaac Sim 用。参照が無い。`CMakeLists.txt` の `install` にも含まれない（`meshes config launch rviz` のみ）。TheRobotStudio のオリジナルに無い（由来は nimiCurtis と推測。未確認） | **将来 Isaac Sim を使う予定があるか、ユーザーの判断**。削除ならタグ・コミットから戻せる。リポジトリが約 23 MB 軽くなる（履歴には残る） |
+| 8 | `.flake8` | description に Python が無いので不要 **[推測]**（lint の設定が他から参照されるか未確認） | 影響は小さい。判断は任意 |
+| 9 | `package.xml` の `<depend>urdf</depend>`、`CMakeLists.txt` の `find_package(urdf)`、`install(DIRECTORY urdf/ …)`（`urdf/` が空になる場合） | 削除ではなく**編集**（package.xml・CMake の変更で承認制）。A 案の CMake の変更と同じコミットで整理する案 | `find_package(urdf)` は使っていない **[推測]** |
+
+- 残す: `meshes/*.stl`（13 個。`SHA256SUMS` で保護）、`package.xml`、`CMakeLists.txt`、（A 案の）`third_party/SO-ARM100/`。
+- `git rm` したものは `docs/inventory.md` に「削除の直前のコミット `<hash>` から取り出せる」と書く。git 管理外のものは**無い**（`git ls-files` で確認。`usd/` の 5 ファイルも**追跡されている**（`git check-ignore` で無視対象でもない）ので、`git rm` でき、削除直前のコミットから戻せる）。
+
+---
+
+## 13. `LICENSE.so101_ros2` と `package.xml` の `<license>` の扱いの案
+
+**事実の整理**（5 章・7 章）: URDF・メッシュ = TheRobotStudio（Apache-2.0）。`controllers.yaml`・launch・package.xml の author・description のその他のファイル = nimiCurtis（MIT）。`<license>` は description・moveit_config が `BSD`、bringup・controller が `MIT`。
+
+| 項目 | 案 | 理由 |
+|---|---|---|
+| `LICENSE.so101_ros2`（MIT、nimiCurtis） | **残す**（A 案の実施の後も）。削除の判断は、nimiCurtis 由来のファイルが無くなった後（例: `controllers.yaml` の値を自前で書き直し、package.xml の author を整理した後）。grep（`nimiCurtis`・`Copyright`・`MIT License`・`Nimrod`）で**帰属表示が必要なものが残らない**ことを確かめてから、別の 1 手で削除 | URDF とメッシュを TheRobotStudio の無変更のものに付け替えても、`controllers.yaml` などが nimiCurtis 由来のまま。MIT は著作権表示と許諾文を**コピーに残すこと**が条件 |
+| `third_party/SO-ARM100/LICENSE`（Apache-2.0） | **新規に置く**（11.1）。`docs/third_party.md` に表を追加（出典・ライセンス・場所・無変更の宣言・生成物は「パスの置換のみ」） | Apache-2.0 §4(a): ライセンスのコピーを渡す。§4(b): 変更したファイルに変更の明記（生成物のコメント）。§4(c): 元の表示を残す（URDF 内の Onshape・onshape-to-robot のコメントも無変更で残る）。§4(d): NOTICE は無い |
+| `so_arm101_description/package.xml` の `<license>BSD</license>` | `Apache-2.0` を含める案: `<license>Apache-2.0</license>`（URDF・メッシュ）に加えて、nimiCurtis 由来のファイルが残る間は `<license>MIT</license>` も並記（package.xml は `<license>` を複数書ける）。実際にそのパッケージに入るファイルのライセンスの正確な洗い出しは、実施時に行う | 今の `BSD` は**事実と合っていない**（どのファイルも BSD の表示を持たない。`so101_ros2` の package.xml がそう書いていたのを引き継いだ **[推測]**） |
+| `so_arm101_moveit_config/package.xml` の `<license>BSD</license>` | 同様に整理（MoveIt Setup Assistant の生成物は、ひな形の `BSD`。自前の変更部分のライセンスはユーザーの判断） | ユーザーの判断が要る（自分のコードのライセンスを何にするか） |
+| `so_arm101_bringup`・`so_arm101_controller` の `<license>MIT</license>` と `<author>Nimrod</author>` | author は、nimiCurtis 由来のファイルが残る間は**残す**。ライセンスは MIT のままでよい **[推測]** | 帰属の記載を勝手に消さない |
+| ユーザー自身のコードのライセンス（`so_arm101_hardware`・`so_arm101_calibration`・`so_arm101_bringup` の新規部分） | **ユーザーの判断**（リポジトリのルートに LICENSE が無い **[事実]**）。決まったら、ルートに LICENSE を置く | 法的助言ではない。公開する前に決める |
+
+- package.xml・LICENSE の変更は、URDF の置き換え・SRDF・削除とは**別のコミット**にする（承認制）。
+
+---
+
+## 14. 実施の段階（案）と、ユーザーに決めてほしいこと
+
+| 段階 | 内容 | 変更するもの | 確認 |
+|---|---|---|---|
+| S0 | 計画の承認。ユーザーの「実機を使っていない」の返答（モックの前） | — | — |
+| S1 | 基準（前）の取得: robot_description 6 通りの保存、`colcon test` の件数、（モックの基準ログ） | `~/so_arm101_check/` と `docs/inventory.md` のみ | 保存物の sha256 の記録 |
+| S2 | オリジナルの取り込み（`third_party/SO-ARM100/`: URDF・LICENSE・SOURCE.md・SHA256SUMS）と、sha256 の試験。**URDF の経路は変えない** | description に新規ファイルと試験（CMake）、`docs/third_party.md` | `colcon build`・`colcon test`（試験の件数の前後）。コミット |
+| S3 | 生成（CMake の置換）への切り替えと、今の `urdf/so101_new_calib.urdf` の `git rm` | description の CMake、`urdf/so101_new_calib.urdf`（削除） | 11.5 の前後比較（期待する差だけ）、`check_urdf`、`pose_margin.py`、`colcon build`・`test`。モック（11.4）。コミット |
+| S4 | SRDF `:45` の削除 | SRDF（1 行） | 11.6。コミット |
+| S5 | description の未使用ファイルの削除（12 章で承認されたもの） | `git rm` | 前後比較（変わらない）、`colcon build`・`test`。コミット |
+| S6 | LICENSE・package.xml の整理（13 章） | package.xml・docs・LICENSE | `colcon build`。コミット |
+| S7 | 実機の確認（ユーザー。11.5） | — | 結果を `docs/inventory.md` に記録 |
+
+**ユーザーに決めてほしいこと**:
+1. 11 章の計画（置き場所 `third_party/SO-ARM100/`、`meshes/` は動かさない、CMake の置換と 34 か所の検査、出所のコメントの挿入）でよいか。
+2. 12 章のうち、削除する候補の範囲（特に #7 の `usd/`（約 23 MB）と #8 の `.flake8`）。
+3. 13 章の `<license>` の案（特にユーザー自身のコードのライセンス）。
+4. 「実機を使っていない」の返答のタイミング（S1 のモックの基準ログの前）。
+5. 11.4 の 1（ros2_control のソースの確認）を、先に Claude が行ってよいか（GitHub のソースを読むだけ。リポジトリは変えない）。
