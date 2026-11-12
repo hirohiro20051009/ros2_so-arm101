@@ -139,7 +139,7 @@ CLAUDE.md の規則どおり、**承認を得てから実行**し、`docs/invent
 
 | # | ファイル:行 | 前 | 後 |
 |---|---|---|---|
-| c1 | `src/so_arm101_bringup/launch/bringup.launch.py:98` | `get_package_share_directory("so_arm101_controller"), "config", "controllers.yaml"` | `get_package_share_directory("so_arm101_bringup"), "config", "controllers.yaml"`。**行数は変わらない**ので、bringup の lint の失敗（名前に行番号が入る `E501 …:115,136,193,194` など）の名前も変わらない。98 行は今 86 桁で、`so_arm101_controller` → `so_arm101_bringup` で 3 桁短くなる（E501 は増えない。実装で確認） |
+| c1 | `src/so_arm101_bringup/launch/bringup.launch.py:98` | `get_package_share_directory("so_arm101_controller"), "config", "controllers.yaml"` | `get_package_share_directory("so_arm101_bringup"), "config", "controllers.yaml"`。**行数は変わらない**ので、bringup の lint の失敗（名前に行番号が入る `E501 …:115,136,193,194` など）の名前も変わらない。98 行は今 89 桁で、`so_arm101_controller` → `so_arm101_bringup` で 3 桁短くなる（86 桁）（E501 は増えない。実装で確認） |
 | c2 | `THIRD_PARTY_NOTICES.md:21` | `src/so_arm101_controller/config/controllers.yaml` (values from upstream `so101_controllers.yaml`), `src/so_arm101_controller/package.xml`, `CMakeLists.txt` | `src/so_arm101_bringup/config/controllers.yaml` (values from upstream `so101_controllers.yaml`; moved from the removed `so_arm101_controller` with `git mv`)。controller の `package.xml`・`CMakeLists.txt` は外す |
 | c3 | `THIRD_PARTY_NOTICES.md`（`<author>Nimrod</author>` の文） | `… of bringup, controller, description and hardware …` | `… of bringup, description and hardware …` |
 | c4 | `docs/inventory.md`（末尾に追記） | — | 「E の実施」: 実装のコミット、削除の直前のコミット、旧→新のパス、6 章の控え、7 章の前後の表、モック・実機の確認の結果 |
