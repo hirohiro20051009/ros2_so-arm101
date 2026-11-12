@@ -1882,3 +1882,9 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 
 ## 計画: launch の `hardware` 引数の削除（2026-11-12。計画のみ。実装はしていない）
 - `docs/hardware_arg_removal_plan.md`。要点: **[事実]** `ros2 launch` は宣言していない引数を無言で受け付ける（`launch` 1.0.15 `include_launch_description.py:48-52,179-184`）。引数を単に消すと、古い `hardware:=lerobot` がエラー無しで feetech として起動する（`read_only:=false` 付きなら書き込みモード）。推奨は **案 B**（宣言と mappings は削除し、`launch_configurations` を見る検査は残す: 無し→何もしない、`feetech`→警告つきで続行、それ以外→今と同じエラー）。手順書の起動コマンドの `hardware:=feetech` は削除、`feetech_write_check.md` 6 行目の古い LeRobot の記述は修正案を示した、過去の記録は書き換えず読み替えを追記する。
+
+## 計画の更新: `hardware` 引数の削除は D 案（2026-11-12。計画のみ。実装はしていない）
+- ユーザーの指示で、採用案を **D 案**（`hardware` の宣言・mappings・xacro の `hardware` を削除し、`bringup.launch.py` に「宣言していない引数は起動前にエラー」の検査を入れる。`hardware` に限らない）にした。詳細は `docs/hardware_arg_removal_plan.md` の 7〜9 章。
+- **[事実]** 検査の対象は `context.argv`（利用者が打った引数）だけにして、`launch_configurations`（内部の設定）は見ない。「宣言された引数」は `ld.get_launch_arguments()` で得る（include した launch の引数を含む 22 個。`hardware` を消すと 21 個。`monitor_dynamics`・`rviz_config` などは通り抜けて効くので許す）。直接起動する launch は `bringup.launch.py` だけ（docs と bash 履歴で確認）。
+- **[事実]** `so_arm101_bringup` の lint の 16 件・失敗 12 は、すべて `bringup.launch.py` 1 ファイルの違反（copyright 1、flake8 の E501 ×4、pep257 の D400・D415 ×2 か所）。違反 1 つ = 1 件なので、ファイルを直すと件数が動く（`_require_feetech` の削除で pep257 が −2 の予想）。
+- D 案では `hardware:=feetech` も起動前にエラーになる。手順書の 11 コマンドの更新は、実装と別のコミット（実装の直後）。

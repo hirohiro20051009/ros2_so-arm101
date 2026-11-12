@@ -1,5 +1,7 @@
 # launch の `hardware` 引数の削除の計画（2026-11-12。**計画のみ。コード・xacro・launch・手順書は変更していない**。実機・ポートには触れていない）
 
+> **更新（2026-11-12、ユーザーの指示）: 採用案は 7 章の D 案**（`hardware` の宣言・mappings・xacro の `hardware` を削除し、`bringup.launch.py` に「宣言していない引数は起動前にエラー」の検査を入れる。`hardware` に限らない）。1〜6 章は、A・B・C 案を比べたときの検討記録（事実の確認は有効。案 B の推奨は D 案に置き換わった）。
+
 表記: **[事実]** = ソース・ファイル・ログ・コマンドで確認したこと。**[推測]** = 確認していないこと。
 
 ## 1. 現状 [事実]
@@ -82,3 +84,106 @@
 2. B の警告の出し方（`LogInfo` の 1 行か、`warnings`）と、移行期間（いつ検査を消すか。例: 次の大きな変更で、または半年後）。
 3. 手順書の更新は、実装と別のコミットでよいか（推奨）。
 4. 実機の確認は読み取り専用の起動 1 回でよいか。
+
+
+---
+
+## 7. D 案（採用案。2026-11-12 のユーザーの指示）
+
+### 7.1 内容
+1. `bringup.launch.py` の `hardware` の宣言と mappings、`so101_new_calib.urdf.xacro` と `so101_new_calib.ros2_control.xacro` の `hardware`（引数・マクロ引数・`xacro.fatal`・`xacro:if hardware == 'feetech'`）を削除（3.1 の 2 と同じ。`use_fake_hardware` は残す）。`_require_feetech` は削除。
+2. `bringup.launch.py` に**「宣言していない引数が渡されたら、起動前にエラーで止める」検査**を入れる（`hardware` に限らない）。宣言・検査・ノードの順を保つ（検査はすべての宣言の後、最初のノードの前）。
+3. エラーの文面（案。日本語と英語を 1 行ずつ）:
+   - 「未宣言の引数: `foo`（もしかして: `food_x`?）。宣言されている引数: `mock`, `serial_port`, …（名前順の全一覧）」
+   - 打ち間違いの候補は `difflib.get_close_matches`（既定のしきい値 0.6）で最大 2 つ。
+   - `hardware` が含まれるときは追加で: 「`hardware` 引数は削除しました（LeRobot 経路の削除に伴う。タグ `stage2c-done`）。外して実行してください」。`hardware:=feetech` も同じ（値によらず）。
+   - 例外は `RuntimeError`（今の `_require_feetech` と同じ。`ros2 launch` が `Caught exception in launch` で終了コード 1 にする。ノードは起動しない）。
+
+### 7.2 「未宣言」を誤って判定しない（設計とその根拠。**[事実]** はソースの確認）
+- **判定の対象は `context.argv`（利用者が打った引数）だけ**。`context.launch_configurations`（内部の設定が入る）は**見ない**。
+  - **[事実]** `ros2launch/api/api.py:159-168`: `LaunchService(argv=launch_file_arguments)`。`launch_file_arguments` は、利用者が打った `name:=value` と、`--launch-prefix`・`--launch-prefix-filter` を指定したときの `launch-prefix:=…`・`launch-prefix-filter:=…`（`api.py:154-160`）だけ。
+  - **[事実]** `launch/launch_service.py:77` と `launch_context.py:76-78`: `context.argv` はその `argv` をそのまま返す。
+  - **[事実]** include した launch ファイルが足す設定（`IncludeLaunchDescription` の `SetLaunchConfiguration`、`DeclareLaunchArgument` の既定、`OpaqueFunction` の中で足される値）は **`launch_configurations` に入るだけで `argv` には入らない**（`include_launch_description.py:179-184`、`declare_launch_argument.py:205-214`）。したがって、これらを未宣言と誤判定しない。
+  - 判定は `name:=value` の形の要素だけ（`:=` を含まないものは無視。`ros2 launch` が先に形式エラーにする: `api.py:127-138`）。
+- **「宣言されている引数」は、そのファイルが宣言したものに、include した launch ファイルが宣言したもの（通り抜ける引数）を足したもの**:
+  - **[事実]** 宣言が `launch_configurations` に既にある名前は、`DeclareLaunchArgument` が既定で上書きしない（`declare_launch_argument.py:205`）。つまり、`bringup.launch.py` に渡した `monitor_dynamics:=false` や `rviz_config:=…` は、include した `move_group.launch.py`・`moveit_rviz.launch.py` に**通り抜けて効く**（今も使える。**これを未宣言と誤判定すると、動いている使い方を壊す**）。
+  - **[事実]** `LaunchDescription.get_launch_arguments()` は、include を辿った宣言を返す。実際に今の `bringup.launch.py` で実行したところ **22 個**（自分の宣言 `mock`・`hardware`・`serial_port`・`calibration_file`・`read_only`・`acceleration`・`torque_limit`・`apply_servo_config`・`probe_lock_sram`・`use_rviz`・`db` の 11 個と、include した launch の `debug`・`allow_trajectory_execution`・`publish_monitored_planning_scene`・`monitor_dynamics`・`capabilities`・`disable_capabilities`・`rviz_config`・`moveit_warehouse_database_path`・`reset`・`moveit_warehouse_port`・`moveit_warehouse_host` の 11 個）。`hardware` を消すと 21 個。条件付きで include される `moveit_rviz`・`warehouse_db` の引数も入っている。
+  - 実装: 名前の一覧は、`generate_launch_description()` の最後（すべての宣言と include を足した後）に `ld.get_launch_arguments()` から作り、検査の関数（`OpaqueFunction(args=[…])`）に渡す。**手で書いた一覧は持たない**（include 先の引数が増減しても自動で追従する）。
+  - 常に許す名前: `launch-prefix`、`launch-prefix-filter`（`ros2 launch` の option が足す。`api.py:154-160`）。
+- **限界（[推測]・明記）**: ほかの launch ファイルが `bringup.launch.py` を `IncludeLaunchDescription(launch_arguments=…)` で include する場合、その引数は `argv` に入らないので、検査の対象外（誤判定はしない。検査が効かないだけ）。今のリポジトリに、そういう launch は無い（grep で確認）。
+
+### 7.3 誤判定しないことの確認（ソースと実行）
+1. **ソース**（上の 7.2。実装の後に、実際の行を `inventory.md` に記録）。
+2. **単体試験（`pytest`。ノードは起動しない）**:
+   - `bringup.launch.py` を `importlib` で読み込み、`generate_launch_description()` を呼ぶ（ノードは起動しない）。宣言の名前の集合 `D` を `ld.get_launch_arguments()` から得る。
+   - **`D` の全要素**について、`LaunchContext(argv=[f"{name}:=x"])` で検査を呼び、**エラーにならない**こと（`D` が 21 個であること、`hardware` が含まれないこと、`monitor_dynamics`・`rviz_config` が含まれることも確認）。`launch-prefix:=x`・`launch-prefix-filter:=x` も通る。`argv=[]` も通る。
+   - 未宣言 1 つ（`foo:=bar`）→ `RuntimeError`。文面に `foo`、宣言の一覧（`mock` を含む）がある。
+   - `hardware:=feetech`・`hardware:=lerobot` → `RuntimeError`。文面に「`hardware` 引数は削除しました」「`stage2c-done`」がある。
+   - 打ち間違い: `read_olny:=false` → 文面に `read_only`、`use_rvis:=false` → `use_rviz`。`Mock:=true`（大文字。名前は区別される）→ エラーで、候補に `mock`。
+   - **内部の設定の誤判定がないこと**: 最小の `LaunchDescription`（`SetLaunchConfiguration("internal_x", "1")`、`DeclareLaunchArgument("inner_arg", default_value="v")` を持つ入れ子の `IncludeLaunchDescription`、`OpaqueFunction` が `context.launch_configurations["added_by_opaque"]` を足す、そのあとに検査）を `LaunchService(argv=[])` で実行して、**終了コード 0**。同じ記述を `argv=["foo:=bar"]` で実行して終了コード 1。ノードは起動しない。
+3. **実行（`ros2 launch`。起動前に止まるものはノードが起動しない）**: 7.5 の表。
+4. **`ros2 launch so_arm101_bringup bringup.launch.py --show-args`** の出力に `hardware` が無く、21 個あること（検査は走らない）。
+
+### 7.4 対象の launch は `bringup.launch.py` だけでよいか
+- **[事実]** 利用者が直接起動するのは `so_arm101_bringup/launch/bringup.launch.py` だけ。docs の `ros2 launch` のコマンド 18 件（`so_arm101_bringup bringup.launch.py` のみ。そのほかの 6+6+4+2+1 件は、削除済みの旧パッケージ（`so101_*`・`apriltag_test`）と `realsense2_camera`）。ユーザーの bash 履歴の最近の 8 件のうち `ros2 launch` は `so_arm101_bringup bringup.launch.py`（56 件）。
+- `so_arm101_moveit_config/launch/*.launch.py`（8 個）は、`bringup.launch.py` が include するもの（`static_virtual_joint_tfs`・`spawn_controllers`・`move_group`・`moveit_rviz`・`warehouse_db`）か、手順書に出てこないもの（`rsp`・`servo`・`setup_assistant`）で、**`hardware` を使わない**。直接は起動しない。`so_arm101_description/launch/`・`so_arm101_controller/launch/` は空。
+- **結論**: 検査は `bringup.launch.py` だけでよい。moveit_config の launch に直接 `hardware:=…` を付けた場合は無言で無視される（実際には起きていない。起きても `hardware` は元から無効だった）。
+- **注意（影響）**: D 案では `hardware:=feetech` もエラーになる（値によらず）。手順書・履歴・コピーしたコマンドの `hardware:=feetech` は、**手順書の更新（7.6）をするまで動かない**。エラーの文面が「外して実行してください」と教える。手順書の更新は、実装のコミットの直後に行う（8 章）。
+
+### 7.5 実装後の launch の挙動の確認（起動前に止まるか・起動するか。ノードの起動は 3 件だけ）
+SIGINT を既定に戻すラッパー（`inventory.md` の `kill -TERM` の件の修正。`SigIgn` の確認つき）で起動し、PID を控え、`kill -INT` だけで止める。止めた後は `ps` と `ros2 node list --no-daemon`（daemon には触らない）。ログは `~/so_arm101_check/hwarg_*.log`。
+
+| # | 引数 | 期待 | ノード |
+|---|---|---|---|
+| 1 | `mock:=true use_rviz:=false`（引数は宣言済みのみ。RViz を開かないために `use_rviz:=false`。引数なしそのままは RViz が開くだけの違い） | 検査を通って起動。コントローラ 3 つ active | **起動する**（`kill -INT`） |
+| 2 | 通り抜ける引数: `mock:=true use_rviz:=false monitor_dynamics:=false` | **誤判定しない**（検査を通って起動） | **起動する**（`kill -INT`） |
+| 3 | 未宣言 1 つ: `mock:=true use_rviz:=false foo:=bar` | 起動前に `RuntimeError`、終了コード 1。文面に `foo` と宣言の一覧 | 起動しない |
+| 4 | `mock:=true use_rviz:=false hardware:=feetech` | 起動前にエラー。「`hardware` 引数は削除しました…外して実行してください」 | 起動しない |
+| 5 | `mock:=true use_rviz:=false hardware:=lerobot` | 同上（今と同じく止まる。文面は新しいもの） | 起動しない |
+| 6 | 打ち間違い: `mock:=true use_rviz:=false read_olny:=false` | エラー。「もしかして: `read_only`」 | 起動しない |
+| 7 | 打ち間違い: `mock:=true use_rvis:=false` | エラー。「もしかして: `use_rviz`」（**RViz の既定が true のままにならない**ことの確認でもある） | 起動しない |
+| 8 | 宣言済みの引数の値の誤り: `mock:=true use_rviz:=false read_only:=flase` | 今の挙動（`choices` のエラー）のまま。検査の対象外（宣言済み） | 起動しない |
+| 9 | `--show-args` | `hardware` が一覧に無い | 起動しない |
+
+- 3〜9 は、各ログに `process started` が**無い**こと、`ps` に ROS のプロセスが**無い**ことを確認する（起動前に止まったことの証拠）。
+- `mock:=false`（実機のポートを開く）の試験は**しない**（実機の確認はユーザー）。
+
+### 7.6 手順書の更新は実装と別のコミット（ユーザーの指示）
+- 4 章の扱いのとおり（A: 実行コマンドの `hardware:=feetech` を削除、B: 説明文の言い換え、C: `feetech_write_check.md` 6 行目の修正、D: 「歴史的」な手順は変更しない、E: 過去の記録は書き換えず、`inventory.md` に読み替えを追記）。**11 コマンド**: `feetech_write_check.md`（:40・59・121・137・145・160・195・237）、`feetech_servo_config_check.md`（:36・49）、`feetech_readonly_check.md`（:81）。
+- 読み替え（E の追記）: 「過去の記録の `hardware:=feetech` は、削除した（D 案）。今は**付けるとエラー**になる（`hardware` 引数は削除した）。`hardware:=lerobot` も同様」。
+- 6 行目の修正案は 4 章 C のとおり（ただし D 案なので「付けた古いコマンドは警告つきで動く」ではなく「**付けると起動前にエラーで止まる（外して実行する）**」に直す）。
+
+### 7.7 試験・lint の件数（`so_arm101_bringup`。実装のコミットの前に `colcon test` を実行して前後を比べる）
+- **[事実] 今の状態（16 件・失敗 12）の内訳**（xunit の中身を読んだ）: `copyright` 1 件（`launch/bringup.launch.py`: copyright の表示なし）、`flake8` 4 件（`bringup.launch.py` の E501（99 文字超）が 100・121・181・182 行）、`pep257` 4 件（`bringup.launch.py` の D400・D415 が 2 か所ずつ: 1 行目のモジュールの docstring と、34 行目の `_require_feetech` の docstring。どちらも 1 行目が「。」で終わる）、`lint_cmake` 1 件・`xmllint` 1 件（成功）、CTest のまとめ 5 件（`copyright`・`flake8`・`pep257` の 3 つが失敗）。失敗 12 = 1 + 4 + 4 + 3。**失敗は `bringup.launch.py` 1 ファイルの既存の lint 違反**（違反 1 つ = 1 件）。
+- **したがって `bringup.launch.py` を直すと、件数が動く**（違反の数がそのまま件数になるため）。予想:
+  - `_require_feetech`（docstring が D400・D415）を削除 → **pep257 の失敗が 4 → 2**（−2 件）。新しい検査の関数の docstring は、1 行目を `.` で終える（違反を足さない）。
+  - 新しい行は 99 文字以内（E501 を足さない）。既存の E501 の 4 行（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include）は、**直さない**（今回の範囲外。行番号は動く）。
+  - モジュールの docstring（1 行目が「。」で終わる）は、文言を直しても D400・D415 の 2 件は残る（今回は直さない）。
+  - 予想: lint のみで **16 件・失敗 12 → 14 件・失敗 10**（pep257 −2 件。増えるのは、後述の試験の分だけ）。
+- **試験の追加**（承認が要る: `package.xml` の `<test_depend>ament_cmake_pytest</test_depend>`、`CMakeLists.txt` の `find_package(ament_cmake_pytest)` と `ament_add_pytest_test`、新規 `test/test_launch_arg_check.py`）: 7.3 の 2 の試験。件数は、`pytest` の関数の数（約 10。実装で確定）と、CTest のまとめ 1 件、新しいファイルの `copyright` の 1 件（MIT のヘッダを付けて成功させる。ユーザーの「自分のコードは MIT」の判断と同じ）が増える。**新しいファイルは flake8・pep257 にも通す**（違反を足さない）。
+- **報告の形**: 前（16・12）→ 後を、種別ごと（`copyright`・`flake8`・`pep257`・`pytest`・CTest）の表にし、増減の理由（pep257 の −2 は削除した関数の docstring、+N は新しい試験）を書く。失敗が **増えた**場合は、コミットの前に報告する。
+- ほかのパッケージ（`so_arm101_description`・`so_arm101_moveit_config`・`so_arm101_hardware`・`so_arm101_calibration`・`so_arm101_controller`）の `colcon test` も全体で実行し、件数の前後（今: 全体 196 件・失敗 12。description 2、moveit_config 0、controller 0、hardware 105、calibration 73）を報告する（moveit_config の xacro を変えるため、moveit_config と bringup は特に）。
+
+### 7.8 robot_description の前後の確認
+- `~/so_arm101_check/gen_rd6.sh` の 6 通りで、**現在の保存物 `~/so_arm101_check/urdf_after/` と sha256 が一致**すること（引数 `hardware` を消しても出力は変わらないはず）。確認は 2 通り: `hardware:=feetech` を**付けて**（xacro は宣言していない引数を無言で無視するため、結果が変わらないこと）と、**付けずに**。
+- `gen_rd6.sh`（git 管理外）は、実装の後に、`hardware:=feetech` を外した版に直す。**直す前の全文を `docs/inventory.md` に控える**（CLAUDE.md の規則: git 管理外の書き換えの前に元の内容を控える）。
+- `tools/pose_margin.py` の出力（URDF のリミット）が前と同じこと。
+
+### 7.9 実機の確認（ユーザー）
+- 読み取り専用の起動 1 回（`mock:=false`、`hardware` なし。`[diag]` 6/6・コントローラ 3 つ active・カウンタ 0）。`robot_description` が同一なので、W0 以降は不要。
+
+## 8. 段階（D 案）
+
+| 段階 | 内容 | 確認 |
+|---|---|---|
+| D1 | 計画の承認 | — |
+| D2 | 基準の取得: `colcon test` の件数（特に bringup の種別ごとの内訳）、`gen_rd6.sh` の全文を `inventory.md` に控える | — |
+| D3 | 実装: launch・xacro・試験（`package.xml`・`CMakeLists.txt` の変更を含む）。7.3 の単体試験、7.5 の launch の挙動、7.8 の sha256。**コミット 1** | `colcon build`・`colcon test`（7.7 の表）、6 通りの sha256 一致、launch の挙動 9 通り |
+| D4 | 手順書の更新（7.6）と `inventory.md` の読み替えの追記。**コミット 2**（docs のみ。D3 の直後） | 変更した行の一覧 |
+| D5 | 実機の確認（ユーザー。読み取り専用の起動 1 回） | 結果を `inventory.md` に記録 |
+
+## 9. ユーザーに決めてほしいこと（D 案）
+1. `package.xml`・`CMakeLists.txt`（bringup）に `ament_cmake_pytest` と試験を足してよいか（承認制。足さない場合、7.3 の 2 の単体試験は無し、確認は 7.5 の実行だけ）。
+2. 既存の lint 違反（E501 ×4、D400・D415 ×2 の 1 か所、copyright）は今回は直さない（pep257 の 2 件は削除する関数の分だけ減る）でよいか。
+3. エラーの文面（日本語と英語の併記か、日本語のみか）。
+4. 7.5 の launch の挙動の確認で、ノードを起動する 2 件（#1・#2）と `--show-args` をしてよいか（ユーザーが実機を使っていないときに実施。起動の前に確認を求める）。
