@@ -1,5 +1,7 @@
 # bringup.launch.py の既存の lint 違反 10 件を直す計画
 
+> **注記**: 4〜9 章は決定前の記述（`hirok`、51 件、AST が変わらない など）を含む。決定と結果は 11 章を正とする。
+
 作成: 2026-11-12 / **調査と計画のみ（実装しない。承認待ち）** / 基準: HEAD `6f245da`（この計画のコミットの前）
 
 - 調査の方法: `colcon test --packages-select so_arm101_bringup` の実行（lint とオフラインの pytest だけ。ノードもシリアルポートも使わない）、`git log --follow`、`git show`、上流（nimiCurtis/so101_ros2）の取得（読み取り）、行の比較。リポジトリのファイルは、この文書以外は変えていない。
