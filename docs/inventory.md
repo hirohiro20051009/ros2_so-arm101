@@ -1948,9 +1948,34 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **結果**: 起動前の検査で止まらずに起動、`initialized: port=/dev/ttyACM0`、EEPROM vs yaml 6/6、servo settings vs reference 6/6、SRAM `torque_enable=0 lock=1 acceleration=50`、コントローラ 3 つ activated、`reads=990 retried=0 failed_cycles=0`、bus のカウンタすべて 0、`not known to URDF` 0 件、exit=0、停止後の `ps` は空。
 - 意味: 検査（`_check_launch_arguments`）は、宣言済みの引数だけの実機の起動（`mock:=false`）を誤って止めない。robot_description が同一（6 通りの sha256 一致）なので、ドライバ・ros2_control の起動に変化は無い。W0 以降は不要（計画どおり）。
 
-## 残課題（2026-11-12。**記録のみ。調査も変更もしていない**）
-1. **`~/.local` の anyio の pytest プラグインが、システムの pytest 6.2.5 と非互換**（`python3 -m pytest` が `ModuleNotFoundError: No module named '_pytest.scope'` で失敗する。`~/.local/lib/python3.10/site-packages/anyio/pytest_plugin.py`）。ユーザー環境の `pip --user` のパッケージの整理は、**後でユーザーが判断する**。bringup の CMake には `PYTEST_DISABLE_PLUGIN_AUTOLOAD` を足して回避している（コミット `35ebba4`。ユーザーが事後承認）。他のパッケージで `ament_add_pytest_test` を足すときも、同じ回避が要る（または環境の整理）。
-2. **過去の `apriltag_test` の pytest の収集エラー**（`inventory.md` 1141 行ほか）が、同じ原因の可能性（**未確認**）。`apriltag_test` は削除済みのため、確認は難しい（タグ `stage2c-done` から取り出せば確認できる）。
+## 残課題（2026-11-12。1・2 は調査済み。3 は記録のみ）
+1. **`~/.local` の anyio の pytest プラグインと、システムの pytest 6.2.5 の非互換 — 調査済み・案 0（何もしない）で対策しない**（2026-11-12 に調査。**環境は変えていない**。実行したのは読み取りと、一時ディレクトリの空の試験の `python3 -m pytest` だけ）。
+   - **原因（事実）**: `~/.local/lib/python3.10/site-packages/anyio`（4.13.0）の `pytest_plugin.py` の 15 行目が `from _pytest.scope import Scope` をする。システムの pytest 6.2.5（apt の python3-pytest 6.2.5-1ubuntu2、`/usr/lib/python3/dist-packages`）にはこのモジュールがなく、pytest11 の entry point の自動ロードで `ModuleNotFoundError: No module named '_pytest.scope'` になる。`~/.local` に pytest はない。システム側に anyio はない（apt の python3-anyio は未インストール）。
+   - **pytest11 の entry point（事実）**: `~/.local` 由来は anyio 4.13.0（`anyio.pytest_plugin`）のみ。システム由来は pytest-cov 3.0.0（`pytest_cov.plugin`）と colcon-core 0.21.3（`colcon_core.pytest.hooks`）。
+   - **anyio の依存元**: 事実として、Required-by は httpx（0.27.0）と starlette（1.0.0）。httpx は gradio・gradio_client、starlette は fastapi（→ gradio）が要求し、最上位は gradio 3.41.2。**[推測]** gradio を入れたときに anyio が入った（pip の履歴は見ていない）。
+   - **再現（空の試験 `test_a.py`（`assert 1`）を一時ディレクトリに置いて実行。ポートは開いていない。bringup の CMake の設定がなくても pytest 単体で再現する）**:
+
+     | 条件 | 結果 |
+     |---|---|
+     | A: `python3 -m pytest` | **失敗**（上の `ModuleNotFoundError`） |
+     | B: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` | 成功（1 passed）。bringup の CMake の回避策と同じ |
+     | C: `-p no:anyio` | 成功 |
+     | D: `PYTHONNOUSERSITE=1` | 成功 |
+     | E: `python3 -s` | 成功 |
+
+   - `PYTHONPATH` と `PYTEST_*` の環境変数は未設定だった。
+   - **回避策 B の副作用（事実）**: anyio のほかに pytest_cov と colcon_core のプラグインも自動ロードされなくなる。bringup の pytest はこの 2 つを使っていないので、**実害はない**。
+   - **控え（戻すための `pip freeze --user`、128 行）**: `~/so_arm101_check/pip_user_freeze_20261112_185025.txt`（git 管理外）。`~/.local` には触れていないので、今は戻す操作はない。
+   - **各案の評価の要約（ユーザーの決定: 案 0）**:
+     - **案 0 何もしない（採用）**: 環境への影響なし。pytest を足す package ごとに同じ回避（`PYTEST_DISABLE_PLUGIN_AUTOLOAD`）が要り、素の `python3 -m pytest` は失敗したまま。
+     - 回避策を `-p no:anyio` に狭める案: **採用しない**（記録のみ。C で成功することは確認済み。B と違い pytest_cov・colcon_core は無効にならない）。
+     - 案 1 anyio を消す: httpx・starlette・fastapi・gradio が import できなくなる。非推奨。戻し方は `pip install anyio==4.13.0`。
+     - **案 2 anyio の版を下げる（将来の候補・記録のみ）**: 戻し方は `pip install anyio==4.13.0`。starlette 1.0.0 と httpx 0.27.0 の制約に合う版の特定が要る（`pip download --no-deps` などで環境を変えずに確認できる）。**[推測]** 4.x の古い版なら `_pytest.scope` を import しない。
+     - 案 3 `~/.local` に pytest 7 以上を入れる: ROS 2 Humble の ament・colcon・launch_testing が使う pytest が変わる。非推奨。
+     - 案 4 gradio 系を別の venv に分ける: 作業量が大きい。
+     - **案 5 ROS のシェルで `PYTHONNOUSERSITE=1`（将来の候補・記録のみ）**: D で通ることは確認済み。**ただし `~/.local` の numpy 1.26.4 などは、今も ROS の実行時にシステムのものより優先して見えている。user site を外すと、ROS 側で使われる版が変わる**（numpy・opencv・scipy など）。今は問題が起きていないので対策はしない。
+   - **未確認の推測（4 点。いずれも確かめていない）**: (a) anyio は gradio を入れたときに入った。(b) `_pytest.scope` は pytest 7.0 で入った（記憶による）。(c) 次の項の `apriltag_test` のエラーが同じ原因である。(d) 案 2 で pytest 6.2.5 と両立する anyio の版がある。
+2. **過去の `apriltag_test` の pytest の収集エラー**（`inventory.md` 1141 行ほか）: **同じ原因の可能性が高い（未確認）**。再現していない。ユーザーの決定で、再確認は行わない（`apriltag_test` は削除済みで、タグ `stage2c-done` から取り出せば確認できる）。1803 行に `pytest.xml: 1 test, 1 error` の記録があり、起動時の失敗なら収集段階のエラーに見えるので矛盾しないが、`ModuleNotFoundError` だったかどうかの記録はない。
 3. **`bringup.launch.py` の既存の lint 違反の修正**（今回は直していない）: copyright 1、flake8 の E501 ×4（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include の 2 行）、pep257 の D400・D415（モジュールの docstring が「。」で終わる）。違反 7 件に CTest のまとめ 3 件を足したものが、bringup の失敗 10 件（`colcon test-result` の件数）。
 
 ## 将来の目標と IK の経緯、Servo 統合のときの記録、注意（2026-11-12。**記録のみ。コード・設定は変更していない**。ユーザーの判断）
