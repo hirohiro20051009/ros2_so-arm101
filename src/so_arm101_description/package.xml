@@ -7,7 +7,8 @@
 
   <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
 
-  <license>BSD</license>
+  <license>MIT</license>
+  <license>Apache-2.0</license>
   <author email="nimicu21@gmail.com">Nimrod</author>
   <buildtool_depend>ament_cmake</buildtool_depend>
 

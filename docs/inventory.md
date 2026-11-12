@@ -2034,3 +2034,11 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - 要点: 由来は 自作 / nimiCurtis（MIT）/ TheRobotStudio（Apache-2.0）/ LeRobot 0.4.2 由来の値（Apache-2.0）/ MoveIt Setup Assistant の生成物（ユーザー自身が生成）に分けた。ルートに `LICENSE` は無く、NOTICE も無い（上流にも無い）。ヘッダは 1 行 36 本・全文 1 本・無し 8 本、SPDX は 0 件。
 - 確認: `ament_copyright` は bringup だけが colcon test で走る。1 行ヘッダ・SPDX は「ライセンス不明」で失敗し、許諾文の全文だけが通る（手動実行）。`ament_xmllint` は複数 `<license>` を許す（写しで確認）。
 - 案: 詳細は `docs/license_plan.md` 3 章。package.xml の `<license>` の変更（description: `BSD` → `MIT` + `Apache-2.0`、moveit_config: `BSD` → `MIT`）は**実装前に承認が必要**。ユーザーが決めること: 著作権表示、moveit_config の併記、LeRobot の帰属の案、ヘッダの範囲、`LICENSE.so101_ros2` の置き場所、`usd/` の由来の確認の時期。
+
+## ライセンスの実施（2026-11-12。docs/license_plan.md 8 章）
+
+- 追加: ルートの `LICENSE`（MIT、`Copyright (c) 2026 hiro`。年は最初のコミット 29ff6bf が 2026-11-05 のため 2026）、`THIRD_PARTY_NOTICES.md`（TheRobotStudio・nimiCurtis・LeRobot・MoveIt の帰属と対象ファイル。`LICENSE.so101_ros2` を削除できる条件つき）。
+- hardware の `package.xml`・`CMakeLists.txt`・plugins xml は nimiCurtis の `so101_hardware_interface` の骨組み由来（git show 29ff6bf と比較）と確認し、nimiCurtis の対象に入れた。`<license>` は MIT のまま。
+- `<license>` の変更: description `BSD` → `MIT` + `Apache-2.0`、moveit_config `BSD` → `MIT` + `BSD-3-Clause`。bringup・calibration・controller・hardware は `MIT`（変更なし）。
+- 変更していない: ソースのヘッダ、`LICENSE.so101_ros2`、`third_party/`、コード。`usd/` の由来の確認は Isaac で使う前に行う。
+- 確認: `colcon build` 6 パッケージ成功。`ament_xmllint` 6 つの package.xml が valid。`colcon test-result` 全体 231 件・失敗 10 → 231 件・失敗 10（hardware 105、calibration 73、bringup 51/失敗 10、description 2、moveit_config 0、controller 0。前後で同じ）。
