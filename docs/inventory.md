@@ -2042,3 +2042,11 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - `<license>` の変更: description `BSD` → `MIT` + `Apache-2.0`、moveit_config `BSD` → `MIT` + `BSD-3-Clause`。bringup・calibration・controller・hardware は `MIT`（変更なし）。
 - 変更していない: ソースのヘッダ、`LICENSE.so101_ros2`、`third_party/`、コード。`usd/` の由来の確認は Isaac で使う前に行う。
 - 確認: `colcon build` 6 パッケージ成功。`ament_xmllint` 6 つの package.xml が valid。`colcon test-result` 全体 231 件・失敗 10 → 231 件・失敗 10（hardware 105、calibration 73、bringup 51/失敗 10、description 2、moveit_config 0、controller 0。前後で同じ）。
+
+## E（`controllers.yaml` を bringup へ移し、`so_arm101_controller` を無くす）の計画（2026-11-12。調査と計画のみ）
+
+- `docs/controllers_yaml_move_plan.md` を追加。実装・`build/`・`install/` の変更・実機・モックの起動はしていない。
+- 要点: `so_arm101_controller` はコードの無い設定だけのパッケージ（git 管理は 3 ファイル）。`controllers.yaml` を読むのは `bringup.launch.py:98`（実行時。`ros2_control_node` の `ParameterFile`）と `hardware/CMakeLists.txt:75`（試験が `update_rate` を読む。ソースのパス）だけ。依存は `bringup/package.xml:15`。推奨: `git mv` で `so_arm101_bringup/config/controllers.yaml` へ（名前・内容は変えない。sha256 `8515d643…`）、controller の `package.xml`・`CMakeLists.txt` は `git rm`、bringup に `install(DIRECTORY config …)` を足す。
+- 注意: 古い `install/so_arm101_controller`・`build/so_arm101_controller` が残る（isolated + symlink-install。`ros2 pkg prefix` が成功し続ける見込み）。片付けは 2 ディレクトリだけを消す案（承認制。消す前の控えは計画の 6 章）。
+- 基準（取得済み）: `gen_rd6.sh` の 6 通りが `urdf_after/` と同一、`--show-args` 21 個、pipelines（chomp・ompl・pilz）、`colcon test-result` は全体 231 件・失敗 10（bringup 51・失敗 10、calibration 73、controller 0、description 2、hardware 105、moveit_config 0）。
+- ユーザーの決定待ち: 計画 10 章（D1〜D9）。
