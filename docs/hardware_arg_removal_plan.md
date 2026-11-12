@@ -191,3 +191,6 @@ SIGINT を既定に戻すラッパー（`inventory.md` の `kill -TERM` の件�
 
 ## 10. 実施の記録（D3。コミット 1。2026-11-12）
 実装した（`bringup.launch.py`・moveit_config の xacro 2 つ・bringup の `CMakeLists.txt`/`package.xml`・新規 `test/test_launch_arg_check.py`）。確認の結果（試験の件数 196 → 231・失敗 12 → 10（pep257 の 2 件は「消滅」）、bringup 16 → 51、pytest 34 件、6 通りの robot_description の sha256 一致、launch の挙動 9 通り、`mock:=true` の 2 回の起動と `kill -INT` での停止、`ps` 空）は `docs/inventory.md` の「`hardware` 引数の削除（D 案）の実装」に書いた。pytest が登録されなかった原因（`~/.local` の anyio プラグインとシステムの pytest 6.2.5 の非互換）と対処（`PYTEST_DISABLE_PLUGIN_AUTOLOAD`）も同じ場所。**手順書の更新（7.6・D4）はコミット 2**。
+
+## 11. 実機の確認の結果（D5。2026-11-12。ユーザーの報告。合格）
+読み取り専用の起動（`hardware` 引数なし。ログ `~/so_arm101_check/hwargD_readonly.log`）: 起動前の検査で止まらずに起動、`initialized: port=/dev/ttyACM0`、EEPROM vs yaml 6/6、servo settings vs reference 6/6、SRAM `torque_enable=0 lock=1 acceleration=50`、コントローラ 3 つ activated、`reads=990 retried=0 failed_cycles=0`、bus のカウンタすべて 0、`not known to URDF` 0 件、exit=0、停止後の `ps` は空。**D 案（D1〜D5）は完了。** 詳細と残課題（anyio のプラグイン、`apriltag_test` の収集エラーの可能性、既存の lint 違反）は `docs/inventory.md`。

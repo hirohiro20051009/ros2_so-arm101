@@ -1942,3 +1942,13 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **説明文の言い換え（意味は変えていない）**: `feetech_write_check.md` :3（「対象: 書き込みモード（`read_only:=false`）」）と **:6（古い LeRobot の記述の修正。`hardware` が既定、`hardware:=lerobot` で LeRobot 経路、「起動コマンドは両方を明示」などの誤りを、「`read_only` の既定は `true`。書き込みモードは `read_only:=false` を明示したときだけ。`read_only` を書かないコマンドは読み取り専用。LeRobot 経路と `hardware` 引数は削除した。`hardware:=…` を付けると起動前にエラー」に）**。`feetech_servo_config_check.md` :3。`feetech_readonly_check.md` :1（題）・:6・:97・:194（`hardware:=feetech` を「自前ドライバ（feetech）」に）。
 - **変更しなかったもの**: 「歴史的」と明記された手順（`hardware:=lerobot` の起動コマンド: `feetech_servo_config_check.md` :31、`feetech_readonly_check.md` :28・35・53・153 の表と節。`:37` の比較表の「`hardware:=feetech`（自前ドライバ）」の行も、歴史的な比較表なのでそのまま）。コピーしても、起動前にエラーで止まる。
 - 次: 実機の確認（読み取り専用の起動 1 回。ユーザー）。結果は `inventory.md` に記録する。
+
+## `hardware` 引数の削除（D 案）の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/hwargD_readonly.log`。私はポートを開いていない）
+- **対象**: コミット `35ebba4`（`hardware` 引数の削除と、未宣言の引数の検査）と `05789e7`（手順書）の後の、読み取り専用の起動 1 回（`hardware` 引数なし）。
+- **結果**: 起動前の検査で止まらずに起動、`initialized: port=/dev/ttyACM0`、EEPROM vs yaml 6/6、servo settings vs reference 6/6、SRAM `torque_enable=0 lock=1 acceleration=50`、コントローラ 3 つ activated、`reads=990 retried=0 failed_cycles=0`、bus のカウンタすべて 0、`not known to URDF` 0 件、exit=0、停止後の `ps` は空。
+- 意味: 検査（`_check_launch_arguments`）は、宣言済みの引数だけの実機の起動（`mock:=false`）を誤って止めない。robot_description が同一（6 通りの sha256 一致）なので、ドライバ・ros2_control の起動に変化は無い。W0 以降は不要（計画どおり）。
+
+## 残課題（2026-11-12。**記録のみ。調査も変更もしていない**）
+1. **`~/.local` の anyio の pytest プラグインが、システムの pytest 6.2.5 と非互換**（`python3 -m pytest` が `ModuleNotFoundError: No module named '_pytest.scope'` で失敗する。`~/.local/lib/python3.10/site-packages/anyio/pytest_plugin.py`）。ユーザー環境の `pip --user` のパッケージの整理は、**後でユーザーが判断する**。bringup の CMake には `PYTEST_DISABLE_PLUGIN_AUTOLOAD` を足して回避している（コミット `35ebba4`。ユーザーが事後承認）。他のパッケージで `ament_add_pytest_test` を足すときも、同じ回避が要る（または環境の整理）。
+2. **過去の `apriltag_test` の pytest の収集エラー**（`inventory.md` 1141 行ほか）が、同じ原因の可能性（**未確認**）。`apriltag_test` は削除済みのため、確認は難しい（タグ `stage2c-done` から取り出せば確認できる）。
+3. **`bringup.launch.py` の既存の lint 違反の修正**（今回は直していない）: copyright 1、flake8 の E501 ×4（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include の 2 行）、pep257 の D400・D415（モジュールの docstring が「。」で終わる）。違反 7 件に CTest のまとめ 3 件を足したものが、bringup の失敗 10 件（`colcon test-result` の件数）。
