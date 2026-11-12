@@ -2206,3 +2206,12 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - `docs/servo_integration_plan.md` を改訂。用途（地面の物体を真下に近い接近で掴む）と範囲（Servo を bringup に統合し、共通の層が使う入口を作る。実機は「Python からの単発の目標に対する Servo の小さい補正」まで。VR は解析 IK のみで Servo を使わない）を前提にした。解析 IK・ラッパー・共通の層はリポジトリの外で、変更しない。
 - 主な結果: (1) 真下の把持姿勢で、作れない回転の軸は `(cos pan, −sin pan, 0)`（pan とともに回る）。**yaw を捨てる前回の推奨は取り消し**。rx 固定（\|pan\| ≤ 1.2）、超えたら ry。drift は常に base_link の軸で、command frame と無関係。作れない向きは共通の層で射影する。(2) 出発点（elbow +1.690）は、関節の上限の判定は内側なら許すが、自己衝突までの距離が 3.9 mm で Servo の倍率が約 0.015 になり動けない（距離は `moveit_core` の `PlanningScene` で計算）。MoveIt で中間姿勢へ出てから Servo。(3) forward controller は指令が来るまで何も書かず、JTC は止める・起動するとき直前の指令を保つ。切り替えで飛ばない見込み（運用条件は 3.1.1）。(4) Servo 専用の関節速度の上限は `robot_description_planning.joint_limits` を Servo のノードに渡して強制（`enforce_limits.cpp`）。forward 経路には JTC の制限もドライバの上限（0.479 rad）も守りにならないので、下の層に 1 周期の上限を置く案（L1〜L4）。(5) pose tracking は C++ のクラスで自前のノードが要り、作れない向きで収束せず、command frame を先端にする必要があるため、Twist を推奨。(6) プランニングシーンに床は無く、Servo は床を見ない。(7) 残差の限界: 約 0.023 rad/s 以下は動かない見込み、開く向きは Servo が積分しないため約 0.04 rad の手前止まりを超えられない見込み（推測）。(8) 特異点のしきい値は、真下の把持姿勢で 40 / 100 を提案。
 - ユーザーの決定待ち: 計画 8 章（D1〜D24。D15〜D24 は追加）。
+
+## Servo 統合の計画の改訂 2（2026-11-12。3 回目。調査と計画のみ。コード・launch・設定の変更、モック・実機の起動なし）
+
+- `docs/servo_integration_plan.md` を改訂。ユーザーの決定: D1〜D12・D14・D16・D18〜D24 は推奨どおり。D15 は **L1（ドライバの設定）**、D17 は**最初の実機の確認ではモード管理ノードを作らず手動の `switch_controllers`**、D13 は「設定・静的試験 → launch（`use_servo`）→ 送信ツール → モック → 手順書 → 実機」。
+- **L1**: `max_joint_speed`・`limit_window_s` は、ドライバの hardware パラメータ（`sts3215_system.cpp:63-64`）。xacro の `<param>` で渡せ、**コード変更なし**。1 周期の上限は両者の積（`:830-832`）。JTC も forward も同じ書き込みで削られる。提案: 0.75 × 0.08 = **0.06 rad/周期**（Scaling 0.1 の最悪 0.048 の 1.25 倍。Scaling 0.125 を超えると削られうる）。
+- **1 回の `switch_controller`（STRICT）で入れ替えられる**（controller_manager 2.54.3。`manage_switch` が同じ呼び出しの中で、停止（解放）→ 開始（取得）の順。`controller_manager.cpp:1450-1485`、`:1508-1509`、`:1616`）。開始に失敗しても停止は取り消されない（どちらも inactive で、ドライバは直前の目標を保持）。
+- **届く範囲**（真下、pan 任意、wrist_roll 任意）: URDF の範囲で z ≤ 0.090 m（**z = 0.10 m は範囲外で、解き方の失敗ではない**）、r（pan の軸から）0.05〜0.27 m。外側へ 15° で z = 0.10 m が r = 0.13〜0.26 m で届き、30° でさらに広がる。**床（`base_link` の取り付け面）は z ≈ −0.0024 m**。指は真下の接近で先端のフレームより約 6〜7 mm 下に出る。
+- 補正が届かない量は、実機の手順書の W3 で測る項目 Q1〜Q6（案）にした。
+- ユーザーの決定待ち: 計画 8 章の D25〜D30。
