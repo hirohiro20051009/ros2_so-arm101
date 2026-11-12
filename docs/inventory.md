@@ -2193,3 +2193,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **削除の前の確認**: `usd` の参照は、CMake・package.xml・launch・xacro・コード（docs 以外）に無い。残っていたのは `THIRD_PARTY_NOTICES.md` の 1 行だけで、その行を削除した（nimiCurtis の節のほかの項目は変更なし）。docs の過去の記述（`license_plan.md`、`original_urdf_plan.md` ほか）は歴史として書き換えない。
 - **前後の確認**: description の install/ のファイル一覧（60 行）は前後で `diff` 空。description の colcon test は前後とも 2 件・失敗 0。`xacro` から生成した robot_description の 6 通り（`~/so_arm101_check/gen_rd6.sh`。前 `usd_before/`・後 `usd_after/`）は `cmp` で 6 通りとも同一（先頭 16 桁: `d8eebdcd27762b2b`（mock 2 つ）、`9bfaceea6da94c16`、`a5160ee8aad290a8`、`6bf7aa602dc5b6ad`、`7dc2c92cc80f37ed`）。実機・モックの起動は不要としたので行っていない。
 - **将来 Isaac で使うときの方針**: 今の URDF（`third_party/SO-ARM100/so101_new_calib.urdf`、385e8d7）から、URDF Importer でロボット単体の USD を作る。注意: 関節の範囲は USD では度（URDF はラジアン）。ドライブの値（旧 USD では stiffness 17.8、damping 0.6、maxForce 10）は実機の STS3215 の制御と別物で、使うときに決め直す。S3 のアセット（ネットワーク必須）には頼らない。
+
+## Servo 統合の計画（2026-11-12。調査と計画のみ。コード・launch・設定は変更していない。モック・実機は起動していない）
+
+- `docs/servo_integration_plan.md` を追加。読んだのはインストール版 `moveit_servo` 2.5.10（.deb にソースは無い）と、公式 `moveit/moveit2` のタグ `2.5.10` のソース（`raw.githubusercontent.com` から取得。リポジトリには入れていない）。JTC 2.54.1・`controller_manager` 2.54.3 も同様。
+- 「Servo を統合するときの記録」（前の節）の 4d の課題の再確認の結果: `start_servo` は**必須**（`servo_node.cpp:111-114`）。drift dimensions は**必須**（5×5 にしないと `utilities.cpp:104` が範囲外を読む）。`publish_period` 0.034 と JTC 25 Hz は、「合っていない」ではなく**ほぼ進まない見込み**（`[推測]`。JTC は新しい軌道の最初の更新で直前の指令を出す）。`robot_description` の `use_fake_hardware` 既定は**実害なし**（`<ros2_control>` 以外は同一。Python で確認）。`joint_limits` を読まないことは確認。`robot_description_planning` を渡せば Servo 専用の速度上限を入れられる。
+- 新しく分かったこと: 今の `servo.launch.py` は KDL を渡すので IK プラグインの経路になり、drift と両立しない（`robot_description_kinematics` を渡さなければ逆 Jacobian の経路。`kinematics.yaml` は変更しない）。特異点のしきい値（17/30）は、この腕では関節空間のどこでも超える（5×5 の条件数。付録）。JTC には、トピックとアクションの排他が無い（あとから来たものに置き換える）。ドライバの 1 周期の上限（0.48 rad）は、Servo の最大（0.34 rad）にかからない。
+- ユーザーの決定待ち: 計画 8 章（D1〜D14）。
