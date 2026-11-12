@@ -70,6 +70,7 @@ W0 の手順（本文の「W0. 保持のみ」）を**起動と停止を 5 回�
   - 動かす前の `<current>` が無効に見えるのは、開始状態（実機の値）が範囲を 0.00009 rad 超えているためで、**この確認の対象**（`FixStartStateBounds` で開始状態が扱われるか）。Plan がこの開始状態を理由に拒否されたら、そのメッセージを報告する。
   - elbow_flex を + 側（97° 以上）にする目標は作らない。他のスライダーの変化の見積り（出発点を整数の度に丸めたとき）: pan −5.63°→−6°（−0.37°）、lift −84.97°→−85°、wrist_flex +28.84°→+29°、wrist_roll −2.77°→−3°（−0.23°）、gripper +0.87°→+1°（+0.13°）。すべて 0.5° 以内。
 - Plan が失敗する・開始状態の不正で拒否される場合は、Execute せずに、ログを報告する。続けるなら（Claude と相談のうえ）`send_joint_delta.py elbow_flex -0.10 --seconds 4` で先に開いてから W3.5 へ進む。
+- **実機の結果（2026-11-12）**: 実機では `<current>` の丸めは **elbow_flex 98°** になり、スライダーは端に張り付いて見えた（上の見積りの 97° ではない。elbow の出発点は +1.70697 rad と、URDF の上限より 0.017 rad 大きかった）。丸めの値は、出発点の実測によって 97°／98° と変わりうる。端に張り付いて見えても、elbow_flex を 93° にして Plan & Execute は成功した。
 - 報告:
   - **Plan の成否**（RViz の表示。失敗なら、その表示の文言）。
   - **Execute の成否**（成功／中止／実行中の異常）。
@@ -204,7 +205,9 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
   ```bash
   ros2 topic echo /joint_states --once        # 今の実測値
   python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex <開始時の値 - 今の値 - 0.02> --seconds 4
+  python3 ~/ros2_so-arm101/tools/send_joint_delta.py shoulder_lift <開始時の値 - 今の値 + 0.02> --seconds 4
   ```
+  **「− 0.02」は elbow_flex 専用**（戻す量が + なので、0.02 を引くと端の手前で止まる）。**shoulder_lift は + が開く向き（戻す量が −）なので「+ 0.02」**（戻す量の絶対値を 0.02 小さくする）。wrist_flex など端に近くない関節は 0.02 を足し引きしない。
   ※ 折りたたみ姿勢の shoulder_lift / elbow_flex は関節リミットの端に近い（`inventory.md` の問題2）。**リミットの外へ向かう向きは動かさない**（ドライバは校正範囲でクランプする）。
 - **止め方**: 元の折りたたみ姿勢（開始時の値）に戻っている → **前腕に触れて重さを受ける** → **Ctrl-C**（脱力で腕が沈む）。
 - 合格: 沈まない／指令の向きに動く／`FAULT` なし／`rate_limited` が 0。
@@ -225,6 +228,8 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
   | wrist_roll | -0.04833 |
   | gripper | +0.01523 |
 
+- **出発点の作り方（実測 2026-11-12）**: 書き込みモードの前の出発点は、**「支えて戻す」たたみ方**で作る（手で前腕を支えて、ゆっくり折りたたみの止まりまで戻す）。elbow_flex は +1.6840／+1.6855（±1 tick）に収まる。**「重力に任せて」たたむと +1.7208 になり、校正のクランプ（±1.7192）を約 1 tick 超える**（書き込みモードの起動は拒否されず、生の値を Goal にして次の周期で端へ引き込まれる。50 tick 以内は黙ってクランプ）。
+- **出発点の表は毎回少しずれる**: たたみ切りの姿勢は毎回少し変わる（2026-11-12 は lift -1.49983、wrist_flex +0.41888 で、上の表とずれていた）。そこで W4 の戻し先は**「その起動のときの実測値」**とする（起動直後に `/joint_states` を控える）。**ただし elbow_flex は +1.69009 を上限にして、それより大きい値（URDF の上限を大きく超える値）には戻さない。**
 - モックの MoveIt（新座標の出発点での判定。`/check_state_validity`・`/compute_fk`・`/plan_kinematic_path`、2026-11-11、mock の move_group。実機は使っていない）の判定: 出発点と、そこから elbow_flex を -0.10 / -0.15 / -0.20 / -0.30 にした姿勢は**すべて有効**（衝突なし）で、出発点からの OMPL の計画もすべて成功する。gripper 先端の高さ（base_link 基準）は、出発点（z +0.0219 m）から +0.0255 / +0.0386 / +0.0520 / +0.0794 m（旧校正の座標の出発点での判定は +0.026 / +0.039 / +0.053 / +0.081 m で、ほぼ同じ）。
 - **腕の支え方**: W3 と同じ（動かすあいだは前腕の下に触れずに構える。止めるときは触れて受ける）。
 - 起動（**W3.5 と W4 は同じ起動のまま続けて行う**。開いた姿勢で Ctrl-C しないため）。W4 は初めての MoveIt の実行なので `torque_limit:=500`（pan と wrist_roll に効く。lift / elbow_flex / wrist_flex は常に 1000）を付ける。RViz あり、ここでは RViz を操作しない。ログは `write_W4.log`:
@@ -255,14 +260,14 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **目標の作り方の注意**: 出発点の elbow_flex は URDF のリミット（+1.69）を**約 0.00009 rad 超えている**（C3 の後の新座標。OUT。旧校正の座標では 0.021 rad の余裕があった）。OMPL は計画要求アダプタ `FixStartStateBounds`（`start_state_max_bounds_error: 0.1`）で扱えるので、この姿勢から Plan & Execute できる見込み（モックの move_group で計画の成功を確認。**実機は C4 で確認**）。**W4 の目標は elbow_flex を + に動かさない（現在より大きくしない）ものにする。** shoulder_lift も出発点付近でリミットに近い向き（−側）へは動かさない。
 - **MotionPlanning では OMPL を使い、Pilz を選ばない**（開始状態が URDF の範囲をわずかに超えると、Pilz は計画を拒否する（`INVALID_ROBOT_STATE`）ため。出発点の elbow_flex は約 0.00009 rad 超えている）。**Pilz を使うときや、W3.5 を飛ばして起動直後に計画するときは、先に `python3 ~/ros2_so-arm101/tools/send_joint_delta.py elbow_flex -0.10 --seconds 4` で elbow_flex を開く**（開く向きは目標の約 0.04 rad 手前で止まるので、約 -0.05 動く。開いた姿勢のまま Ctrl-C しない）。
 - 見ること: 計画どおりに滑らかに動く／終点で止まる／`step limit` の WARN が arm 関節で出ない／`FAULT` なし。pan の向き（+ で上から見て時計回り）が RViz の表示と実機で一致するか。
-- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 戻す先は**出発点の値**（W3.5 の表）。戻しは RViz を使わず、`send_joint_delta.py` で 1 関節ずつ行う（理由: RViz では関節ごとの目標値を数値で指定する操作が分かりにくく、計画の衝突判定で中止される可能性もある。`send_joint_delta.py` は差分を直接指定でき、1 回ごとに実測で確認できる）。
+- **止め方**: **開いた姿勢のまま Ctrl-C すると腕が落ちる。** 戻す先は**その起動のときの実測値**（起動直後に控えたもの。W3.5 の表の値は目安で、毎回少しずれる）。ただし elbow_flex は +1.69009 を超える値には戻さない。戻しは RViz を使わず、`send_joint_delta.py` で 1 関節ずつ行う（理由: RViz では関節ごとの目標値を数値で指定する操作が分かりにくく、計画の衝突判定で中止される可能性もある。`send_joint_delta.py` は差分を直接指定でき、1 回ごとに実測で確認できる）。
   1. 動きが止まっていることを確認。
   2. `ros2 topic echo /joint_states --once` で各関節の実測を読む。
-  3. 動かした関節ごとに、**「出発点 − 現在の実測値」**を計算して送る（`send_joint_delta.py` は現在の実測値から目標を計算するため）。1 回の |delta| は 0.5 rad 以下。超える場合は分けて送る。順番は pan → wrist_roll → wrist_flex → shoulder_lift（動かしていれば）→ **elbow_flex を最後**。
+  3. 動かした関節ごとに、**「戻し先（起動時の実測値） − 現在の実測値」**を計算して送る（`send_joint_delta.py` は現在の実測値から目標を計算するため）。1 回の |delta| は 0.5 rad 以下。超える場合は分けて送る。順番は pan → wrist_roll → wrist_flex → shoulder_lift（動かしていれば）→ **elbow_flex を最後**。
      ```bash
      python3 ~/ros2_so-arm101/tools/send_joint_delta.py <関節名> <出発点 - 実測> --seconds 4
      ```
-  4. elbow_flex は「出発点 (+1.69009) − 現在値」を 1 回で送る（目標の +1.69009 は URDF リミット +1.69 を約 0.00009 rad 超える。`send_joint_delta.py` は URDF の範囲を見ず、ドライバは校正した範囲（±1.7192）でクランプするので、送れる。たたみ切った機械的な止まりなので、折りたたむ向きは差が約 3 tick）。
+  4. elbow_flex は「戻し先 − 現在値」を 1 回で送る（戻し先は起動時の実測値。ただし +1.69009 を上限にする）。たとえば +1.69009 の場合（目標の +1.69009 は URDF リミット +1.69 を約 0.00009 rad 超える。`send_joint_delta.py` は URDF の範囲を見ず、ドライバは校正した範囲（±1.7192）でクランプするので、送れる。たたみ切った機械的な止まりなので、折りたたむ向きは差が約 3 tick）。
   5. 再び `/joint_states` を読み、**各関節が出発点から約 0.02 rad 以内**であることを確認する。
   6. 前腕を支える（戻せないときも手で支える）→ **launch の端末で Ctrl-C**。
 - 合格: W3 と同じ基準＋ログ末尾 `rate_limited=0`（arm）。
@@ -288,6 +293,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 | `cannot read back X (...)`、直前に `retrying` が 2 回 | 3 回とも通信エラー。トルクは ON にならない | 報告。`[activation failed] torque OFF and Lock=1 confirmed` を確認 |
 | `ros2_control_node` が exit code -6、直前に `terminate called after throwing an instance of 'std::runtime_error'` / `Failed to set the initial state of the component ... to active` | 起動に失敗したとき、controller_manager（Humble）が例外で終了する。Humble の仕様 | `[activation failed] torque OFF and Lock=1 confirmed (read back) on all joints` の行があれば安全面の問題はない。その行が無ければサーボの電源を切る |
 | `deactivated. ... bus: flushed_requests=… flushed_bytes=… drained_bytes=… id_mismatch=… answered_first=… timeouts=… bad_checksum=…`（バス層の診断。読み取り専用の `deactivated (no register was written)` の行にも出る） | `drained_bytes`・`id_mismatch`・`answered_first` は、**健全なバスでは 0**（通信エラーの後に、古い応答を捨てた／取り違えた数）。`flushed_requests`・`flushed_bytes` は、要求の直前に古いバイトがあって捨てた回数と量（0 が望ましい）。`timeouts`・`bad_checksum` は通信エラーの数（`retried` と対応）。0 でなければ、その数と、直前の WARN の `[tx=… rx=… flushed_before_request=…]` を報告する。切り分け: `checksum mismatch` のとき `flushed_before_request>0` なら要求の前に古いバイトがあった、0 なら配線・USB の化け | 報告。原因の比較は `drain_quiet_ms:=0`（従来の「捨てるだけ」）で行う（C4 の順 8。起動引数の追加の承認が要る） |
+| 終了時に `rviz2`（と `move_group`）が exit code -11（`process has died`）。deactivate の後に起きる（2026-11-12 の W4 のログでは、`[deactivate] torque OFF and Lock=1 confirmed` と `deactivated.` の後） | RViz 側の終了時の異常。実機のトルク OFF／Lock=1 の確認（`[deactivate]`・`deactivated.`）が済んでいれば**無視してよい**（2026-11-12 の W4 で確認） | `[deactivate]` に `could NOT confirm` が無いことだけ確認 |
 | `[deactivate] ... could NOT confirm ...` | 終了でトルク OFF／Lock=1 を確認できなかった | 腕を支えてサーボの電源を切る |
 
 ## 報告してほしいもの（段階ごと）

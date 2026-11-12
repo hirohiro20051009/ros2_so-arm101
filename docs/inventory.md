@@ -1616,3 +1616,58 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
 - 順 6: Execute の条件を「elbow_flex 以外の関節は 0.5° 以内の変化なら許容、1° 超なら Execute しない」に変更。`<current>` で elbow_flex が 97°（+1.6930 rad、上限 +1.69 超え）に丸められる可能性と、その扱い（表示は未確認として報告、目標は約 92°、無効表示が消えなければ Plan/Execute しない）を注意として追加。
 - 確認: `torque_limit` は bringup.launch.py に宣言済み（既定 1000）。W1/W2/W4 の起動と同じ `torque_limit:=500`。
 - 確認: eeprom_after_C3.json のキーと `backup` の出力形式（eeprom_backup.cpp の読み書き）が一致。比較スクリプトを、同じファイル 2 つ（コピー、読むだけ）で試して MATCH を確認。
+
+## 段階2c 実機確認: C0.6・C4（順 1〜6）合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/`）
+結果はユーザーの報告のとおり。数値のうち、`reads` 2 つ・W0 の `startup_read_retries`・W4 の終了時の出力はログと突き合わせた（下記）。それ以外はユーザー報告の転記。
+
+### C0.6（案 C: EEPROM の書き込みの読み戻しを 2 回一致）
+- 待ち 50 ms・0 ms とも **exit=0、`bus:` なし**。
+- 0 ms は同じ値の書き直しなので、**完了待ちが要るかどうかの根拠にはならない（既定の 50 ms のまま）**。`time` は手入力を含むので、比較は参考。
+
+### 順 2（読み取り専用 10 分）
+- 約 744 s、`reads=37216`（約 50 Hz）、全カウンタ 0（`c4_readonly_10min.log` で確認: `retried=0 failed_cycles=0`、`bus:` の全項目 0）。
+
+### 順 3（たたみ方による elbow の違い）
+- 「**支えて戻す**」たたみ方: elbow +1.6840／+1.6855（±1 tick）。「**重力に任せる**」: +1.7208（クランプ ±1.7192 を約 1 tick 超える）。
+- **書き込みモードの前の出発点は「支えて戻す」で作る**（手順書に追記）。
+
+### 順 4（W0 × 5）
+- 5 回とも `startup_read_retries=0`、全カウンタ 0（ログで確認）。**checksum mismatch は再現せず（原因は未特定のまま）**。停止後は torque_enable=0、lock=1、acceleration=50。
+
+### W1
+- 約 74 分、`reads=225734`、失敗 0（`write_W1.log` で確認: `retried=0 failed_cycles=0 rate_limited=0`、`bus:` 全項目 0、`goal_writes=225734`）。
+- **gripper の閉じる向き（-0.294）は status 6（ABORTED）**、目標の 0.0105 手前で止まる（閉じ切りのぎりぎり、過剰トルクなし）。**ユーザーの判断: 対策不要。境界付近の数度の差は実運用上気にしない。**
+
+### W2・W3
+- 合格。pan の + は時計回り（再確認）。
+- **W3.5 で elbow に -0.05 を足しても 2 tick しか動かなかった**（手前止まりが約 0.04 rad あるため。手順書の「効く量は小さい」の裏付け）。
+
+### 順 6（範囲外の開始状態からの Plan & Execute）
+- elbow +1.70697（**URDF 上限を 0.017 rad 超え**）から、OMPL で elbow 93° の Plan & Execute に**成功**。move_group に `Starting state is just outside bounds (joint 'elbow_flex'). Assuming within bounds.` が出て、`allowed_start_tolerance` 0.01 の検証も通った（`Validating trajectory with allowed_start_tolerance 0.01`）。
+- `<current>` の丸めは **elbow 98°**（手順書の見積りの 97° ではない）。スライダーは端に張り付いて見える。他の関節の読み値は 1 tick も変わらず。
+- **問題 2（たたみ姿勢からの Plan & Execute が衝突で中止）は新座標では再現しなかった**。RViz で upper_arm と wrist の重なりなし（gripper のすき間は RViz の方が少し広い）。
+- 「未確認として残すもの」（上の「C4 で確かめる」の 2 項目と、モデルの衝突と実機のたたみ切りの差）のうち、実行側の `allowed_start_tolerance` と、実機での OMPL の Plan & Execute は**確認済み**（元の記述は残す）。
+
+### W4（MoveIt の実行、10 分。ユーザーの判断で 10 分）
+- MoveIt で他の関節を動かすたびに、**elbow が自重の向きに約 6 tick（0.5°）ずつ入り込む**（原因は未特定。実測の事実のみ）。
+- 終了時、`rviz2` と `move_group` が exit code -11（**deactivate の後**。`write_C4_step6.log` の 349-350 行で `[deactivate] torque OFF and Lock=1 confirmed` と `deactivated.` が先、477-478 行で died）。`Maybe failed to update robot state` が 3 回（time diff 0.200 s・0.031 s・0.071 s）。手順書の「ログの読み方」に、終了時の exit -11 は無視してよい旨を追記。
+
+### コードを読んで確かめたこと（実機・モックは使っていない）
+**1. FixStartStateBounds（MoveIt2 Humble）**
+- 読んだ source: moveit/moveit2 の humble ブランチ、コミット c283a36186a6f7a5985360e6674bf8fd0790e485（2026-09-01、"2.5.10"。タグ 2.5.10 も同じコミット）。インストール済みは moveit-core / ros-planning 等が 2.5.10-1jammy（dpkg -l）。
+- 開始状態が範囲外でも `start_state_max_bounds_error` 以内なら、`enforceBounds` で範囲内に直して計画し、**直す前の実際の開始状態を軌道の先頭（時刻 0）に付け足す**（`addPrefixWayPoint`）。許容を超えると付け足さずに WARN。
+- パラメータ名は `start_state_max_bounds_error`、OMPL パイプラインで **0.1** が効いている（**実機のログで確認**: `Param 'ompl.start_state_max_bounds_error' was set to 0.100000`、chomp も同じ。`write_C4_step6.log`）。
+- `allowed_start_tolerance`（既定 0.01）の検証は `TrajectoryExecutionManager::validate`（同じ 2.5.10 の source）: **軌道の最初の点の位置と現在の関節状態**を比べ、差が許容を超えると `Invalid Trajectory: start point deviates ...` で拒否する。先頭の点が付け足された実際の開始状態なので、通った。
+- **確認できなかった範囲**: apt のビルドが公式タグと同一かは未確認（版番号は同じ）。
+**2. 書き込みモードの起動時、現在位置がクランプ（elbow ±1.7192）の外のとき**（`sts3215_system.cpp`）
+- **起動を拒否しない**。起動の手順 5 で、クランプせずに**生の値を Goal にする**。
+- 次の周期から、指令を `[raw_min, raw_max]` にクランプする。**50 tick（`kClampToleranceTicks`）以内の範囲外は黙ってクランプ**し、Goal は校正範囲の端へ引き込まれる。
+- **50 tick を超えて範囲外なら、異常と数え、連続 50 周期（約 1 秒）でフォルトになり、Goal の送信が止まる**（トルクは保持）。
+- **「起動時に現在位置が範囲外」を直接見る試験はない**。近いのは `CommandsBeyondTheCalibratedRangeAreClamped`（指令が +10 tick 超え）と `StartupWriteOrder`・`HoldsCurrentPositionAndSendsGoalEveryCycle`。
+- **試験の候補（未実施。今回コード・試験は変えていない）**: 偽サーボの現在位置を `raw_max` + 1 tick（引き込まれてフォルトにならない）と +51 tick 以上（約 1 秒でフォルトになる）にして書き込みモードで起動し、Goal が端に入ること・フォルトの有無を見る。
+**3. GripperActionController（status 6 の理由）**
+- `controllers.yaml`（`so_arm101_controller`。bringup が読む）と `ros2_controllers.yaml`（`so_arm101_moveit_config`）の `gripper_controller` は `joint: gripper` だけで、goal_tolerance・stall 関係は**未設定（既定値）**: goal_tolerance 0.01、allow_stalling false、stall_velocity_threshold 0.001、stall_timeout 1.0（ros2_controllers 2.54.1 のヘッダ）。
+- 動作: 誤差 < 0.01 rad なら成功。そうでなく、速度が 0.001 以下の状態が 1.0 秒を超えたら stalled で、allow_stalling=false なので **ABORTED（status 6）**。目標 0.0105 手前で止まる（誤差が 0.01 以上）ことと整合する（ログで目標との誤差の時刻までは見ていない）。
+
+### 要望（未実施。記録のみ）
+- `send_joint_delta.py` は送る前に Enter を待つ（[send_joint_delta.py:62](tools/send_joint_delta.py#L62)）。**貼り付けた別のコマンドの行が Enter の代わりになって、指令が送られたことがあった**。確認を「**空の Enter のみ**」または「**y**」にする案。実施するかは未定（コードは変えていない）。
