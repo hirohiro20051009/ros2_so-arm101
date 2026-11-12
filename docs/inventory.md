@@ -2215,3 +2215,11 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **届く範囲**（真下、pan 任意、wrist_roll 任意）: URDF の範囲で z ≤ 0.090 m（**z = 0.10 m は範囲外で、解き方の失敗ではない**）、r（pan の軸から）0.05〜0.27 m。外側へ 15° で z = 0.10 m が r = 0.13〜0.26 m で届き、30° でさらに広がる。**床（`base_link` の取り付け面）は z ≈ −0.0024 m**。指は真下の接近で先端のフレームより約 6〜7 mm 下に出る。
 - 補正が届かない量は、実機の手順書の W3 で測る項目 Q1〜Q6（案）にした。
 - ユーザーの決定待ち: 計画 8 章の D25〜D30。
+
+## Servo 統合 段 1（設定・静的試験。2026-11-12。docs/servo_integration_plan.md。モック・実機は起動していない）
+
+- 追加: `so_arm101_bringup/config/servo.yaml`（Servo 専用。出力 `/forward_position_controller/commands`、scale 0.01/0.05/0.05、しきい値 40/100、override 0）、`servo_joint_limits.yaml`（5 関節 0.3 rad/s）、`tools/servo_math.py`（Jacobian・射影・drift の規則。numpy だけ）。
+- 変更: `controllers.yaml`（`forward_position_controller` の型と設定を追加。`--inactive` で spawn する想定。use_servo の段 2 まで spawn されない）、`so101_new_calib.urdf.xacro`（`xacro:arg max_joint_speed` 0.75・`limit_window_s` 0.08 を追加し、マクロへ渡す）、`so101_new_calib.ros2_control.xacro`（マクロの引数と、実機側の `<param>` 2 行を追加）。ドライバのコードは変更なし。
+- **robot_description の sha256（`gen_rd6.sh` の 6 通り。新しい基準）**: mock 2 通りは**不変**（`d8eebdcd27762b2b`）。実機側 4 通りは、差分が `<param name="max_joint_speed">0.75</param>` と `<param name="limit_window_s">0.08</param>` の 2 行だけ: ro `9bfaceea…` → `f8dc8da49a238a75`、rw `a5160ee8…` → `088bdfa09bdeb0ca`、rw_apply `6bf7aa60…` → `c5a19e7a006e269c`、rw_probe `7dc2c92c…` → `1461b070b550512d`。
+- 試験: bringup 47 → **64**（pytest 34 → 51。+17。`test_launch_arg_check.py` に追記。新しいファイルの登録には CMake の変更が要り、計画外のため）。全体 227 → **244**、失敗 0。hardware 105・calibration 73・description 2・moveit_config 0 は不変。`--show-args` 21（同一）、pipelines（chomp・ompl・pilz、既定 ompl）同一。install/ の差分は `config/servo.yaml`・`config/servo_joint_limits.yaml` の 2 行（bringup の `install(DIRECTORY config …)` による）。
+- L1 の値のログ: 読み取り専用の起動では `max_joint_speed`・`limit_window_s` は出ない（`initialized:` の行は port・calibration・timeout・max_consecutive_failures だけ。`sts3215_system.cpp:109-112`）。書き込みモードの起動で、`WRITE mode:` の WARN に `max_joint_speed=0.75 rad/s x window=0.080 s`（`:665-668`）と、`write mode active:` の INFO に `Per-cycle step limit: 39 ticks`（`:844-846`）が出る。

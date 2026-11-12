@@ -7,6 +7,10 @@
     <xacro:arg name="serial_port" default="/dev/ttyACM0" />  <!-- 実機のみ -->
     <xacro:arg name="calibration_file" default="" />         <!-- 実機のみ -->
     <xacro:arg name="read_only" default="true" />            <!-- 実機のみ。false で書き込みモード（段階2b-3b） -->
+    <!-- ドライバの 1 周期の変化量の上限 = max_joint_speed × limit_window_s [rad]（既定 0.75 × 0.08 = 0.06 rad）。実機のみ。
+         MoveIt の既定の Scaling 0.1 の最悪（0.048 rad）の 1.25 倍。docs/servo_integration_plan.md 3.3.2 -->
+    <xacro:arg name="max_joint_speed" default="0.75" />
+    <xacro:arg name="limit_window_s" default="0.08" />
     <!-- 段階2b-3b: 書き込みモード（read_only=false）のパラメータ。実機のみ -->
     <xacro:arg name="acceleration" default="50" />           <!-- 1..254。0 は拒否 -->
     <xacro:arg name="torque_limit" default="1000" />         <!-- pan と roll だけに効く（lift/elbow/wrist_flex は常に 1000）。gripper は min(値, 500) -->
@@ -31,5 +35,7 @@
         torque_limit="$(arg torque_limit)"
         apply_servo_config="$(arg apply_servo_config)"
         probe_lock_sram="$(arg probe_lock_sram)"
+        max_joint_speed="$(arg max_joint_speed)"
+        limit_window_s="$(arg limit_window_s)"
     />
 </robot>

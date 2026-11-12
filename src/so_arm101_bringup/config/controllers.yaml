@@ -24,6 +24,10 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
+    # Servo 用（use_servo:=true のときだけ spawn する。--inactive で読み込むだけ。docs/servo_integration_plan.md 3.1）
+    forward_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
 arm_controller:
   ros__parameters:
     update_rate: 25
@@ -57,3 +61,16 @@ gripper_controller:
   ros__parameters:
     type: position_controllers/GripperActionController
     joint: gripper
+
+# Servo（Float64MultiArray）の出力を受ける。arm_controller と同じ関節の position を要求するので、
+# ros2_control が同時に active にさせない（排他）。関節の順は Servo の arm グループの順
+# （MoveIt の RobotModel で確認済み）と同じにすること。要素数しか検査されない（順は検査されない）。
+forward_position_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan
+      - shoulder_lift
+      - elbow_flex
+      - wrist_flex
+      - wrist_roll
+    interface_name: position

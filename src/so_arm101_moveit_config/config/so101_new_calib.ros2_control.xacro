@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
-    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true serial_port:=/dev/ttyACM0 calibration_file:='' read_only:=true acceleration:=50 torque_limit:=1000 apply_servo_config:=false probe_lock_sram:=false">
+    <xacro:macro name="so101_new_calib_ros2_control" params="name initial_positions_file use_fake_hardware:=true serial_port:=/dev/ttyACM0 calibration_file:='' read_only:=true acceleration:=50 torque_limit:=1000 apply_servo_config:=false probe_lock_sram:=false max_joint_speed:=0.75 limit_window_s:=0.08">
         <xacro:property name="initial_positions" value="${load_yaml(initial_positions_file)['initial_positions']}"/>
 
         <ros2_control name="${name}" type="system">
@@ -19,6 +19,8 @@
                     <param name="torque_limit">${torque_limit}</param>
                     <param name="apply_servo_config">${apply_servo_config}</param>
                     <param name="probe_lock_sram">${probe_lock_sram}</param>
+                    <param name="max_joint_speed">${max_joint_speed}</param>
+                    <param name="limit_window_s">${limit_window_s}</param>
                 </xacro:unless>
             </hardware>
             <joint name="shoulder_pan">
