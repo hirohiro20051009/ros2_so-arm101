@@ -2106,3 +2106,15 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
   合計: 324 − 38 + 2 = 288。controller の分以外で減った行は無い。
 - 削除の直前のコミットと取り出し方: `git` 管理下の `src/so_arm101_controller/{package.xml,CMakeLists.txt,config/controllers.yaml}` は、実装のコミットの親 `49a6c18`（docs だけの変更。`src/` は `a5c8cbd` と同一）から取り出せる（`git checkout 49a6c18 -- src/so_arm101_controller`）。ソースの内容が最後に変わったのは `a5c8cbd`。`install/`・`build/` は git 管理外で戻らないが、上の控えと `colcon build --packages-select so_arm101_controller`（パッケージを戻した後）で再生成できる。
 - 承認の一覧に入っていなかった rmdir（`src/so_arm101_controller/launch`、`config`、`src/so_arm101_controller` の 3 つ）は、空だった（`find` で確認）ので、事後に承認された。
+
+## E2（`controllers.yaml` の移動後のモックの確認。2026-11-12。コミット 1fe9e34 の後。ユーザーが「実機は使っていない」と返事をした後）
+
+- 起動: `source setup_so101.sh` の後、`ros2 launch so_arm101_bringup bringup.launch.py mock:=true use_rviz:=false` を 1 回だけ（`2>&1 | tee -i` でログを取り、終了コードは `${PIPESTATUS[0]}`）。launch の PID（398257）は、`exec` の前に自分で控えた。シリアルポート・実機には触れていない。起動の前に `ps` で他の launch・`ros2_control_node`・`move_group` が無いことと、`ros2 node list --no-daemon` が空であることを確認した。
+- **3 つのコントローラが active**（起動から 20 秒以上後。`ros2 control list_controllers`）: `joint_state_broadcaster`（JointStateBroadcaster）、`arm_controller`（JointTrajectoryController）、`gripper_controller`（GripperActionController）。
+- **`ros2_control_node` の引数**（`ps -o args`）: `--params-file /tmp/launch_params_… --params-file /home/hirok/ros2_so-arm101/install/so_arm101_bringup/share/so_arm101_bringup/config/controllers.yaml`。新しい場所の `controllers.yaml` が使われている。
+- **読まれた値**: `ros2 param get /arm_controller open_loop_control` → True、`/arm_controller update_rate` → 25、`/controller_manager update_rate` → 50（`controllers.yaml` の値）。
+- **ログ**（`mock.log`。全体 約 300 行）: `so_arm101_controller` の文字列は **0 件**。`[ERROR]`・`[FATAL]`・`FAULT`（単語）・`activation failed`・`failed to activate` は、既知のものだけ: octomap の ERROR（`No 3D sensor plugin(s) defined for octomap updates`。57 行目）、終了時の `move_group` の Segmentation fault と exit code -11（296・298 行目。「無視してよい出力の一覧」にある）。`allow_nonzero_velocity_at_trajectory_end` の Deprecated の WARN（既存）。（最初の grep で `FAULT` が `default` に一致して多数出たが、大文字小文字を区別しない検索のため。実際の FAULT は無い。）
+- **停止**: 自分の launch の PID（398257）に `kill -INT` だけ。`${PIPESTATUS[0]}` = 0（launch は正常に終了）。`pkill`・`killall` は使っていない。
+- **後始末**: 停止の後、`ps` に `ros2_control_node`・`move_group`・`robot_state_publisher`・spawner・`ros2 launch` は無い（`gvfsd` の `--spawner` は無関係）。**停止の直後の `ros2 node list` には `/move_group` と `/moveit_simple_controller_manager` が残っていた**（`ps` は空）が、少し後の再確認では、daemon 経由・`--no-daemon` のどちらも空になった。`ros2 daemon` には触っていない。
+- 確認のために途中で起動した待機用のバックグラウンドの `until` ループ（自分の子プロセス）は、`TaskStop` で止めた。
+- 実機の読み取り専用の起動（8 章 3）は、ユーザーに依頼する項目として残っている（未実施）。
