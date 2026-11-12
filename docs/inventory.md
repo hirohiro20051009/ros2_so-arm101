@@ -2118,3 +2118,14 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **後始末**: 停止の後、`ps` に `ros2_control_node`・`move_group`・`robot_state_publisher`・spawner・`ros2 launch` は無い（`gvfsd` の `--spawner` は無関係）。**停止の直後の `ros2 node list` には `/move_group` と `/moveit_simple_controller_manager` が残っていた**（`ps` は空）が、少し後の再確認では、daemon 経由・`--no-daemon` のどちらも空になった。`ros2 daemon` には触っていない。
 - 確認のために途中で起動した待機用のバックグラウンドの `until` ループ（自分の子プロセス）は、`TaskStop` で止めた。
 - 実機の読み取り専用の起動（8 章 3）は、ユーザーに依頼する項目として残っている（未実施）。
+
+## E3（`controllers.yaml` の移動後の実機の読み取り専用の確認。2026-11-12。コミット 0d09791 の後。ユーザーが実施。結果: **合格**）
+
+- 実施: ユーザー。ログ `~/so_arm101_check/e1_readonly.log`（312 行。私は実機・シリアルポートに触れていない。ログの内容は私が読んで確認した。「ユーザーの報告」と書いたものは、ログに無く、ユーザーの報告による）。`read_only` の既定（true）の起動。
+- **起動**: `initialized` の出所は `ros_calibrated`（`measure_file=calibration_records/2026-11-11/measure_C1c_1.json`、`backup_file=…/eeprom_backup_20261111-163729.json`、`applied_at=2026-11-11T19:43:04`、`applied_by=so_arm101_calib 0.2.0`）。`[diag]` は **EEPROM vs yaml: 6/6 joints match**、**servo settings vs reference: 6/6 joints match**。SRAM は `torque_enable=0`・`lock=1`・`acceleration=50`（ログ 48 行の shoulder_pan ほか）。`controller_manager` の update rate は 50 Hz（59 行）。
+- **コントローラ**（ユーザーの報告）: `ros2 control list_controllers` で 3 つとも active。`arm_controller` の `open_loop_control` は True、`update_rate` は 25。`ros2_control_node` の引数は `…/install/so_arm101_bringup/share/so_arm101_bringup/config/controllers.yaml`。
+- **位置（出発点。ユーザーの報告）**: 16:00 の実測と同じ。−0.0967, −1.4968, +1.6901, +0.4204, −0.0453, +0.0246。
+- **停止**: `deactivated (no register was written). reads=4760 retried=0 failed_cycles=0 bus: flushed_requests=0 flushed_bytes=0 drained_bytes=0 id_mismatch=0 answered_first=0 timeouts=0 bad_checksum=0`（ログ 194 行）。`ros2_control_node` は `process has finished cleanly`。launch の exit=0（ユーザーの報告）。
+- **ログの検索**: `so_arm101_controller` の文字列は 0 件、`is not known to URDF` も 0 件（`grep -c` で確認）。終了時の `move_group` の exit code -11（Segmentation fault。`CallbackGroup::~CallbackGroup()`）は既知の挙動（「無視してよい出力の一覧」）。
+- **後始末**: 停止後、`ps` は空。`ros2 node list` に `/move_group` と `/moveit_simple_controller_manager` が残ったが、ユーザーが `ros2 daemon` を入れ直した後は空になった（ユーザーの報告）。
+- 計画（`docs/controllers_yaml_move_plan.md`）の 8 章 3 は完了。残りは E4（`controllers.yaml` の冒頭コメント。承認済み。別コミット）。
