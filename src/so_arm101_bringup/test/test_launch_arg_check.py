@@ -27,7 +27,9 @@ import re
 from launch import LaunchContext, LaunchDescription, LaunchDescriptionSource, LaunchService
 from launch.actions import (
     DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, SetLaunchConfiguration,
+    TimerAction,
 )
+from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 import numpy as np
 import pytest
@@ -67,10 +69,10 @@ def test_check_is_the_first_action():
 
 
 def test_declared_arguments():
-    assert len(DECLARED) == 21
+    assert len(DECLARED) == 22
     assert 'hardware' not in DECLARED
     for name in ('mock', 'read_only', 'torque_limit', 'use_rviz',
-                 'monitor_dynamics', 'rviz_config'):
+                 'monitor_dynamics', 'rviz_config', 'use_servo'):
         assert name in DECLARED
 
 
@@ -384,3 +386,85 @@ def test_dropping_yaw_is_singular_for_the_top_down_poses():
     for pose in TOP_DOWN_POSES:
         jac, _, _ = SM.jacobian(CHAIN, _top_down_q(pose, 0.4))
         assert SM.reduced_condition(jac, 'rz') > 1e4
+
+
+# ---------------------------------------------------------------------------------------------
+# use_servo (docs/servo_integration_plan.md, stage 2). The launch description is only inspected.
+# ---------------------------------------------------------------------------------------------
+def _text(value):
+    if isinstance(value, str):
+        return value
+    return ''.join(_text(v) for v in value) if isinstance(value, (list, tuple)) else value.text
+
+
+def _summary(entity):
+    if isinstance(entity, Node):
+        return f'Node:{_text(entity.node_package)}/{_text(entity.node_executable)}'
+    return type(entity).__name__
+
+
+def _split(entities):
+    plain = [_summary(e) for e in entities
+             if not isinstance(e, DeclareLaunchArgument) and e.condition is None]
+    conditional = [e for e in entities
+                   if not isinstance(e, DeclareLaunchArgument) and e.condition is not None]
+    return plain, conditional
+
+
+def _evaluate(entity, use_servo):
+    context = LaunchContext()
+    for name in DECLARED:
+        context.launch_configurations[name] = 'false'
+    context.launch_configurations['use_servo'] = use_servo
+    return entity.condition.evaluate(context)
+
+
+def _servo_node():
+    nodes = [e for e in LD.entities if isinstance(e, Node)
+             and _text(e.node_package) == 'moveit_servo']
+    assert len(nodes) == 1
+    return nodes[0]
+
+
+def test_use_servo_is_false_by_default():
+    declared = {a.name: a for a in LD.get_launch_arguments()}
+    assert _text(declared['use_servo'].default_value) == 'False'
+
+
+def test_actions_without_a_condition_are_the_same_as_before_use_servo():
+    plain, conditional = _split(LD.entities)
+    assert plain == [
+        'OpaqueFunction', 'IncludeLaunchDescription', 'Node:robot_state_publisher/'
+        'robot_state_publisher', 'Node:controller_manager/ros2_control_node', 'TimerAction',
+        'IncludeLaunchDescription']
+    assert [_summary(e) for e in conditional] == [
+        'Node:moveit_servo/servo_node_main', 'IncludeLaunchDescription',
+        'IncludeLaunchDescription']
+    timer = [e for e in LD.entities if isinstance(e, TimerAction)][0]
+    inner_plain, inner_conditional = _split(timer.actions)
+    assert inner_plain == ['IncludeLaunchDescription']
+    assert [_summary(e) for e in inner_conditional] == ['Node:controller_manager/spawner']
+
+
+def test_servo_node_and_forward_spawner_start_only_with_use_servo():
+    timer = [e for e in LD.entities if isinstance(e, TimerAction)][0]
+    spawner = [e for e in timer.actions if isinstance(e, Node)][0]
+    for entity in (_servo_node(), spawner):
+        assert _evaluate(entity, 'false') is False
+        assert _evaluate(entity, 'true') is True
+    assert [_text(a) for a in spawner._Node__arguments] == [
+        'forward_position_controller', '--inactive']
+
+
+def test_servo_node_parameters():
+    names = set()
+    for group in _servo_node()._Node__parameters:
+        if isinstance(group, dict):
+            names.update(_text(key) for key in group)
+    assert 'moveit_servo.command_out_topic' in names
+    assert 'robot_description' in names
+    assert 'robot_description_semantic' in names
+    for joint in SERVO_ARM_ORDER:
+        assert f'robot_description_planning.joint_limits.{joint}.max_velocity' in names
+    # No kinematics solver for Servo: the inverse Jacobian path (needed for the drift dimensions).
+    assert not [n for n in names if n.startswith('robot_description_kinematics')]
