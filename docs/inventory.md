@@ -2027,3 +2027,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 | `Deprecated` の WARN | 起動時 |
 | `/recognize_objects not available` | 起動時 |
 | `Maybe failed to update robot state`（0.03 s 程度） | 実行中。時間が大きいときは報告する |
+
+## ライセンスの計画（2026-11-12。調査と計画のみ）
+
+- `docs/license_plan.md` を追加（新規ファイルにした理由: `original_urdf_plan.md` 13 章は URDF の置き換えの時系列の記録で、範囲が広がったため。13 章には案内の 1 行だけを足した）。**LICENSE・package.xml・ソースのヘッダ・コードは変更していない。実機・ポート・ノードは使っていない。**
+- 要点: 由来は 自作 / nimiCurtis（MIT）/ TheRobotStudio（Apache-2.0）/ LeRobot 0.4.2 由来の値（Apache-2.0）/ MoveIt Setup Assistant の生成物（ユーザー自身が生成）に分けた。ルートに `LICENSE` は無く、NOTICE も無い（上流にも無い）。ヘッダは 1 行 36 本・全文 1 本・無し 8 本、SPDX は 0 件。
+- 確認: `ament_copyright` は bringup だけが colcon test で走る。1 行ヘッダ・SPDX は「ライセンス不明」で失敗し、許諾文の全文だけが通る（手動実行）。`ament_xmllint` は複数 `<license>` を許す（写しで確認）。
+- 案: 詳細は `docs/license_plan.md` 3 章。package.xml の `<license>` の変更（description: `BSD` → `MIT` + `Apache-2.0`、moveit_config: `BSD` → `MIT`）は**実装前に承認が必要**。ユーザーが決めること: 著作権表示、moveit_config の併記、LeRobot の帰属の案、ヘッダの範囲、`LICENSE.so101_ros2` の置き場所、`usd/` の由来の確認の時期。

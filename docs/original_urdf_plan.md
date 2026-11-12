@@ -457,6 +457,8 @@ src/so_arm101_description/
 
 ## 13. `LICENSE.so101_ros2` と `package.xml` の `<license>` の扱いの案
 
+> 2026-11-12: ユーザーが MIT を決めた後の、より詳しい計画は **`docs/license_plan.md`**（由来の一覧・LICENSE の案・package.xml の案・colcon test への影響）。この章は URDF の置き換え時点の記録として残す。
+
 **事実の整理**（5 章・7 章）: URDF・メッシュ = TheRobotStudio（Apache-2.0）。`controllers.yaml`・launch・package.xml の author・description のその他のファイル = nimiCurtis（MIT）。`<license>` は description・moveit_config が `BSD`、bringup・controller が `MIT`。
 
 | 項目 | 案 | 理由 |
