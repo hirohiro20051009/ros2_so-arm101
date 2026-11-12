@@ -46,3 +46,12 @@ so_arm101 のドライバ（`so_arm101_hardware` の `Sts3215System`）は **LeR
 ## so101_ros2（nimiCurtis）
 
 段階1で取り込んだ `so101_ros2` 由来のパッケージ（MIT）の LICENSE は `LICENSE.so101_ros2`。
+
+## 削除したもの（2026-11-12、段階 L2。`git rm`。archive は作っていない）
+
+LeRobot 経路と、そのための道具・ブリッジを、リポジトリから削除した。**戻すときは、タグ `stage2c-done`（コミット 1a3628e）から取り出せる**（例: `git checkout stage2c-done -- src/so_arm101_lerobot_bridge`、`git checkout stage2c-done -- tools/gen_conversion_golden.py`）。
+
+- 上の表の `tools/gen_conversion_golden.py`・`tools/lerobot_readonly_state.py`（および、表にない `tools/convert_lerobot_calibration.py`）は**削除した**。上の「開発・比較用で」の段落は、**削除前の説明**（歴史的）。再生成が必要なら、タグから取り出す。
+- 正解表 `conversion_golden.csv`・`unnormalize_golden.csv` は**残している**（LeRobot 0.4.2 の出力の数値。Apache-2.0 の帰属はこの文書とヘッダに残す。ヘッダの文言の中立化は L3）。
+- 表の「so_arm101_lerobot_bridge の `bridge.py`」の行は、削除したパッケージ内のコードへの言及（元は nimiCurtis/so101_ros2、MIT）。
+- `LICENSE.so101_ros2`（nimiCurtis、MIT）は、description の urdf・meshes・controller の出所が確定するまで残す。

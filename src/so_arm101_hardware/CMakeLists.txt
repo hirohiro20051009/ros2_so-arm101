@@ -15,13 +15,6 @@ find_package(yaml-cpp REQUIRED)
 # Add the include directory for the header file
 include_directories(include)
 
-# Create the shared library for the hardware interface plugin
-add_library(so101_hardware_bridge SHARED src/so101_hardware_bridge.cpp)
-
-# Link the library against its dependencies
-ament_target_dependencies(so101_hardware_bridge rclcpp hardware_interface
-                          pluginlib)
-
 # Feetech STS3215 を直接読む SystemInterface（読み取り専用）。LeRobot には依存しない。
 add_library(so_arm101_sts3215 SHARED
   src/serial_port.cpp
@@ -35,7 +28,7 @@ target_link_libraries(so_arm101_sts3215 yaml-cpp)
 
 # Install the compiled library to the lib directory
 install(
-  TARGETS so101_hardware_bridge so_arm101_sts3215
+  TARGETS so_arm101_sts3215
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
@@ -83,7 +76,7 @@ if(BUILD_TESTING)
 endif()
 
 # 他のパッケージ（so_arm101_calibration など）が so_arm101_sts3215（Sts3215Bus / Sts3215WriteBus /
-# calibration など）を使えるようにする。公開ヘッダ（sts3215_system.hpp と so101_hardware_bridge.hpp）が
+# calibration など）を使えるようにする。公開ヘッダ（sts3215_system.hpp など）が
 # rclcpp / rclcpp_lifecycle / hardware_interface / std_msgs / sensor_msgs のヘッダを include するので、
 # 依存も export する（yaml-cpp はライブラリがリンクしている）。
 ament_export_include_directories(include)

@@ -5,7 +5,7 @@
 //     サーボには一切書き込まない。command は破棄する。書き込み用のクラスは生成しない。
 //   read_only:=false（段階2b-3b）: トルク ON と Goal_Position の送信。手順と異常時の扱いは
 //     docs/inventory.md「段階2b-3 の計画 v3」「段階2b-3b の計画 v4」。
-//   - velocity は位置の有限差分（So101HardwareBridge の bridge と同じ扱い）。
+//   - velocity は位置の有限差分。
 //   - スレッド・タイマー・非同期は使わない。1 Hz の監視も read() の中で行う。read/write/on_*/デストラクタは
 //     1 本の mutex で守り、バスの 1 往復は SerialPort::Transaction で守る（シリアルポートの同時使用を防ぐ）。
 #pragma once
