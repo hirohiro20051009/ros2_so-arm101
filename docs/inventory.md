@@ -2234,3 +2234,8 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 
 - 追加: `tools/send_servo_twist.py`（**実機を動かす。ユーザーだけが実行する**）。入力は unitless の割合。成分 0.5・時間 3 秒・先端の総移動量 2 cm・回転 0.1 rad・frame は base_link か gripper_frame_link だけ（`--allow-fast` は成分を 1.0 まで）。現在の関節角から Jacobian の値域に Twist を射影し（捨てる成分が 50 % 以上なら拒否）、pan から drift（rx／ry）を選んで `change_drift_dimensions` を呼ぶ。`forward_position_controller` が active・`arm_controller` が inactive でなければ拒否。計画を表示して Enter を待つ（`--yes` で省く、`--dry-run` は何も送らず設定しない）。stamp は `now()`。終了時（Ctrl-C を含む）にゼロの Twist を 0.3 秒。コントローラの切り替えはしない。
 - 試験: bringup 69 → **82**（pytest 56 → 69。+13: 小さい要求の受理、拒否 8 件、`--allow-fast`、z だけの計画、作れない軸の回転を拒否、gripper frame から base_link への変換）。全体 249 → **262**、失敗 0。
+
+## Servo 試験の分離と exec_depend（2026-11-12。ユーザーの追加の承認）
+
+- `package.xml`: `<exec_depend>moveit_servo</exec_depend>`（`:18`）と `<exec_depend>forward_command_controller</exec_depend>`（`:19`）を追加（`moveit_configs_utils` の次。moveit_servo は bringup に宣言が無かった）。
+- Servo 関係の試験（34 件）を `test_launch_arg_check.py` から `test_servo_integration.py` に移し、`CMakeLists.txt`（`:37-39`）に `ament_add_pytest_test` を登録。試験の名前は不変（`pytest --collect-only` で移す前後の名前の集合が同一）。pytest の総数は 69（35 + 34）で不変。`colcon test-result` の bringup は 82 → 85（pytest 以外の +3: ファイルごとの copyright・pep257 が各 +1、ctest の登録が +1）。全体 262 → 265、失敗 0。
