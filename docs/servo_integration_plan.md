@@ -645,6 +645,8 @@ Servo の設定ファイルの置き場所:
 
 ### 6.2 新しい手順書（実機の段階）の目次の案: `docs/servo_real_check.md`
 
+**この目次を元に、手順書 `docs/servo_real_check.md` を作成した（段階 R0a・R0b・R1〜R3、W0〜W6。コマンド・確認すること・合格の条件つき。14.1 の結果を止め方・停止後の確認に反映）。**
+
 `feetech_write_check.md` と同じ形（共通の約束、1 ステップずつ、合格基準、報告してほしいもの、ログの読み方）。**実機の確認は「Python からの単発の目標に対する Servo の小さい補正」まで**。VR は目次だけ。**モード管理のノードは作らない（D17）。コントローラの切り替えは、`ros2 control switch_controllers` で手動**。
 
 **流れ**: 読み取り専用で確認 → 書き込みモードで MoveIt（OMPL）を使って中間姿勢へ → **止まっていることを確かめて**手動で Servo（forward 系）に切り替え → Python から単発の小さい補正 → Servo を止めて JTC に戻す → MoveIt で出発点へ。
@@ -952,6 +954,40 @@ V. VR（解析 IK の連続出力。Servo は使わない）
 - 終了時（`kill -INT`）: `use_servo:=true` の run で、`move_group` に加えて **`ros2_control_node` も exit code −11（Segmentation fault）**。`use_servo:=false` の run では `move_group` だけ。**`ros2_control_node` の −11 は新しい**（今まで記録していない）。原因は未調査（Servo・forward controller を spawn した状態の終了時 **[推測]**）。腕の保持・書き込みには関係しない（モック）。終了後は `ps` が空。`ros2 node list` に `/move_group` などが残ったので（既知の挙動）、`ros2 daemon stop; ros2 daemon start` の後に空。
 
 **モックで分からないこと（実機の手順書の項目へ。6.2）**: (1) **L1 の効き**（ドライバの上限 0.06 rad/周期。書き込みモードの起動ログ `WRITE mode:` の `max_joint_speed=0.75 … window=0.080` と `Per-cycle step limit: 39 ticks`。MoveIt Scaling 0.1 の実行で `step limit` の WARN が出ないこと）、(2) **gripper の開閉時間**（上限 0.06 rad/周期で、全開閉が約 0.6 秒。`GripperActionController` が完了すること）、(3) **実機の不感帯・摩擦**（11.1 の Q1〜Q6。実速度の比（モックで 0.47）も実機で測る）、(4) 速度の上限（0.3 rad/s）の強制（モックでは速度が足りず未確認）、(5) 量子化。
+
+### 14.1 終了時の `ros2_control_node` の Segmentation fault（exit −11）の調査（2026-11-12。追加の依頼）
+
+**調べたこと**: `servo_mock_1.log` の順序と、モックの再実行 6 回（ログ `servo_mock_3〜7.log`。`use_servo:=true` 4 回、`false` 1 回に `servo_mock_2`・`servo_mock_6` を合わせて集計）。止め方は、自分で起動した launch の PID に `kill -INT`。**コード・設定は変えていない。**
+
+**事実（`servo_mock_1.log`。SIGINT の受信は `…054.684` 秒）**:
+1. `ros2_control_node`: `Shutdown request received` → コントローラを順に `Deactivating`・`Shutting down` → **`'deactivate' hardware 'SO101System'`（`…054.685249`）→ `Successful 'deactivate'` → `'shutdown' hardware` → `Successful 'shutdown'`（`…054.685264`）→ `Shutting down the controller manager.`（`…054.685270`）**。
+2. **その後に** スタックトレース: `#5 rclcpp::Executor::~Executor()` ← main（`ros2_control_node` の本体）。つまり、**落ちたのは、ハードウェアの停止処理（`on_deactivate`・shutdown）が成功した後の、プロセス終了時のデストラクタ**。
+3. 同じ SIGINT で、`servo_node_main`（別のプロセス）は `finished cleanly`、`move_group` は別に −11（既知）。
+
+**再現の頻度（モック）**:
+
+| run | use_servo | 止めたときの状態 | `ros2_control_node` | `move_group` |
+|---|---|---|---|---|
+| `servo_mock_1` | true | arm active、forward inactive、Servo は一時停止（切り替え・Servo の動作の後） | **−11** | −11 |
+| `servo_mock_3` | true | 起動のまま（何もしない） | 正常終了 | −11 |
+| `servo_mock_4` | true | **forward active、Servo 動作中**（Twist を送った後） | 正常終了 | −11 |
+| `servo_mock_5` | true | `servo_mock_1` と同じ手順の後（arm active、forward inactive、Servo 一時停止） | 正常終了 | −11 |
+| `servo_mock_7` | true | 同上（Twist・JointJog を数回） | 正常終了 | −11 |
+| `servo_mock_2` | false | 起動のまま | 正常終了 | −11 |
+| `servo_mock_6` | false | JTC で動かした後 | 正常終了 | −11 |
+
+→ **`use_servo:=true` は 5 回中 1 回、`false` は 2 回中 0 回**。**毎回は起きない**。全 7 回で、ハードウェアの `deactivate`・`shutdown` は `Successful` で、クラッシュの前に終わっている。
+
+**推測（確認していない）**: (1) 落ちる位置（`Executor::~Executor`）から、`rclcpp` の終了時の競合（executor に登録されたノード・コールバックの破棄の順序）で、ROS の上流の既知の種類の問題 **[推測]**。(2) `use_servo:=true` のときだけ起きたので、`forward_position_controller` を読み込んでいること（controller のノードが 1 つ増える）が関係する可能性 **[推測。件数が少なく、有意とは言えない]**。(3) Servo のノードは別のプロセスで、この落ちるプロセスの中には無い（Servo が先に終わることとの関係は、観察できなかった）。(4) controller_manager が、コントローラの解放中に落ちたのではない（解放・shutdown のログが先に出ている）。
+
+**手順で、止める前の状態（forward active／arm active）による差**: `servo_mock_4`（forward active で停止）は正常終了で、`servo_mock_1` と同じ状態（`servo_mock_5`・`7`）も正常終了。**状態による差は見えない**（件数が少ない）。
+
+**結論: 「実機の書き込みモードで `use_servo:=true` を使うとき、後始末が終わる前に落ちる危険があるか」**:
+- **観察した範囲では、ない**。落ちたのはハードウェアの停止処理の**後**で、停止処理は同じスレッドの同期の呼び出し（`resource_manager` の `deactivate` → `on_deactivate`。実機ではトルク OFF・Lock=1 の確認がここで終わる。`sts3215_system.cpp:388-` の `shutdown_servos("deactivate")`）。クラッシュが起きうるのは、その後の終了処理。
+- **ただし、実機のドライバでは未確認**（モックにはトルクが無い）。落ちる前に `on_deactivate` が走ることは、コードの順序（ログの順）から言えるが、**実機のログで `[deactivate] torque OFF and Lock=1 confirmed` を、毎回確認する**必要がある。
+- **手順書での避け方（`docs/servo_real_check.md` の「停止したあとの確認」と止め方の表に反映した）**: (1) 止める前に、Twist の送信を止め（S1）、`pause_servo`（S2）、止まっていることを確認して forward controller を外して `arm_controller` に戻し（S3）、腕を支えてから、launch を Ctrl-C 1 回（S5）。（効果は未確認。頻度の原因が特定できていないため、予防の気休めを超えない）。(2) **停止のたびに、ログの `[deactivate] … confirmed` と `deactivated. …` の 2 行を確認**し、無ければ腕を支えて 12 V を切る（S6）。(3) 停止後に読み取り専用で起動し、`torque_enable=0 lock=1` を確認。(4) **R0b（読み取り専用）で、`use_servo:=true` の起動・停止を 3 回行い、−11 の回数を数える**（腕に書かないので安全）。(5) −11 が出たら、スタックと、直前の行の有無を報告。
+
+**運用の事実（手順の注意）**: シェルのバックグラウンド（`&`）で起動した launch は、**SIGINT が無視される**ことがある（非対話のシェルでは、`&` で起動したジョブが SIGINT を無視する設定を引き継ぐ）。launch は前景で動かし（`2>&1 | tee -i …`）、**別の端末から `kill -INT` する**（または launch の端末で Ctrl-C）。今回の 1 回目の再実行は `&` で起動したため `kill -INT` が効かず、launch に `kill -TERM` を送ったところ、launch の本体だけが死んで子プロセス（`ros2_control_node`・`move_group`・`servo_node_main` など）が残った。**残った子は、控えた PID（自分で起動したもの）に個別に `kill -INT` で止めた**（モックのみ。実機では起きない）。そのログ（1 回目の `servo_mock_3.log`）は上書きして取り直した。
 
 ## 付録: Jacobian の条件数の計算（ノード不使用）
 

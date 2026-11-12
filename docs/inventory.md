@@ -2248,3 +2248,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - 新しい終了時の挙動: `use_servo:=true` で `ros2_control_node` も exit −11（`use_servo:=false` では move_group だけ）。原因は未調査。
 - 後始末: `kill -INT`（自分で起動した PID。`pkill` なし）。`ps` は空。`ros2 node list` に `/move_group` などが残り、`ros2 daemon stop; ros2 daemon start` の後に空。
 - モックで分からないこと（実機の手順書へ）: L1 の効き、gripper の開閉時間、実機の不感帯・摩擦、Servo の速度上限の強制、量子化。
+
+## 終了時の ros2_control_node の Segmentation fault の調査と、実機の手順書（2026-11-12。調査のためのモック 6 回のみ。実機は使っていない）
+
+- **`ros2 daemon` の操作の記録（事実）**: この日の Servo のモックの確認（`servo_mock_1`・`servo_mock_2`）の後始末で、`ps` が空なのに `ros2 node list` に名前が残ったため、CLAUDE.md の規則に従って `ros2 daemon stop; ros2 daemon start` を **2 回**行った（どちらも、その後の `ros2 node list` は空）。ユーザーの指示で、**以後 `ros2 daemon` には触らない**（`ps` が空なら「daemon の古い一覧（既知）」と報告するだけ）。今回の調査では、触っていない（調査後の `ros2 node list` も空）。
+- **調査（詳細は計画 14.1）**: `servo_mock_1.log` で、`ros2_control_node` は、ハードウェアの `deactivate`・`shutdown` が `Successful` になり、`Shutting down the controller manager.` の**後**に落ちた（`rclcpp::Executor::~Executor()`、main の後始末）。モック 6 回の再実行（`use_servo:=true` 4 回、`false` 2 回）で、`use_servo:=true` は 5 回中 1 回（`servo_mock_1` だけ）、`false` は 2 回中 0 回。`move_group` の −11 は 7 回中 7 回（既知）。全回で、ハードウェアの停止処理はクラッシュの前に完了。原因は未特定（`rclcpp` の終了時の競合と、`forward_position_controller` の存在との関係は推測）。結論: 観察した範囲では、後始末が終わる前に落ちる危険は無い。実機では未確認なので、手順書で毎回 `[deactivate] … confirmed` と `deactivated. …` を確認し、読み取り専用の R0b で 3 回の起動・停止を行って −11 の回数を数える。
+- **運用の事実**: `&` で起動した launch は SIGINT を無視する（非対話のシェル）。1 回目の再実行で `kill -TERM` を launch に送ったところ、launch の本体だけが死んで子プロセスが残り、控えた PID に個別に `kill -INT` で止めた（モックのみ）。以後、launch は前景で（バックグラウンドのタスクとして）動かし、`kill -INT` で止める。
+- **手順書 `docs/servo_real_check.md` を追加**（R0a・R0b・R1〜R3、W0〜W6。止め方 S1〜S6、12 V を切る条件、止まっていることの確認（コマンド A）、停止後の確認、Q1〜Q6、L1 の効き・gripper の開閉時間・実機の不感帯と実速度の比・Servo の速度上限の強制（任意）・量子化）。中間の姿勢 T = (pan 0°、lift −22°、elbow +30°、wrist_flex +83°、roll 0°。先端 (0.177, 0, 0.059) m、接近軸は真下、自己衝突まで約 97 mm、5×5 の条件数 約 23。出発点からの直線補間の経路で先端 z の最小は出発点の 0.022 m）。床（未測定）に近づかないため、−z は 1 回 5 mm・累計 15 mm 以内。
