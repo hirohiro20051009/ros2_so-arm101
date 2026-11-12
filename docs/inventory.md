@@ -1773,3 +1773,9 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **試験の件数（前 → 後。クリーンビルドの後）**: hardware gtest **99 → 99**、test-result **105 → 105**。calibration gtest **71 → 71**、**73 → 73**。失敗 0。moveit_config 0 → 0。bringup（lint）**16 件・失敗 12 → 16 件・失敗 12**（変化なし）。
 - **残り（L3 では触れていない）**: `[diag] EEPROM vs yaml`（変更なし）、`sts3215_system.hpp` など出典・Apache-2.0 の帰属、`LICENSE.so101_ros2`、SRDF の `elbow_flex`、`tools/` の docstring・コメントの LeRobot の語（`fake_sts3215.py` など）、`bringup.launch.py` の `apply_servo_config` の description の「LeRobot の値」（launch の文言なので、次の機会）。
 - **未実施**: L3 の後の、ユーザーによる読み取り専用の起動と W0（新しい文言 `servo settings vs reference: 6/6 joints match`、`MATCH (reference)` が 6 行、`[diag] EEPROM vs yaml: 6/6 joints match`、`startup_read_retries=0`、全カウンタ 0、停止後 `torque_enable=0 lock=1 acceleration=50`）。
+
+## L3 の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/` の `L3_readonly.log`・`write_L3_W0.log`・`write_L3_W0_after.log`）
+- **読み取り専用の起動**: `initialized: port=/dev/ttyACM0`、`EEPROM vs yaml` **6/6 match**、**`MATCH (reference)` が 6 行**、**`servo settings vs reference` 6/6 match**、`DIFFERS` なし、コントローラ 3 つ activated、`reads=367 retried=0 failed_cycles=0`、bus はすべて 0（`timeouts=0 bad_checksum=0` まで）、exit=0。電圧 11.8〜11.9 V、温度 29〜34 ℃。
+- **W0（`probe_lock_sram:=true`）**: 腕は動かず保持。`servo settings vs reference` 6/6 match、`[probe] ACCEPTED on all joints`、`startup_read_retries=0`、`[deactivate] torque OFF and Lock=1 confirmed`、`deactivated. reads=898 goal_writes=898 monitors=17`（約 18 秒）`rate_limited=0 port_contention=0`、bus はすべて 0、exit=0。
+- **W0 の後の読み取り専用**: 6 関節とも `torque_enable=0 lock=1 acceleration=50`、6/6 match が 2 行、`reads=399`、カウンタ 0、exit=0。
+- 結論: L3（ログの文言・yaml のコメント・固定ファイルと plugin xml の改名・maintainer）は、実機の挙動に影響していない。新しい文言（`reference`）が、手順書の grep の期待どおりに出ることを確認した。
