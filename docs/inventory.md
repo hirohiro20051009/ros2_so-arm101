@@ -2176,3 +2176,20 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **`package.xml:18`（moveit_config）の変更（ユーザーの決定）**: 前 `<author email="chimay_beer@outlook.jp">hirok</author>` → 後 `<author email="hirohiro20051009@gmail.com">hiro</author>`。outlook もユーザー本人のアドレスだが、GitHub と接続している gmail に統一した。ビルド後、`install/so_arm101_moveit_config/share/so_arm101_moveit_config/package.xml:18` に反映、`ament_xmllint` は valid、moveit_config の colcon test は 0 件のまま。**git 管理下に残る outlook のアドレス**: `docs/inventory.md:1758`・`docs/license_plan.md:24`（どちらも過去の記録。直していない）。
 - **git の設定（確認のみ。履歴は書き換えていない）**: `user.name` = `hirohiro20051009`、`user.email` = `193022585+hirohiro20051009@users.noreply.github.com`（どちらも `file:/home/hirok/.gitconfig`）。`git log --format='%an <%ae>' | sort | uniq -c` = **109 コミットすべて** `hirohiro20051009 <193022585+hirohiro20051009@users.noreply.github.com>`。
 - **残課題**: moveit_config の author（outlook → gmail）は今回直した。公開するときの Copyright 表記（`hiro` と本名の扱い）は `docs/license_plan.md` のとおり未決。
+
+## usd/ の由来の調査と削除（2026-11-12。ユーザーの判断。調査: 読み取りのみ）
+- **残課題「usd/ の由来」: 調査済み・削除で閉じた**。上の「usd/ は残す（Isaac Sim／Isaac Lab で使う予定）」の決定は書き換えない。**2026-11-12 に削除へ変更**した（理由: シーン一式でロボット単体として使えない。Isaac で使うときは今の URDF から URDF Importer で作り直す。不要なものを残して後で迷わないため）。
+- **調査の結論**
+  - **[事実]** 5 ファイルは nimiCurtis/so101_ros2 b50872d の `so101_description/usd/` と sha256 が 5 つとも一致（旧ワークスペースの `so101_ros2` とも一致）。本体 `so101_new_calib.usd` は 23,421,665 B（sha256 先頭 `af0b8ff639fc`）、`configuration/*.usd` 4 つは各 492 B・同一（`57dd85a3cc35`）で中身は空のレイヤー。すべてバイナリ（`PXR-USDC`、crate 0.9.0）。
+  - **[事実]** Isaac Sim（Omniverse）で保存されたシーン一式。ロボット本体（7 リンク・6 関節・メッシュ埋め込み）に加え、GroundPlane、`gripper_link/cam_front`、physicsScene、ライト、Render 設定、S3 の Isaac 5.1 アセット（simple_room・sorting_bowl_yellow・packing_table・yellow_block）の payload を含む。`upAxis=Z`、`metersPerUnit=1.0`、`omni_layer` あり。
+  - **[事実]** 関節名・範囲・原点は `so101_new_calib` と一致（範囲は USD が度、URDF がラジアン。換算で 6 関節とも一致。原点の xyz も一致）。`so101_old_calib`（TheRobotStudio a758567）とは範囲・原点が違い、old 由来ではない。
+  - **[推測]** メッシュと関節の値は TheRobotStudio の new_calib 由来と見られる（メッシュの形は STL と未照合）。
+  - **[事実]** nimiCurtis 側の履歴で usd に触れているコミット: `0abbfc3`（2025-10-09）、`e47e0f7`（2025-10-12、作者 anton、メッセージ「update usd because of new urdf …」）、`c722346`（2025-10-12）。ほかに `cf7bd94`・`f10e2ce`・`6c3cc2d`・`f50af77`・`cca6c1b` の変更にも含まれる。
+  - **[推測]** 作成は Isaac Sim 5.1 前後（外部参照の URL が `Assets/Isaac/5.1/`）。作成者が anton かどうかも推測。
+  - **[事実]** TheRobotStudio/SO-ARM100 に USD は無い。a758567（`/tmp/orig_so100/repo`）の `git ls-files` で無し。**385e8d7 でも**、`git ls-tree -r --name-only 385e8d7 | grep -i usd` の出力は空（grep の終了コード 1）。
+- **調べるのに使った上流の取り出し（リポジトリ外の `/tmp`。読み取りのみ）**: `/tmp/orig_nimi/repo`（b50872d2ba03a3d67fb9a9a7b59af1e72c7040b3）、`/tmp/orig_so100/repo`（a758567、385e8d7 も参照）。USD を読むのに、既存の Isaac Lab の venv（`~/work/IsaacLab/.venv`、Isaac Sim 6.0.1.0、pxr 0.25.11）を読み取りだけで使った（インストールはしていない）。
+- **削除（`git rm`、承認済みの 5 ファイルのみ）**: `src/so_arm101_description/usd/so101_new_calib.usd`、`usd/configuration/so101_new_calib_{base,physics,robot,sensor}.usd`。空のディレクトリは残っていない。
+- **戻し方**: 削除の直前のコミット `25f7b09b721487efb573d423a0b159e7affe3798`（`25f7b09`）から取り出せる。`git checkout 25f7b09 -- src/so_arm101_description/usd`。git 管理下のファイルで、LFS は使っていない（`.gitattributes` なし）。git 管理外のものは無かった。
+- **削除の前の確認**: `usd` の参照は、CMake・package.xml・launch・xacro・コード（docs 以外）に無い。残っていたのは `THIRD_PARTY_NOTICES.md` の 1 行だけで、その行を削除した（nimiCurtis の節のほかの項目は変更なし）。docs の過去の記述（`license_plan.md`、`original_urdf_plan.md` ほか）は歴史として書き換えない。
+- **前後の確認**: description の install/ のファイル一覧（60 行）は前後で `diff` 空。description の colcon test は前後とも 2 件・失敗 0。`xacro` から生成した robot_description の 6 通り（`~/so_arm101_check/gen_rd6.sh`。前 `usd_before/`・後 `usd_after/`）は `cmp` で 6 通りとも同一（先頭 16 桁: `d8eebdcd27762b2b`（mock 2 つ）、`9bfaceea6da94c16`、`a5160ee8aad290a8`、`6bf7aa602dc5b6ad`、`7dc2c92cc80f37ed`）。実機・モックの起動は不要としたので行っていない。
+- **将来 Isaac で使うときの方針**: 今の URDF（`third_party/SO-ARM100/so101_new_calib.urdf`、385e8d7）から、URDF Importer でロボット単体の USD を作る。注意: 関節の範囲は USD では度（URDF はラジアン）。ドライブの値（旧 USD では stiffness 17.8、damping 0.6、maxForce 10）は実機の STS3215 の制御と別物で、使うときに決め直す。S3 のアセット（ネットワーク必須）には頼らない。

@@ -22,7 +22,6 @@ Details and the history: `docs/third_party.md`, `docs/license_plan.md`.
   - `src/so_arm101_bringup/package.xml`, `CMakeLists.txt`
   - `src/so_arm101_description/package.xml`, `CMakeLists.txt`
   - `src/so_arm101_hardware/package.xml`, `CMakeLists.txt` (skeleton of upstream `so101_hardware_interface`: description, dependency list, plugin export, comments), `so_arm101_hardware_plugins.xml` (the file format and its structure; the driver code is not from upstream)
-  - `src/so_arm101_description/usd/` (5 files; origin not yet confirmed — to be checked before use with Isaac Sim)
 - The `<author>Nimrod</author>` entries in the `package.xml` files of bringup, description and hardware record the original author.
 - **`LICENSE.so101_ros2` can be removed only when none of the files above is left** (rewritten from scratch or deleted) and a grep for `nimiCurtis`, `Nimrod`, `Copyright` shows no remaining attribution. Remove it in a separate step with `git rm`, and record the commit to restore it from in `docs/inventory.md`.
 
