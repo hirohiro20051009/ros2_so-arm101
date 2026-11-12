@@ -2008,7 +2008,22 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - コントローラ 3 つが activated（`joint_state_broadcaster`、`arm_controller`、`gripper_controller`）。
 - 終了時: `deactivated (no register was written)`。`reads=945 retried=0 failed_cycles=0`、`bus:` のカウンタはすべて 0。
 - 気になるログ 0 行。SRDF の `elbow_flex` の警告 0 件。
-- ERROR は、**終了時の `move_group` の Segmentation fault（exit -11）だけ**。**[記録のみ・未調査]** この Segmentation fault が今回の変更（削除・依存の整理）の前から出ていたかは、このリポジトリの記録からは確認していない（`inventory.md` に過去の記録は見つからない）。原因は不明。終了時（`kill -INT` の後）の出来事で、レジスタへの書き込みは無い（上の `deactivated (no register was written)`）。調べるなら、削除の前のコミット `d7c39b9` のビルドで同じ起動をして、比較する必要がある（ユーザーの依頼があったときだけ。実機を使う）。
+- ERROR は、終了時の `move_group` の Segmentation fault（exit -11）だけ。**以前から出ている既知の挙動で、無視してよい出力として扱う**（過去の記録: 1653 行、1710 行。`rviz2` の終了時も同じ）。レジスタへの書き込みはなく、停止の処理（`deactivated` の行）は正常に出る。原因は調べていない（MoveIt 側の終了処理と推測 **[推測]**）。`d7c39b9` との比較は不要。
 - 後始末: `ps` と `ros2 node list` ともに空。
 - SRAM: `torque_enable=0`、`lock=1`、`acceleration=50`（全関節）。電圧 11.8〜11.9 V、温度 30〜34 ℃。
 - 結論: 22 章の実施（削除 10 ファイル、C1〜C3）は、実機の読み取り専用の起動の範囲で問題なし。22 章は完了。
+
+## 無視してよい出力の一覧（2026-11-12。ユーザーとの間で、これまでの実機・モックの確認で「無視してよい」としてきたもの）
+
+実機・モックの確認のログを読むときに、次の出力は問題として扱わない。ここに無いものは、新しい出力として報告する。
+
+| 出力 | 出るとき・備考 |
+|---|---|
+| 終了時の `move_group`・`rviz2` の Segmentation fault（exit -11） | 終了時（`kill -INT` の後）。レジスタへの書き込みは無く、`deactivated` の行は正常に出る。原因は調べていない（MoveIt 側の終了処理と推測 **[推測]**） |
+| octomap の ERROR | 起動時 |
+| effort の `nan` | 状態の表示 |
+| 起動失敗時の `ros2_control_node` の exit -6 | 起動が失敗したときの結果。原因は別のログで調べる |
+| `kdl_parser` の root link の inertia の WARN | 起動時 |
+| `Deprecated` の WARN | 起動時 |
+| `/recognize_objects not available` | 起動時 |
+| `Maybe failed to update robot state`（0.03 s 程度） | 実行中。時間が大きいときは報告する |

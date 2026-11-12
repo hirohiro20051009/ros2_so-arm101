@@ -699,3 +699,4 @@ grep（リポジトリのルートで。`build/ install/ log/ .git __pycache__ d
 
 - 実施: コミット `8c5734b`（`git rm` 10 ファイル（22.2 の一覧。本文の「12」は数え間違い）、C1・C2・C3、クリーンビルド）。前後の確認（sha256 6 通りが同一、`--show-args` 21 個、pipelines、colcon test 231 件・失敗 10）はすべて予想どおり。詳細は `docs/inventory.md` の同名の節。
 - 実機の読み取り専用の起動（1 回）: **合格**。詳細は `docs/inventory.md` の「削除・依存の整理の後の実機確認: 合格」。
+- 終了時の `move_group` の Segmentation fault（exit -11）は、以前から出ている既知の挙動で、無視してよい出力として扱う（`docs/inventory.md` の「無視してよい出力の一覧」）。レジスタへの書き込みは無く、停止の処理は正常に出る。原因は調べていない（MoveIt 側の終了処理と推測）。`d7c39b9` との比較は不要。
