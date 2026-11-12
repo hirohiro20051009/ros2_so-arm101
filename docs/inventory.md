@@ -1681,3 +1681,8 @@ C1 の判断で「新しい値を書く」を選んだが、先にツールを�
   - **EEPROM の Min/Max_Position_Limit と yaml の `min`/`max`・`eeprom.min_limit`/`max_limit` の一致を、起動時に検査している**（書き込みモードでは不一致なら起動を拒否。試験 `RefusesWhenMinOrMaxLimitDiffersFromYaml`）。yaml の min/max だけを内側にすると、この検査と変換（gripper は min/max で正規化）に影響する。
   - 入れるなら、**EEPROM は測った値のまま残し、ドライバ側で関節・向きごとの余裕を持たせる**案がある（余裕は yaml の別項目にする、など）。その場合、yaml の書式（schema_version）と起動時の検査・試験の変更が要るので、承認制で別途計画する。
 - **LeRobot 経路は、このプロジェクトの ROS パッケージから将来すべて削除する**。洗い出しと計画は `docs/lerobot_removal_plan.md`（実施は未。承認の後）。
+
+### LeRobot 経路の削除の方針（ユーザー判断 2026-11-12。計画は `docs/lerobot_removal_plan.md` 第 2 版。実施は未）
+- **`archive/` は作らず、`git rm` で完全に削除する**（so_arm101_lerobot_bridge、`tools/gen_conversion_golden.py`・`lerobot_readonly_state.py`・`convert_lerobot_calibration.py`、nimiCurtis 由来のコード、`Gili.json`・`Tzili.json`、`bringup_with_cameras.launch.py` を含む）。**戻すときは、タグ `stage2c-done`（1a3628e）から取り出せる**（例: `git checkout stage2c-done -- src/so_arm101_lerobot_bridge`）。CLAUDE.md の「archive へ移動」の規則との違いは、計画書の注意に書いた（CLAUDE.md は未変更）。
+- 方針: LeRobot の完全排除と、必要最小限のパッケージにすることを優先する。問題が出たらその都度対策する。
+- 決定: `[diag]` の基準値はコードに残して文言を reference に（A）、黄金表は名前を中立にして残す（A）、`hardware` 引数は `feetech` だけ受け付けて他は明示的なエラー、docs の LeRobot の手順は「歴史的」と注記、`setup_so101.sh` の `LECONDA_SITE_PACKAGES` は削除（`CONDA_PREFIX` の確認は手順書に残す）。`LICENSE.so101_ros2` は、MIT の帰属が必要なコードが残らないことを確認してから削除（現状は `camera.launch.py` が残る。計画書 7 章）。
