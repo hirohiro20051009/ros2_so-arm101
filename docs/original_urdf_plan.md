@@ -446,7 +446,7 @@ src/so_arm101_description/
 | 4 | `urdf/so101_new_calib_with_transmission.xacro` | description の xacro からしか include されない。A 案の URDF が `<transmission>` を持つので、**役目が重なる** | 無し |
 | 5 | `config/initial_positions.yaml`、`config/joint_limits.yaml`、`config/joint_names_so_arm_urdf.yaml` | 参照は #2 の xacro の既定値（`initial_positions.yaml`）だけ。moveit_config 側に同名で別の値のものがあり、そちらが使われる（description 側は lift −1.75 など、値も違う） | #2 を消すなら不要。値が違うので、**間違って読まれる危険**もある |
 | 6 | `joints_properties.xml` | オリジナル（`Simulation/SO101/joints_properties.xml`）と同一（末尾の改行以外）。MuJoCo 用で、ROS 側から読まない | 無し |
-| 7 | `usd/`（5 ファイル、約 23 MB） | Isaac Sim 用。参照が無い。`CMakeLists.txt` の `install` にも含まれない（`meshes config launch rviz` のみ）。TheRobotStudio のオリジナルに無い（由来は nimiCurtis と推測。未確認） | **将来 Isaac Sim を使う予定があるか、ユーザーの判断**。削除ならタグ・コミットから戻せる。リポジトリが約 23 MB 軽くなる（履歴には残る） |
+| 7 | ~~`usd/`~~ **候補から外した（ユーザーの判断 2026-11-12: Isaac Sim／Isaac Lab で使う予定があるため残す）** | （元の理由: Isaac Sim 用で参照が無い。約 23 MB、5 ファイル） | 残す。由来（どのツールで、どの URDF から作ったか）は後で調べる課題（`docs/inventory.md` に記録） |
 | 8 | `.flake8` | description に Python が無いので不要 **[推測]**（lint の設定が他から参照されるか未確認） | 影響は小さい。判断は任意 |
 | 9 | `package.xml` の `<depend>urdf</depend>`、`CMakeLists.txt` の `find_package(urdf)`、`install(DIRECTORY urdf/ …)`（`urdf/` が空になる場合） | 削除ではなく**編集**（package.xml・CMake の変更で承認制）。A 案の CMake の変更と同じコミットで整理する案 | `find_package(urdf)` は使っていない **[推測]** |
 
@@ -487,7 +487,7 @@ src/so_arm101_description/
 
 **ユーザーに決めてほしいこと**:
 1. 11 章の計画（置き場所 `third_party/SO-ARM100/`、`meshes/` は動かさない、CMake の置換と 34 か所の検査、出所のコメントの挿入）でよいか。
-2. 12 章のうち、削除する候補の範囲（特に #7 の `usd/`（約 23 MB）と #8 の `.flake8`）。
+2. 12 章のうち、削除する候補の範囲（#7 の `usd/` は**候補から外れた**。ほかの範囲は後で判断）。
 3. 13 章の `<license>` の案（特にユーザー自身のコードのライセンス）。
 4. 「実機を使っていない」の返答のタイミング（S1 のモックの基準ログの前）。
 5. 11.4 の 1（ros2_control のソースの確認）を、先に Claude が行ってよいか（GitHub のソースを読むだけ。リポジトリは変えない）。
@@ -566,3 +566,10 @@ src/so_arm101_description/
   - コントローラ 3 つ（`joint_state_broadcaster`・`arm_controller`・`gripper_controller`）は前後とも `active`。
 - 試験: `colcon test` 全体 **196 → 196 件・失敗 12 → 12**（description 2、moveit_config 0、controller 0、bringup 16（失敗 12。以前から）、hardware 105、calibration 73）。`colcon build` は成功。
 - 停止の手順で起きたこと（**正直な記録。CLAUDE.md の規則からの逸脱が 1 回**）: 前の起動（`srdf_before`）は、確認用のシェルスクリプトの中で `setsid … &` で起動したため、launch のプロセスが SIGINT を**無視する設定を引き継いだ**（`/proc/<pid>/status` の `SigIgn` で確認）。`kill -INT` が効かなかったので、**自分が起動して PID を控えたものだけ**を対象に、(1) 子ノード 4 つ（PID 380263・380265・380267・380269）に `kill -INT`（3 秒で終了。ただし `robot_state_publisher` は launch が `respawn` で再起動した）、(2) 待機していた launch 本体（PID 380261）に **`kill -TERM`**（規則の `kill -INT` ではない）、(3) 再起動された `robot_state_publisher`（PID 380764）に `kill -INT`。その後、`ps` は空、`ros2 node list --no-daemon` も空。`pkill`・名前での停止は使っていない。次の起動（`srdf_after`）は、起動の前に Python で SIGINT を既定に戻してから `exec` する形に直し、**`kill -INT` で正常に停止**（PID 380964、`ps` 空、`--no-daemon` 空）。`~/so_arm101_check/mock_acm.sh` がそのスクリプト。daemon（PID 373597）には触っていない。
+
+
+## 20. ユーザーの判断（2026-11-12。記録のみ。コード・設定は変更していない）
+
+- **`usd/` は残す**（Isaac Sim／Isaac Lab で使う予定）。12 章の削除の候補から外した（#7）。由来（どのツールで、どの URDF から作ったか）は、後で調べる課題（`docs/inventory.md` に記録）。
+- **ユーザー自身のコードのライセンスは MIT にする**。今回は実施しない。ルートの `LICENSE`（MIT）の追加と、各 `package.xml` の `<license>` の案（`third_party` の Apache-2.0、nimiCurtis 由来の MIT、LeRobot 0.4.2 由来の基準値（正解表・`third_party.md` の Apache-2.0）の扱いを含む）は、**URDF の作業が終わった後に、計画として出す**（13 章を、この判断に合わせて作り直す）。
+- 12 章のほかの削除の範囲は、後でユーザーが判断する。

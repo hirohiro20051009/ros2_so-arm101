@@ -1845,3 +1845,9 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - `so101_new_calib.srdf:45` の `gripper_link × elbow_flex`（`elbow_flex` は関節名）の 1 行を削除（16 → 15 行）。MoveIt の設定の変更で、承認済み。**削除の直前のコミットから取り出せる**（URDF の置き換えのコミット `56e6111`）。
 - 前後（モック）: 許可衝突行列は**同一**（リンク 8・許可 15 組）、`robot_description_semantic` の差は削除した 1 行だけ、`move_group` の警告 `Link 'elbow_flex' is not known to URDF` は 1 → 0。コントローラ 3 つ active。`colcon test` 196 → 196、失敗 12 → 12（bringup の以前からの lint）。詳細は `docs/original_urdf_plan.md` 19 章。
 - 停止の手順の逸脱の記録（`kill -TERM` を launch 本体に 1 回。自分が起動した PID のみ）は、同 19 章。
+
+## ユーザーの判断の記録（2026-11-12。記録のみ。コード・設定は変更していない）
+- **`src/so_arm101_description/usd/`（5 ファイル、約 23 MB）は残す**。Isaac Sim／Isaac Lab で使う予定があるため。`docs/original_urdf_plan.md` 12 章の削除の候補から外した。
+- **後で調べる課題（usd/ の由来）**: どのツール（Isaac Sim の URDF Importer など）で、どの URDF（nimiCurtis の `so101_description`、あるいは TheRobotStudio の `so101_new_calib.urdf`）から作ったか。**[事実]** TheRobotStudio の `Simulation/SO101` には usd が無い。**[事実]** nimiCurtis の `so101_description/usd` に同名のファイルがあるかは未確認（取得済みのクローン `/tmp/orig_nimi/repo` で確認できる。`/tmp` なので消えうる）。**[推測]** nimiCurtis 由来。USD のメタデータ（作成ツール・元の URDF のパス）を読めば分かる可能性がある。置き換えた URDF（385e8d7 と同一内容）と USD の関節の 0 の位置・リミット・リンク名が合うかも、Isaac で使う前に確認する。
+- **ユーザー自身のコードのライセンスは MIT にする**（今回は実施しない）。ルートの `LICENSE`（MIT）の追加と、各 `package.xml` の `<license>` の案は、URDF の作業が終わった後に計画として出す（`third_party` の Apache-2.0、nimiCurtis 由来の MIT、LeRobot 由来の基準値の Apache-2.0 の扱いを含む）。
+- 12 章のほかの削除の範囲は、後で判断する。
