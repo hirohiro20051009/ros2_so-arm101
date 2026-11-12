@@ -2000,3 +2000,15 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **install/ の前後の diff（95 → 88 行。消えた 7 行だけ。増えた行は無い）**: description の `config/initial_positions.yaml`・`joint_limits.yaml`・`joint_names_so_arm_urdf.yaml`（`git rm` した yaml 3 つ）、`urdf/so101_new_calib.ros2_control.xacro`・`urdf.xacro`・`with_transmission.xacro`（`git rm` した xacro 3 つ）、moveit_config の `launch/rsp.launch.py`（`git rm`）。`urdf/so101_new_calib.urdf`（生成物）は残っている。
 - 失敗 10 件は、削除前から同じ（`bringup.launch.py` の lint の既存の違反。「残課題」の 3）。今回の変更とは無関係。
 - 次: ユーザーが新しいターミナルで実機の読み取り専用の起動を 1 回する。結果は別途記録する。
+
+## 削除・依存の整理（`8c5734b`）の後の実機確認: 合格（2026-11-12。ユーザーの実機の報告。ログは `~/so_arm101_check/cleanup22_readonly.log`。私はポートを開いていない）
+
+- 起動: 読み取り専用で 1 回。**exit=0**。
+- `[diag]`: EEPROM vs yaml **6/6**、servo settings vs reference **6/6**。出所の行は `measure_C1c_1.json`、`applied_at=2026-11-11T19:43:04`（前回と同じ）。
+- コントローラ 3 つが activated（`joint_state_broadcaster`、`arm_controller`、`gripper_controller`）。
+- 終了時: `deactivated (no register was written)`。`reads=945 retried=0 failed_cycles=0`、`bus:` のカウンタはすべて 0。
+- 気になるログ 0 行。SRDF の `elbow_flex` の警告 0 件。
+- ERROR は、**終了時の `move_group` の Segmentation fault（exit -11）だけ**。**[記録のみ・未調査]** この Segmentation fault が今回の変更（削除・依存の整理）の前から出ていたかは、このリポジトリの記録からは確認していない（`inventory.md` に過去の記録は見つからない）。原因は不明。終了時（`kill -INT` の後）の出来事で、レジスタへの書き込みは無い（上の `deactivated (no register was written)`）。調べるなら、削除の前のコミット `d7c39b9` のビルドで同じ起動をして、比較する必要がある（ユーザーの依頼があったときだけ。実機を使う）。
+- 後始末: `ps` と `ros2 node list` ともに空。
+- SRAM: `torque_enable=0`、`lock=1`、`acceleration=50`（全関節）。電圧 11.8〜11.9 V、温度 30〜34 ℃。
+- 結論: 22 章の実施（削除 10 ファイル、C1〜C3）は、実機の読み取り専用の起動の範囲で問題なし。22 章は完了。
