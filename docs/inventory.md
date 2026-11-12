@@ -1779,3 +1779,14 @@ export LECONDA_SITE_PACKAGES=/home/hirok/miniforge3/envs/ros2_lerobot/lib/python
 - **W0（`probe_lock_sram:=true`）**: 腕は動かず保持。`servo settings vs reference` 6/6 match、`[probe] ACCEPTED on all joints`、`startup_read_retries=0`、`[deactivate] torque OFF and Lock=1 confirmed`、`deactivated. reads=898 goal_writes=898 monitors=17`（約 18 秒）`rate_limited=0 port_contention=0`、bus はすべて 0、exit=0。
 - **W0 の後の読み取り専用**: 6 関節とも `torque_enable=0 lock=1 acceleration=50`、6/6 match が 2 行、`reads=399`、カウンタ 0、exit=0。
 - 結論: L3（ログの文言・yaml のコメント・固定ファイルと plugin xml の改名・maintainer）は、実機の挙動に影響していない。新しい文言（`reference`）が、手順書の grep の期待どおりに出ることを確認した。
+
+## L4 実施: LeRobot の削除の完了の記録と、CLAUDE.md の規則の更新（2026-11-12。実機・シリアルポートには触れていない）
+- **完了の表**（各段階のコミット・試験の件数・実機確認）は `docs/lerobot_removal_plan.md` の冒頭「完了（L1〜L4）」に書いた。L1 `7b5360b`、L2 `b95cc8c`、L3 `b58df44`（実機確認の記録は `ed5620f`・`5bb8c0c`・`9d6fd5b`）。件数は L4 の前後で hardware 99/105、calibration 71/73、bringup lint 16 件・失敗 12 のまま。
+- **戻し方の基本**（ユーザーの判断）: 「削除の直前のコミット」から取り出す（例: `git checkout b95cc8c~1 -- src/so_arm101_lerobot_bridge`）。タグ `stage2c-done`（`1a3628e`）は補足（L1 より前の状態）。
+- **`CLAUDE.md` の規則を変更**（変更前: 「ファイルの削除はしない。不要なものは archive/ へ移動し、理由を記録する」）。変更後の 3 項目:
+  1. `不要なものの削除は git rm で行う（archive/ には移さない）。削除のときは、戻すためのタグかコミットを docs/inventory.md に書く（例: 「タグ stage2c-done から取り出せる」）。承認なしに削除しない（削除の一覧と理由を示し、承認を得てから実行する）`
+  2. `git 管理外のファイル（.gitignore の対象など）は git rm の対象外で、タグからも戻せない。削除や書き換えの前に、元の内容を docs/inventory.md に控える`
+  3. `build/ と install/ を消すのはクリーンビルドのときだけで、直前に報告する。log/ は消さない`
+  ほかの規則（pkill 禁止、コミット前の colcon test、承認ルール、実機に触れない、プロセスの確認など）は変更なし。
+- **`bringup.launch.py` の `apply_servo_config` の説明**: 「LeRobot の値と違う EEPROM」→「基準の値（LeRobot 0.4.2 の値）と違う EEPROM」（文字列だけ。引数の名前・既定値 `false`・`choices` は変更なし。`ros2 launch -s` で確認）。
+- **`docs/third_party.md`（grep で確認だけ。変更なし）**: LeRobot の語 16 行は出典・帰属・削除の説明。「削除したもの」の節の戻し方は、タグ `stage2c-done` を基本として書いてあり、上の新しい基本（削除の直前のコミット）とは書き方が違う（誤りではない。必要なら別途直す）。

@@ -125,7 +125,10 @@ def generate_launch_description():
     ld.add_action(
         DeclareLaunchArgument(
             "apply_servo_config", default_value="false", choices=["true", "false"],
-            description="true のときだけ、LeRobot の値と違う EEPROM（P/I/D 等）を起動時に書く。Operating_Mode は書かない",
+            description=(
+                "true のときだけ、基準の値（LeRobot 0.4.2 の値）と違う EEPROM（P/I/D 等）を起動時に書く。"
+                "Operating_Mode は書かない"
+            ),
         )
     )
     ld.add_action(

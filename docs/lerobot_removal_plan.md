@@ -12,7 +12,23 @@
 凡例: **[事実]** = grep・コード読みで確認した。**[推測]** = 未確認。
 
 ## 進捗と、ユーザーの追加判断（2026-11-12）
-- **L1 実施済み**（コミットは `git log` を参照。結果は `inventory.md` の「L1 実施」）。**L2 以降は未実施**。
+- **完了（L1〜L4。2026-11-12）**。各段階のコミットと結果（件数は「hardware の gtest／`colcon test-result`」「calibration の同」「bringup の lint の件数・失敗」）:
+
+| 段階 | コミット（実機確認の記録） | 試験の件数 | 実機確認（ユーザー） |
+|---|---|---|---|
+| L0 | 調査のみ（`6623c09` の計画に含む） | 99/105、71/73、bringup 20/14 | （なし） |
+| L1 起動経路を外す | `7b5360b`（`ed5620f`） | 99/105、71/73、bringup 18/12 | 合格（読み取り専用と W0） |
+| L2 削除 | `b95cc8c`（`5bb8c0c`） | 99/105、71/73、bringup 16/12 | 合格（読み取り専用。`Sts3215System` を読み込めた） |
+| L3 名前・文言・試験の整理 | `b58df44`（`9d6fd5b`） | 99/105、71/73、bringup 16/12 | 合格（読み取り専用と W0。`servo settings vs reference 6/6`、`MATCH (reference)` 6 行） |
+| L4 記録 | このコミット（`git log` を参照） | 99/105、71/73、bringup 16/12 | （なし） |
+
+  - **削除したもの**: L1 は `bringup_with_cameras.launch.py`。L2 は 43 ファイル（bridge パッケージ 34、`So101HardwareBridge` の `.cpp`/`.hpp` 2、`tools/` の 3 本、候補 B の 4 ファイル）。
+  - **bringup の lint の減り方**: ファイルごとに 1 件の試験が出るため、削除したファイルの分（L1 で 2 件、L2 で 2 件）が消えた。失敗の 12 件は変わっていない（解消ではなく、削除による）。
+  - **承認の後に追加した変更**: L1: description の `mode:=real` で `<ros2_control>` を出さない。L2: bringup の `CMakeLists.txt` の `install(DIRECTORY config ...)` の削除（候補 B で `config/` が空になったため）。L3: plugin xml の改名後の `install/` の宙ぶらりんのリンクのため、クリーンビルド。
+  - **`setup_so101.sh`**: `.gitignore` の対象（git 管理外）。L2 で `LECONDA_SITE_PACKAGES` の 2 行を削除した。元の文面は `inventory.md` にある（タグからは戻せない）。
+  - **戻し方**: 削除の直前のコミットから取り出す（例: `git checkout b95cc8c~1 -- src/so_arm101_lerobot_bridge`。L1 の削除は `7b5360b~1`）。タグ `stage2c-done`（`1a3628e`）は、L1 より前の状態（補足の基準点）。
+  - **未決事項**: `LICENSE.so101_ros2` は、description の urdf・meshes・controller の出所が確定するまで残す（7 章）。SRDF の `elbow_flex` は URDF の作り直しの段階（10 章）で直す。
+  - **後続**: 候補 A・G・H・C の step/stl の削除は別のコミット（`inventory.md` に記録）。保留: C の usd、D、E、F。
 - **判断**: `hardware` 引数の検査は `mock:=true` のときも行う（L1 で実装済み）。plugin xml の改名は **L3** で行う（L2 では `So101HardwareBridge` のブロックを消すだけで、ファイル名は変えない）。**候補 B（`camera.launch.py` とカメラ設定 yaml 3 つ）は L2 で `git rm` する**。`LICENSE.so101_ros2` は、description の urdf・meshes・controller の由来が確定するまで**残す**（ヘッダが無いことは、由来でない証拠にならないため）。package.xml の `maintainer` は変えてよいが、`license` 欄は変えない（L3 で）。CLAUDE.md の archive の規則は **L4 で**「削除は `git rm`。戻すためのタグかコミットを `inventory.md` に書く」に直す（文言の案は L4 の前に出す）。
 - **LeRobot の削除（L1〜L4）の後に別のコミットで行う候補**: A（`apriltag_test`）・G（`tools/` の開発用スクリプト）・H（既存の `archive/`）と、C の `assets/step`・`assets/stl`。**保留**: C の `usd/`、D・E・F。
 - 7 章の「推奨 (a)」「LICENSE の削除」は、上の判断で置き換わる（B は L2 で削除、LICENSE は由来が確定するまで残す）。
@@ -187,6 +203,7 @@
 
 ### L4（記録）
 `inventory.md` に各段階の結果（件数の前後を含む）、`docs/third_party.md` を更新（Apache-2.0 の帰属表示は残す）。タグ `stage2c-done` はそのまま（戻すための基準点）。
+**（完了。結果は冒頭の「完了」の表。L4 では、`CLAUDE.md` の削除の規則を `git rm` に直し、`bringup.launch.py` の `apply_servo_config` の説明の文言を直した。）**
 
 ## 5. 削除後に必要な確認（まとめ）
 1. `colcon build`（クリーン）、`ros2 pkg list` に bridge が無い。
