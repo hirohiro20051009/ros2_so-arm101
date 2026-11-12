@@ -1976,7 +1976,7 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
      - **案 5 ROS のシェルで `PYTHONNOUSERSITE=1`（将来の候補・記録のみ）**: D で通ることは確認済み。**ただし `~/.local` の numpy 1.26.4 などは、今も ROS の実行時にシステムのものより優先して見えている。user site を外すと、ROS 側で使われる版が変わる**（numpy・opencv・scipy など）。今は問題が起きていないので対策はしない。
    - **未確認の推測（4 点。いずれも確かめていない）**: (a) anyio は gradio を入れたときに入った。(b) `_pytest.scope` は pytest 7.0 で入った（記憶による）。(c) 次の項の `apriltag_test` のエラーが同じ原因である。(d) 案 2 で pytest 6.2.5 と両立する anyio の版がある。
 2. **過去の `apriltag_test` の pytest の収集エラー**（`inventory.md` 1141 行ほか）: **同じ原因の可能性が高い（未確認）**。再現していない。ユーザーの決定で、再確認は行わない（`apriltag_test` は削除済みで、タグ `stage2c-done` から取り出せば確認できる）。1803 行に `pytest.xml: 1 test, 1 error` の記録があり、起動時の失敗なら収集段階のエラーに見えるので矛盾しないが、`ModuleNotFoundError` だったかどうかの記録はない。
-3. **`bringup.launch.py` の既存の lint 違反の修正**（今回は直していない）: copyright 1、flake8 の E501 ×4（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include の 2 行）、pep257 の D400・D415（モジュールの docstring が「。」で終わる）。違反 7 件に CTest のまとめ 3 件を足したものが、bringup の失敗 10 件（`colcon test-result` の件数）。
+3. **`bringup.launch.py` の既存の lint 違反の修正**（計画: `docs/bringup_lint_fix_plan.md`。**承認待ち。実装していない**）（今回は直していない）: copyright 1、flake8 の E501 ×4（`calibration_file` の行、`torque_limit` の description、`moveit_rviz`・`warehouse_db` の include の 2 行）、pep257 の D400・D415（モジュールの docstring が「。」で終わる）。違反 7 件に CTest のまとめ 3 件を足したものが、bringup の失敗 10 件（`colcon test-result` の件数）。
 
 ## 将来の目標と IK の経緯、Servo 統合のときの記録、注意（2026-11-12。**記録のみ。コード・設定は変更していない**。ユーザーの判断）
 
