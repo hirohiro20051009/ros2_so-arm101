@@ -1,6 +1,6 @@
 # 実機確認手順: サーボ設定（EEPROM／SRAM）の読み取り（段階2b-3a）
 
-対象: `hardware:=feetech`（読み取り専用）の起動時診断 `[diag] ... EEPROM: ... | SRAM: ...`。
+対象: 読み取り専用の起動時診断 `[diag] ... EEPROM: ... | SRAM: ...`。
 **サーボには何も書かない。トルクにも触れない。** 腕を動かす操作は含まない（ただし手順 2 でサーボの電源を切るので、腕が落ちる。支えること）。
 
 ## 目的
@@ -33,7 +33,7 @@ LeRobot の `configure()` を一度走らせて、設定を書かせた直後の
    `joint_state_broadcaster` が active になって `/joint_states_raw` が来たら Ctrl-C。**停止でトルクが OFF になり、腕が脱力する**ので支える。
 3. 続けて feetech（読み取り専用）を起動して、診断の出力を保存し、数秒後に Ctrl-C（新しい端末）:
    ```bash
-   ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_A.log
+   ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_A.log
    ```
    `[diag] ... EEPROM: ...` が 6 行と `servo settings vs reference: n/6 joints match`（L3 以降の文言。L2 までは `servo settings vs LeRobot: n/6 joints match`）が出る。
 
@@ -46,7 +46,7 @@ LeRobot の `configure()` を一度走らせて、設定を書かせた直後の
 LeRobot は起動しない（設定を書き直さないため）。**電源を入れた直後に、feetech（読み取り専用）だけを起動する**:
 ```bash
 ls -l /dev/ttyACM0                 # ポートがあること
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_B.log
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee ~/so_arm101_check/servo_config_B.log
 ```
 数秒後に Ctrl-C。
 

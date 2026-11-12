@@ -1935,3 +1935,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 ```
 - 確認用に追加した git 管理外のスクリプト: `~/so_arm101_check/mock_start.sh`（`mock:=true` だけ。SIGINT を既定に戻して起動し、PID を控えて `kill -INT`）。
 - 状態: 実機の確認（読み取り専用の起動 1 回。ユーザー）は、手順書の更新（コミット 2）の後。
+
+## `hardware` 引数の削除に伴う手順書の更新と、過去の記録の読み替え（2026-11-12。コミット 2。docs のみ）
+- **読み替え（過去の記録は書き換えていない）**: この文書と、`lerobot_removal_plan.md`・`stage2c_plan.md`・`original_urdf_plan.md`・`hardware_arg_removal_plan.md` の `hardware:=feetech` は、**`hardware` 引数を削除した（D 案。コミット `35ebba4`）今は、付けると起動前にエラーで止まる**（`Undeclared launch argument(s): hardware … Remove it and run again.`）。外して実行する。`hardware:=lerobot` も同じエラー（LeRobot 経路はタグ `stage2c-done` に残る）。`xacro` を手で直接実行する場合は、宣言していない引数が無言で無視される。
+- **更新した手順書（実行するもの）**: 起動コマンドの ` hardware:=feetech` を削除（**11 コマンド**: `feetech_write_check.md` の 8（旧 :40・59・121・137・145・160・195・237）、`feetech_servo_config_check.md` の 2（旧 :36・49）、`feetech_readonly_check.md` の 1（旧 :81）。ほかの引数は変えていない）。
+- **説明文の言い換え（意味は変えていない）**: `feetech_write_check.md` :3（「対象: 書き込みモード（`read_only:=false`）」）と **:6（古い LeRobot の記述の修正。`hardware` が既定、`hardware:=lerobot` で LeRobot 経路、「起動コマンドは両方を明示」などの誤りを、「`read_only` の既定は `true`。書き込みモードは `read_only:=false` を明示したときだけ。`read_only` を書かないコマンドは読み取り専用。LeRobot 経路と `hardware` 引数は削除した。`hardware:=…` を付けると起動前にエラー」に）**。`feetech_servo_config_check.md` :3。`feetech_readonly_check.md` :1（題）・:6・:97・:194（`hardware:=feetech` を「自前ドライバ（feetech）」に）。
+- **変更しなかったもの**: 「歴史的」と明記された手順（`hardware:=lerobot` の起動コマンド: `feetech_servo_config_check.md` :31、`feetech_readonly_check.md` :28・35・53・153 の表と節。`:37` の比較表の「`hardware:=feetech`（自前ドライバ）」の行も、歴史的な比較表なのでそのまま）。コピーしても、起動前にエラーで止まる。
+- 次: 実機の確認（読み取り専用の起動 1 回。ユーザー）。結果は `inventory.md` に記録する。

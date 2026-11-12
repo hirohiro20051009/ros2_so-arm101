@@ -1,9 +1,9 @@
 # 実機確認手順: 書き込みモード（トルク ON、Goal_Position）（段階2b-3c）
 
-対象: `hardware:=feetech read_only:=false`。**腕が動く。サーボにトルクが入る。** 実行するのはユーザーだけ（Claude は実機を動かさない）。
+対象: 書き込みモード（`read_only:=false`）。**腕が動く。サーボにトルクが入る。** 実行するのはユーザーだけ（Claude は実機を動かさない）。
 実装の仕様は `docs/inventory.md` の「段階2b-3 の計画 v3」と「段階2b-3b の計画 v4」。
 
-起動の既定（段階2b-4 以降）: `hardware` は `feetech`、`read_only` は `true`。**書き込みモード（トルク ON）は `read_only:=false` を明示したときだけ**。LeRobot 経路は `hardware:=lerobot` を明示したときだけ。この手順書の起動コマンドは両方を明示してあるので、既定の変更で意味は変わらない。
+起動の既定: `read_only` は `true`。**書き込みモード（トルク ON）は `read_only:=false` を明示したときだけ**。この手順書の書き込みモードの起動コマンドは `read_only:=false` を明示してあり、`read_only` を書いていないコマンド（読み取り専用の確認など）は読み取り専用で起動する。LeRobot 経路と `hardware` 引数は削除した（LeRobot 経路はタグ `stage2c-done` に残る）。**`hardware:=…` を付けると、起動前にエラーで止まる**（外して実行する）。
 
 段階は W0 → W1 → W2 → W3 → W4（W5 は任意）。**前の段階が合格するまで次へ進まない。** 各段階に「腕の支え方」と「止め方」がある。必ず読んでから始める。
 
@@ -37,7 +37,7 @@
 
 ### 2. 読み取り専用 10 分
 ```bash
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false \
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false \
   2>&1 | tee -i ~/so_arm101_check/c4_readonly_10min.log
 ```
 - 10 分ほど放置（腕は触らない。トルク OFF なので、腕を自重で落ちない姿勢にしておく）して、**Ctrl-C を 1 回**。
@@ -56,7 +56,7 @@ W0 の手順（本文の「W0. 保持のみ」）を**起動と停止を 5 回�
 出発点の elbow_flex は URDF のリミット +1.69 を約 0.00009 rad 超えている。OMPL が `FixStartStateBounds` で扱えるかを、**実機で最初に**確認する（モックでは成功を確認済み。Pilz は開始状態の範囲外で拒否することを mock で確認済みなので、**Pilz は使わない**）。
 - **書き込みモードで起動する**（W3.5 と同じ起動。RViz あり）。**`send_joint_delta.py` を送る前、elbow_flex が開いていない（出発点の）状態で行う。** 腕の支え方は W3 と同じ（目標が開く向きだけなので、前腕の下に触れずに構える）:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=true \
     torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_C4_step6.log
   ```
 - 起動直後に別の端末で、実測を控える: `ros2 topic echo /joint_states --once`（elbow_flex が +1.69 付近であること）。
@@ -118,7 +118,7 @@ ls -l /dev/ttyACM0                                          # ポートがある
 ```
 基本の起動（段階ごとに引数だけ変える）:
 ```bash
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=false \
   2>&1 | tee -i ~/so_arm101_check/write_<段階>.log
 ```
 起動で出るべきログ: `WRITE mode: this driver will turn torque ON ...`（WARN）、`write mode active: torque ON, Lock=1, Acceleration=50, ...`。
@@ -134,7 +134,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **何もしない**: RViz は使わない（`use_rviz:=false`）。action も topic も送らない。
 - 起動（`acceleration:=50 torque_limit:=1000` は既定値。確認 1 を有効にする）:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=false \
     probe_lock_sram:=true 2>&1 | tee -i ~/so_arm101_check/write_W0.log
   ```
 - 見るログ: `write mode active`、`[probe] with Lock=1 and torque ON, a write to SRAM (Acceleration) was ACCEPTED on all joints`（NOT accepted の WARN でも起動は続く。報告する）。
@@ -142,7 +142,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **止め方**: 腕を支えたまま **Ctrl-C を 1 回**。腕が脱力する。`[deactivate] torque OFF and Lock=1 confirmed` を確認。ログ末尾の `deactivated. reads=… goal_writes=… monitors=… rate_limited=… port_contention=…` も見る。
 - 続けて、読み取り専用で状態を確認する（数秒後に Ctrl-C。トルクは OFF のまま）:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false \
     2>&1 | tee -i ~/so_arm101_check/write_W0_after.log
   ```
   `[diag]` の SRAM で **`torque_enable=0 lock=1`**（LeRobot では lock=0 のまま残っていた）、`acceleration=50` であること。`6/6 joints match`。
@@ -157,7 +157,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **腕の支え方**: 折りたたみ姿勢。**片手で前腕（wrist より手前）を持って重さを受ける**。動かす wrist_roll と gripper には触れない（指を挟まない）。
 - 起動:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=false \
     torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_W1.log
   ```
 - 別の端末（同じ `source` をして）で、少しずつ動かす。**1 回ごとに、動きが止まってから次へ**:
@@ -192,7 +192,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **腕の支え方（最重要）**: 折りたたみ姿勢。**前腕の下に手のひらを構え、触れずに数 cm あけておく**（W3 の実測は、手で支えると遊びの分だけ腕が動いて測定に影響するため、動かすあいだは自重だけを受けた状態で行った）。沈む／弱いと感じたらすぐ手で受ける。**止めるとき（Ctrl-C の前）は前腕に触れて重さを受ける**。もう片手はサーボ電源の近く。
 - 起動（`torque_limit` は不要。指定しても lift / elbow / wrist_flex には効かない）:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=false \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=false \
     2>&1 | tee -i ~/so_arm101_check/write_W3.log
   ```
 - 1 関節ずつ、**小さく（0.1 rad）、ゆっくり（4 秒）**。**開始時の実測値（`ros2 topic echo /joint_states --once`）を控えておく**。向きは実測（W3、2026-11-11）: **wrist_flex の − と elbow_flex の − が「開く向き」**（手先／前腕が離れる）。**shoulder_lift の + は腕全体が前へ倒れ、先端が下がる向き**で、0.1 rad で gripper の先端が台に接触した（強い押し付け・異音は無し）。lift は台に近いので + は小さく、まず 0.05 rad から。
@@ -234,7 +234,7 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech re
 - **腕の支え方**: W3 と同じ（動かすあいだは前腕の下に触れずに構える。止めるときは触れて受ける）。
 - 起動（**W3.5 と W4 は同じ起動のまま続けて行う**。開いた姿勢で Ctrl-C しないため）。W4 は初めての MoveIt の実行なので `torque_limit:=500`（pan と wrist_roll に効く。lift / elbow_flex / wrist_flex は常に 1000）を付ける。RViz あり、ここでは RViz を操作しない。ログは `write_W4.log`:
   ```bash
-  ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech read_only:=false use_rviz:=true \
+  ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false use_rviz:=true \
     torque_limit:=500 2>&1 | tee -i ~/so_arm101_check/write_W4.log
   ```
 - 別の端末で、elbow_flex に **-0.10 を 2 回**（1 回ごとに動きが止まってから `/joint_states` で実測を確認してから次へ）:

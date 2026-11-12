@@ -1,9 +1,9 @@
-# 実機確認手順: hardware:=feetech（読み取り専用）と LeRobot 経路の比較（段階2b-2）
+# 実機確認手順: 自前ドライバ（feetech。読み取り専用）と LeRobot 経路の比較（段階2b-2）
 
 > **【歴史的】** この文書のうち、LeRobot 側の記録を取る手順（0.5・1・4 と、LECONDA_SITE_PACKAGES・`lerobot_readonly_state.py` を使う部分、2.5 の LeRobot 関連の確認、3.5）は再現できない。LeRobot 経路（`hardware:=lerobot`・`so_arm101_lerobot_bridge`・`tools/lerobot_readonly_state.py` など）は **2026-11-12 の段階 L1〜L2 で削除した**（`hardware:=lerobot` は launch がエラーで止まる）。この手順は、**タグ `stage2c-done`（1a3628e）の状態でだけ再現できる**。今の起動ログの文言は「reference」（`servo settings vs reference`、`MATCH (reference)`、`DIFFERS from reference values`）。
 
 
-対象: `bringup.launch.py mock:=false hardware:=feetech`（STS3215 を直接読む。レジスタには一切書き込まない。トルクにも触れない）。
+対象: `bringup.launch.py mock:=false`（STS3215 を直接読む。レジスタには一切書き込まない。トルクにも触れない）。
 目的: 「`so101_follower.json` を使った LeRobot 経由の `/joint_states`」と、自前ドライバ（`follower_calibration.yaml`）の `/joint_states` が一致することを確認する。
 **実機を動かす操作は含まない。** 腕を動かすのは、ユーザーが手で動かす場合だけ。
 
@@ -78,7 +78,7 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 echo "CONDA_PREFIX=[$CONDA_PREFIX] LECONDA_SITE_PACKAGES=[$LECONDA_SITE_PACKAGES]"   # どちらも空であること
 source /opt/ros/humble/setup.bash && source ~/ros2_so-arm101/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false hardware:=feetech use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/feetech_launch.log
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false use_rviz:=false 2>&1 | tee -i ~/so_arm101_check/feetech_launch.log
 ```
 
 腕は動かさない（手順 1 の停止後の姿勢のまま）。別ターミナルで記録して比較する:
@@ -94,7 +94,7 @@ python3 ~/ros2_so-arm101/tools/compare_joint_states.py ~/so_arm101_check/lerobot
 - `std A / std B` は各記録中の標準偏差 [tick]。1 を超えると「静止していない可能性」と注意が出る（腕が動いている・脱力でずれている）。その場合は取り直す。
 - NaN を含む関節は FAIL（ドライバが読み取りに失敗した）。
 
-## 2.5 hardware:=feetech が LeRobot を使っていないことの確認（手順 2 の launch 中に行う）
+## 2.5 自前ドライバ（feetech） が LeRobot を使っていないことの確認（手順 2 の launch 中に行う）
 
 **手順 2 の launch を起動したまま**（止めると (3)〜(7) が確認できない）、別ターミナルで（**conda を activate していないこと**）:
 
@@ -191,7 +191,7 @@ P2 では LeRobot 側の記録に **launch を使わず、読み取り専用ツ�
 6. 逆向きの姿勢 P2b（pan を反対側へ約 30°、roll を反対側へ約 60°、gripper を**大きく開く**）でも 2〜5 を繰り返す（`*_P2b.*`）。符号が逆なら差が大きく出る。gripper の閉じた状態は P1 で確認済みなので、P2b では開く側を見る。
 7. ツールと feetech は**別の時刻**に読むので、1 tick 程度の差は手でひねった直後の揺らぎの可能性がある。`std A` も見る（2026-11-10 の P2a の wrist_roll は平均差 0.97 tick、LeRobot 側 std 0.18 で、P2b では 0.00 だった）。
 
-## 5. hardware:=feetech では RViz の Plan & Execute を実行しない
+## 5. 自前ドライバ（feetech） では RViz の Plan & Execute を実行しない
 
 - 読み取り専用なので、**指令は破棄され腕は動かない**。軌道は（open_loop のため）「成功」と表示されることがあるが、実機は動かない。実行しても意味がなく、混乱のもとになる。
 - 確認は `use_rviz:=false` で行う（`/joint_states` の記録だけ）。RViz を開く場合も、表示を見るだけにする。
