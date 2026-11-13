@@ -37,7 +37,8 @@ TF_TOLERANCE_MM = 1.0  # the recorded tf of the real arm has a 1 mm resolution
 # named poses [pan, lift, elbow, wrist_flex, roll] (rad)
 NAMED_POSES = {
     'zero': [0.0, 0.0, 0.0, 0.0, 0.0],
-    'start (C3)': [-0.09820, -1.48295, 1.69009, 0.50327, -0.04833],
+    'start (C3, old)': [-0.09820, -1.48295, 1.69009, 0.50327, -0.04833],
+    'start (W1)': [-0.0951, -1.4952, 1.6901, 0.4219, -0.0453],
     'T (W1)': [0.0031, -0.3813, 0.5501, 1.4454, -0.0069],
     'T (target)': [0.0, math.radians(-22), math.radians(30), math.radians(83), 0.0],
     'home': [0.0, -1.57, 1.57, 0.8, 0.0],

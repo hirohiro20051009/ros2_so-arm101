@@ -16,7 +16,9 @@ if(BUILD_TESTING)
   # system pytest and make "python3 -m pytest" fail; ament_add_pytest_test() then silently skips the
   # test. Do not autoload third-party pytest plugins (at configure time and when the test runs).
   set(ENV{PYTEST_DISABLE_PLUGIN_AUTOLOAD} 1)
-  foreach(test_name test_constants test_fk_chain test_ik_roundtrip test_ik_roll test_ik_limits)
+  foreach(test_name
+          test_constants test_fk_chain test_ik_roundtrip test_ik_roll test_ik_limits
+          test_model_check test_moveit_fixture test_ik_model_check_static)
     ament_add_pytest_test(${test_name} test/${test_name}.py
                           ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   endforeach()
