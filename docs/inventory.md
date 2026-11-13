@@ -2346,3 +2346,8 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - 消したのは `build/so_arm101_moveit_config` と `install/so_arm101_moveit_config` だけ（`log/` は触っていない）。`colcon build --symlink-install --packages-select so_arm101_moveit_config`（isolated）で再ビルド。
 - **消した `install/` の古い複製（git 管理外。Servo の削除で残っていたもの）の内容の出どころ**: `launch/servo.launch.py`（1420 バイト、11 月 5 日、git blob `c2ead66a271647d579b3527d550e01106dfa32fa`）は git の履歴の 19273db（2026-11-05）の版、`config/servo.yaml`（4611 バイト、blob `e39a59c1c247a5b7dc8469a913b99d403542cbcb`）は 3bc04f8（2026-11-05）の版と一致。**`git show <commit>:src/so_arm101_moveit_config/…` で取り出せる**（削除は 8dc64f2、直前は c764829）。
 - 前後の比較: `install/` の diff は、`servo.launch.py`・`config/servo.yaml`（moveit_config）と、前の bringup の `servo.yaml`・`servo_joint_limits.yaml` の消失に加え、**`launch/__pycache__/*.pyc`（launch を実行したときに作られた生成物 5 個とそのディレクトリ）も無くなった**（再ビルドで消えた。launch の実行で再生成される）。`find install -xtype l` は 0 件。`colcon test`（source 後）**227 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0）。robot_description の sha256 は 6 通りとも前と同一、`--show-args` は 21。
+
+## `~/.local` の numpy を拾う件（2026-11-13。記録のみ。対策はしない）
+
+- シェルの `python3`（`-I` なし）は `~/.local/lib/python3.10/site-packages/numpy`（**1.26.4**）を拾う。`python3 -I` や、システムの `python3-numpy`（`dpkg`: **1.21.5**、`/usr/lib/python3/dist-packages`）とは別の版。`tools/` のスクリプト（`pose_margin.py` など）と、`colcon test` の Python の試験は、通常の `python3` で動くので 1.26.4 を使う。
+- **扱い（ユーザー）**: 対策なし（anyio と pytest 6.2.5 の非互換の件（案 0）と同種）。`so_arm101_ik`（P1）の `package.xml` は `python3-numpy` を `exec_depend` に書く（rosdep のキー。システム版に解決される）。**numpy 1.21.5・1.26.4 のどちらでも動く書き方にする**（`docs/analytic_diff_plan.md` 7.7）。

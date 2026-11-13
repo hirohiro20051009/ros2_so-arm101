@@ -51,7 +51,7 @@
 | 中間（0.2, −0.8, 0.8, 0.9, 0.1） | 7.3 | 0.80（roll の影響） |
 | roll 1.0（T の他の関節） | — | **7.58**（roll の影響） |
 
-- **結論 [事実]**: **現在の値のままだと、先端の位置が URDF と 6〜11 mm ずれる**（T で z が約 10 mm 高く出る。`so101_ik` の先端は実際より約 10 mm「遠い」）。**更新した値（AP 0.0304、HP 0.0542、L1 0.116、L2 0.135、LT 0.15943 m、D2 = −13.97°、D3 = +2.21°、D4 = −2.84°。URDF の関節原点から計算。※ roll = 0 だけに合わせた見かけの値。D4・LT は 7.1 の roll を含む模型で訂正）にすると、roll ≈ 0 では差が 0.35 mm 以下**（ランダムな 80 姿勢のフィットでも rms 0.011 mm）。**残る差は roll による**: TCP が roll の軸から 7.9 mm ずれているので、**roll を回すと先端が最大 約 8 mm 動く**（roll 1.0 で 7.6 mm）。`so101_ik` は TCP を roll の軸の上と仮定している（**TCP と把持の中心のずれはユーザーが別に対処**する範囲。ただし roll ≠ 0 のときの誤差の大きさは、この計画の精度（±3 mm）に直接効くので記録する）。
+- **結論 [事実]**: **現在の値のままだと、先端の位置が URDF と 6〜11 mm ずれる**（T で `so101_ik` の先端の z は URDF より約 9.9 mm **低い**: `so101_ik.fk` の z − URDF の FK の z = −9.93 mm、x −1.32 mm。上の表の差は「URDF − `so101_ik`」なので符号が逆）。**更新した値（AP 0.0304、HP 0.0542、L1 0.116、L2 0.135、LT 0.15943 m、D2 = −13.97°、D3 = +2.21°、D4 = −2.84°。URDF の関節原点から計算。※ roll = 0 だけに合わせた見かけの値。D4・LT は 7.1 の roll を含む模型で訂正）にすると、roll ≈ 0 では差が 0.35 mm 以下**（ランダムな 80 姿勢のフィットでも rms 0.011 mm）。**残る差は roll による**: TCP が roll の軸から 7.9 mm ずれているので、**roll を回すと先端が最大 約 8 mm 動く**（roll 1.0 で 7.6 mm）。`so101_ik` は TCP を roll の軸の上と仮定している（**TCP と把持の中心のずれはユーザーが別に対処**する範囲。ただし roll ≠ 0 のときの誤差の大きさは、この計画の精度（±3 mm）に直接効くので記録する）。
 - **注意 1（ラッパーの姿勢の対応）[事実。式と計算]**: クォータニオンから pitch を取る `quaternion_to_rpy` は**標準の RPY**（`roll = atan2(…)`、`pitch = asin(2(qw qy − qz qx))`）。**URDF の姿勢（T の `gripper_frame_link`）を通すと pitch = −2.5°、roll = −179.9°**になるが、**`so101_ik` の pitch は −92.5°**（真下 = −90°）。**ラッパーのクォータニオンの経路は、真下の姿勢を `so101_ik` の pitch に直さない**（RPY の pitch は「真下」で 0° 付近、`so101_ik` の pitch は −90°）。**明示的な `pitch`・`roll` を渡す使い方では問題ない**。**[推測]** ユーザーは明示的な pitch を使っている。**VR のクォータニオン指令を受けるなら、対応（`ik_pitch = f(クォータニオン)`）を明示して試験する必要がある**（設計の 2.7）。
 - **注意 2（roll の符号）[推測。未確認]**: `S5 = +1`（反時計周り）。URDF の wrist_roll の軸は、q = 0 で世界の −x を向く。標準の RPY の roll（+x 周り）との符号の対応は、ラッパーの式から読み取れない。**roll を使う前に、URDF と一致するか試験で確認する**。
 
@@ -278,3 +278,57 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 3. `tools/ik_model_check.py` は `tools/` に置く案でよいか（代案: パッケージの中）。
 4. 往復の許容（既定 0.5 mm）・FK の許容（0.1 mm）は、この値でよいか。
 5. 7.3 の確認は、P5 の前にユーザーが実機で行う（手順書は承認後に書く）。
+
+
+### 7.7 P1 で決まったこと（2026-11-13。ユーザーの承認。実装・ビルドは `/clear` の後）
+
+**承認**: 作成するファイル・依存・ライセンス表示（下）、許容の表（下）。**これ以外の依存が必要になったら止めて報告する**。ビルドは、ユーザーが実機を使っていないと答えた後に、**`so_arm101_ik` だけ（`--packages-select`）**で行う（許可は改めて求める）。
+
+**1. 作成するファイル**（既存のコードは変更しない）
+
+| ファイル | 内容 |
+|---|---|
+| `src/so_arm101_ik/package.xml` | `ament_cmake`・`ament_cmake_python`（純粋な Python）。`<license>MIT</license>` |
+| `src/so_arm101_ik/CMakeLists.txt` | `ament_python_install_package(so_arm101_ik)`、試験（`ament_add_pytest_test`、`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`。bringup と同じ形） |
+| `src/so_arm101_ik/so_arm101_ik/__init__.py` | 空 |
+| `src/so_arm101_ik/so_arm101_ik/urdf_kinematics.py` | URDF の XML から関節の鎖を作り、FK（位置・回転。**roll を含む**）を計算。`derive_constants(urdf_xml)`（URDF の関節原点から、AP・HP・L1・L2・LT・D2・D3・D4・k・ψ0・y0 を導く） |
+| `src/so_arm101_ik/so_arm101_ik/analytic_ik.py` | `so101_ik.py` の移植。**手書きの定数**（導いた値）。**P1 は FK（roll を含む模型）と、roll 固定の IK**。IK で roll を扱うのは P2 |
+| `src/so_arm101_ik/test/test_constants.py` | 手書きの定数 = 導いた値 |
+| `src/so_arm101_ik/test/test_fk_chain.py` | 鎖の FK、模型の FK との一致 |
+| `src/so_arm101_ik/test/test_ik_roundtrip.py` | IK の往復、除く条件の別の試験 |
+| `docs/inventory.md`・`docs/analytic_diff_plan.md` | 記録 |
+
+**2. 依存（`package.xml`）**: `exec_depend`: `python3-numpy`。`test_depend`: `ament_index_python`、`so_arm101_description`、`ament_cmake_pytest`、`ament_lint_auto`、`ament_lint_common`。**これだけ**（URDF は標準の `xml.etree.ElementTree` で読む。`urdf_parser_py`・KDL・MoveIt は使わない）。URDF は `so_arm101_description` がインストールする `urdf/so101_new_calib.urdf`（robot_description と同じファイル。`ament_index_python` で場所を引く。**試験だけ**。ライブラリは URDF の文字列を受け取る）。
+
+**3. ライセンス表示**: すべての `.py` の先頭に、`bringup/test/test_launch_arg_check.py` と同じ **MIT の全文ヘッダ（先頭の行は `# Copyright 2026 hiro`）**。`package.xml` は `<license>MIT</license>`。`THIRD_PARTY_NOTICES.md` は変更しない（外部のコードなし）。
+
+**4. 許容の表**（URDF の角度は 1.5708・3.14159 のように丸められており、最良の定数でも URDF の鎖との差が最大 3.4 µm（rms 1.4 µm）残る、という測定に基づく。ユーザーの当初の 0.001 mm は取り下げ）
+
+| 試験 | 許容 | 備考 |
+|---|---|---|
+| 導いた定数の解析 FK と URDF の鎖の FK（インストールされた URDF） | **0.01 mm** | 最悪 3.4 µm の約 3 倍 |
+| 導いた定数の解析 FK と、**π/2・π に直した URDF（試験の中で文字列を置換して作る）の鎖の FK** | **1e-5 mm** | 模型が数式として正しいこと（独立な数式との一致。下の (f)）。**測定では 0.0 µm** |
+| 解析 IK → 解析 FK の往復（同じ模型） | **0.001 mm** | 自己無撞着。実際は 1e-6 mm 程度 |
+| 解析 IK → URDF の鎖の FK の往復 | **0.01 mm** | 模型と鎖の差（上と同じ理由） |
+| 関節空間の往復 `IK(FK(q)) = q` | **1e-9 rad** | 除く条件を除く |
+| 手書きの定数と導いた値 | 長さ **0.1 mm**（相当）、角度 1e-5 rad の目安 | **0.1 mm** はユーザーの指定。URDF が変わる・定数が書き換わると落ちる |
+| 実機の tf の値（W1 の T）との一致 | 1 mm | 1 mm 刻みの記録（`(0.172, 0.000, 0.055)`）。粗い健全性の確認 |
+| （P3 から）MoveIt の `/compute_fk` の記録（fixture）との一致 | **0.001 mm** | 下の (f) |
+
+**5. 除く条件（IK の往復。有効数字の問題で、別の試験にする）**
+- **2 つの枝の距離が近い**（(g)。下）。**腕がほぼ完全に伸びる・折りたたまれる**（`|D| > 1 − 1e-5`）。
+- **`r' < 0.01 m`**（pan 軸の真上。pan が不定）。
+- **どれかの関節が範囲の端から 1e-3 rad 以内**（範囲で候補が切り替わる）。
+- 除いた領域は**別の試験**で、「有限の値を返すか、明示的な例外（`IKUnreachableError`・`IKJointLimitError`）になる。NaN を返さない。**位置の往復（`FK(IK(p)) = p`）は、枝が近くても 0.001 mm 以内**（どちらの枝でも位置は同じ）」だけを確かめる。
+
+**(f) 「独立な基準（MoveIt）」について（回答）**
+- **P1 の `colcon test` では MoveIt・ノードを使わない。MoveIt 関係の依存も足さない**。表の「鎖の FK と MoveIt の一致 0.001 mm」は **P1 には入れない**（P3 に回す）。**P1 の独立な基準は 2 つ**: ① **π/2・π に直した URDF の鎖の FK と、閉じた式（導いた定数の解析 FK）の一致（1e-5 mm）**（数式として別の定式化。鎖の合成の規約（rpy の順、軸の向き）を間違えると一致しない）。② **実機の tf の記録（W1 の T の関節角と `(0.172, 0.000, 0.055)`）との一致（1 mm）**（粗い健全性）。
+- **P3 で、MoveIt の fixture を追加**: `tools/ik_model_check.py` の `--record-fixture` で、**モック（`mock:=true use_rviz:=false` の launch。`move_group` の `/compute_fk`）**から、名前付き姿勢 5 個 + 固定の乱数の種の 100 姿勢の `(q, x, y, z)` を倍精度で CSV に記録し、**`src/so_arm101_ik/test/data/moveit_fk.csv`（URDF の sha256 と MoveIt の版つき）**を git に入れる。**試験（`colcon test`）はその CSV だけを読む**（MoveIt・ノードは起動しない）。**URDF の sha256 が変わったら「fixture が古い。再取得（コマンド付き）」で落ちる**。取得は、ユーザーが実機を使っていない状態で、Claude がモックで行う（許可を得て）。
+- **0.001 mm の根拠**: MoveIt の FK は `RobotState` の倍精度の計算で、URDF の同じ数値を使うので、鎖の自前の実装と 1e-6 mm 程度で一致する見込み（**P3 で確認。違えば許容を見直して報告**）。
+
+**(g) 「2 つの枝の距離が近い」のしきい値（回答）**
+- **枝の距離 = 2 つの IK 候補（elbow の ± の枝。関節の範囲で切る前）の関節空間の 2-ノルム [rad] が 0.01 rad（約 0.57°）未満**。
+- 根拠: 2 つの枝の elbow の差は `2·acos(D)`（`D` = 余弦定理の値）。距離 0.01 rad は `acos(D) ≒ 0.004`、**`|D| ≒ 1 − 1e-5`**（上の「ほぼ完全に伸びる」と同じ領域）。このとき、`D` の丸め（1e-16）が `q` に与える誤差は `1e-16 / sqrt(1 − D²) ≒ 1e-14 rad`。**関節空間の往復 1e-9 rad を満たすには、枝の距離が 1e-9 rad より十分大きければ足りる**が、**最近傍の枝の選択が丸めで入れ替わらない余裕**として 0.01 rad を置く（試験の外側に判断の余裕を持たせる。厳しくしたければ 1e-3 rad まで下げられる）。
+- **単位は rad、数値は 0.01**。
+
+**6. `~/.local` の numpy を拾う件**: シェルの `python3` は `~/.local` の numpy 1.26.4 を拾い、システム版（`python3-numpy` 1.21.5。`python3 -I` ではこちら）と異なる。**対策はしない（記録のみ。anyio の件（案 0）と同種）**。`so_arm101_ik` は numpy 1.21.5・1.26.4 の両方で動く書き方にする（古い版にない関数を使わない）。**試験は両方の numpy で通ること**を、ビルド後に確認する（`python3 -I` でシステム版、通常の `python3` で `~/.local` 版。ただし `colcon test` は通常の環境）。
