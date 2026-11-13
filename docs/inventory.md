@@ -2306,3 +2306,11 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **(c) の見積もり**: 1 ステップの dq（z 3 mm で elbow 6 tick など）と、反転で不感帯 20〜30 tick を超えるステップ数（2〜14）を表にした（モデルは推測）。(a)・(b)（12〜19 周期）とは分けた。
 - **(a')（参考。今は実装しない）**: Servo の `joint_topic`（既定 `/joint_states`。`servo_node.cpp:91`）を中継ノードの「直前の目標」に向ける案。Butterworth のジャンプの引き戻しは起きないが、進みが意図の 0.571 倍（中継の遅れで 0.364・0.267 倍。計算）。実測を知らないので、ワインドアップの見張り（クリップ）、床、中継の生存の見張りが外に要る。
 - **床**: 旧 `Z_MIN = 0.06` は使わず、先端 z ≥ 0.045 m、`FK(desired + dq)` の z ≥ 0.048（案）、出発点（z = 0.033）は規則で自動的に拒否。
+
+## 方針の変更（(d) 解析 IK の差分モードを採用）と、`so101_ik.py`・`ros_bridge.py` の読み取り、Servo 削除の計画（2026-11-13。読み取りと計画のみ。削除・コード・設定の変更、モック・ノードの起動、ビルド、シリアルポートを開く操作なし）
+
+- **決定（ユーザー）**: (c) の計画は止め（`diffik_tool_plan.md`・`diffik_accumulate_plan.md` の冒頭に「保留（(d) を採用）」）、**(d) 解析 IK の差分モード**を採用。目標の先端に差分を積み上げ（前回の目標を起点）、毎回解析 IK で解き直し、関節の絶対目標を送る。送り先は当面 MoveIt 経由、JTC 直接も選べるように。ROS ブリッジに入れ、VR のトピック指令も見据えてノード化を検討。TCP と把持の中心のずれはユーザーが別に対処。
+- **計画**: `docs/analytic_diff_plan.md`（読み取りの報告、差分モードの設計、置き場所、このリポジトリ側の変更）、`docs/servo_removal_plan.md`（Servo 一式の削除の計画。**まだ実行していない**）。
+- **`so101_ik.py`（事実）**: 解析 IK（pan = atan2、2 リンクの余弦定理、elbow ± の 2 枝、範囲内を残し現在の関節角に最も近い解）。ラッパーは XYZ + pitch + roll の 5 自由度、yaw を捨てる。依存は math と numpy だけ。コミット 1b6d489（ユーザー）、ライセンス表示なし。**幾何の値のうち D2（−10°。URDF からは −13.97°）、D3（0°。+2.21°）、D4（0°。−2.84°）、LT（0.1621。0.15943）が今の URDF と合わず、先端が 6〜11 mm ずれる**（旧 URDF も同じ運動学なので、旧校正のゼロ点の値の可能性）。更新した値（URDF の関節原点から計算）にすると roll ≈ 0 で 0.35 mm 以内（80 姿勢のフィットで rms 0.011 mm）。TCP は roll の軸から 7.9 mm ずれているので roll で先端が最大約 8 mm 動く。関節の範囲・符号・pitch の定義は URDF と一致。クォータニオン経路のラッパーは、URDF の真下の姿勢を `so101_ik` の pitch（−90°）に直さない（RPY の pitch は 0° 付近）。出発点の elbow（+1.6901）は `within_limits` で範囲外。
+- **`ros_bridge.py`（事実）**: rosbridge_suite ではなく、自作ノード + TCP ソケット（ポート 9999、0.0.0.0、1 要求 1 応答の JSON）。名前空間 `/follower`、MoveIt の KDL IK（`/compute_ik`）と MoveGroup action。
+- **(d) の見込み**: あり（条件つき。根拠は `analytic_diff_plan.md` 5 章）。→ Servo 削除の計画を別ファイルに。削除の前後で比べるもの（sha256 は不変、`--show-args` 22 → 21、`colcon test` 266 → 227 の内訳）を同ファイルに。判断を仰ぐ点: `servo_math.py`（J1）、`moveit_config` の `servo.launch.py`・`servo.yaml`（J2）。
