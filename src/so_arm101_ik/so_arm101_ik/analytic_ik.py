@@ -39,8 +39,14 @@ psi = S5 q5 (roll):
     x      = X0 + radial cos(theta) - lat sin(theta)
     y      = Y0 + radial sin(theta) + lat cos(theta)
 
-The forward kinematics includes the roll. The inverse kinematics of this stage (P1) is for roll = 0
-only (q5 = 0); other rolls are handled in P2 and raise ValueError here.
+The roll psi is an input of the inverse kinematics, so the TCP offsets (a, b) = tcp_offsets(psi)
+are known constants and the problem is solved in closed form (no iteration). psi is the joint
+angle S5 q5 itself (not the roll of a standard RPY). It is used as given: it is never wrapped by
+2 pi (a wrapped value could command a full turn of the wrist), and a value outside the joint
+limits raises IKJointLimitError. The two elbow branches share q1 and q5.
+
+The joint limits are arguments (q_min, q_max) of ik() and solve_ik(); the default is the strict
+limits of the URDF. A caller that only reads (never sends) may pass wider limits.
 """
 
 import math
@@ -65,7 +71,6 @@ S1, S2, S3, S4, S5 = -1.0, -1.0, -1.0, -1.0, 1.0
 Q_MIN = np.array([-1.91986, -1.74533, -1.69, -1.65806, -2.74385])
 Q_MAX = np.array([1.91986, 1.74533, 1.69, 1.65806, 2.84121])
 
-ROLL_TOLERANCE = 1e-9  # the P1 inverse kinematics accepts only roll = 0 within this
 ROOT_TOLERANCE = 1e-9  # |D| up to 1 + this is accepted as reachable (rounding)
 
 
@@ -94,10 +99,10 @@ def normalize_angle(angle):
     return math.atan2(math.sin(angle), math.cos(angle))
 
 
-def within_limits(q):
-    """Return True if every joint is inside its limit (inclusive)."""
+def within_limits(q, q_min=Q_MIN, q_max=Q_MAX):
+    """Return True if every joint is inside its limit (inclusive; the default is the URDF's)."""
     q = np.asarray(q, dtype=float)
-    return bool(np.all(q >= Q_MIN) and np.all(q <= Q_MAX))
+    return bool(np.all(q >= q_min) and np.all(q <= q_max))
 
 
 def tcp_offsets(roll, c=CONSTANTS):
@@ -125,13 +130,11 @@ def fk(q, c=CONSTANTS):
 
 
 def ik_geometry(x, y, z, pitch, roll, c=CONSTANTS):
-    """Solve the geometry for XYZ + pitch at roll = 0 (both elbow branches, limits not applied)."""
+    """Solve the geometry for XYZ + pitch + roll (both elbow branches, limits not applied)."""
     values = (x, y, z, pitch, roll)
     if not all(math.isfinite(v) for v in values):
         raise ValueError('the target and the orientation must be finite numbers')
-    if abs(roll) > ROLL_TOLERANCE:
-        raise ValueError('only roll = 0 is supported by this stage (the roll is handled in P2)')
-    a, b = tcp_offsets(0.0, c)
+    a, b = tcp_offsets(roll, c)
 
     dx, dy = x - c.pan_x, y - c.pan_y
     r_squared = dx * dx + dy * dy - b * b
@@ -159,13 +162,14 @@ def ik_geometry(x, y, z, pitch, roll, c=CONSTANTS):
         q2 = (alpha1 - math.pi / 2.0 - c.d2) / S2
         q3 = (alpha2 - c.d3 - S2 * q2) / S3
         q4 = (pitch - c.d4 - S2 * q2 - S3 * q3) / S4
-        candidates.append(np.array([q1, q2, q3, q4, 0.0]))
+        candidates.append(np.array([q1, q2, q3, q4, roll / S5]))
     return Geometry(radial, cos_elbow, tuple(candidates))
 
 
-def ik(x, y, z, pitch, roll, c=CONSTANTS):
-    """Return the candidates (elbow +, -) that are inside the joint limits (roll = 0 only)."""
-    valid = [q for q in ik_geometry(x, y, z, pitch, roll, c).candidates if within_limits(q)]
+def ik(x, y, z, pitch, roll, c=CONSTANTS, q_min=Q_MIN, q_max=Q_MAX):
+    """Return the candidates (elbow +, -) inside the joint limits (default: the URDF's)."""
+    valid = [q for q in ik_geometry(x, y, z, pitch, roll, c).candidates
+             if within_limits(q, q_min, q_max)]
     if not valid:
         raise IKJointLimitError('a geometric solution exists, but every candidate is out of range')
     return valid
@@ -180,9 +184,9 @@ def select_nearest_solution(solutions, current_q):
     return min(solutions, key=distance)
 
 
-def solve_ik(x, y, z, current_q, pitch=None, roll=None, c=CONSTANTS):
+def solve_ik(x, y, z, current_q, pitch=None, roll=None, c=CONSTANTS, q_min=Q_MIN, q_max=Q_MAX):
     """Return the joint angles for XYZ; pitch and roll default to those of current_q."""
     _, current_pitch, current_roll = fk(current_q, c)
     pitch = current_pitch if pitch is None else pitch
     roll = current_roll if roll is None else roll
-    return select_nearest_solution(ik(x, y, z, pitch, roll, c), current_q)
+    return select_nearest_solution(ik(x, y, z, pitch, roll, c, q_min, q_max), current_q)

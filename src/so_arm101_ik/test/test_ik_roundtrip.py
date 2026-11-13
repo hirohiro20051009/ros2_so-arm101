@@ -250,11 +250,15 @@ def test_target_outside_the_joint_limits_is_rejected():
             ik.solve_ik(xyz[0], xyz[1], xyz[2], np.zeros(5), pitch=pitch, roll=0.0)
 
 
-def test_roll_other_than_zero_is_not_supported_at_this_stage():
-    with pytest.raises(ValueError, match='roll'):
-        ik.solve_ik(0.2, 0.0, 0.1, np.zeros(5), pitch=-1.0, roll=0.1)
-    with pytest.raises(ValueError, match='roll'):
-        ik.solve_ik(0.2, 0.0, 0.1, np.array([0, 0, 0, 0, 0.5]), pitch=-1.0)
+def test_roll_is_supported_and_is_used_as_given():
+    # P2: roll is solved in closed form (details in test_ik_roll.py)
+    q = np.array(NAMED_POSES['T (W1, roll 0)'])
+    q[4] = 0.7
+    xyz, pitch, roll = ik.fk(q)
+    solved = ik.solve_ik(xyz[0], xyz[1], xyz[2], q, pitch=pitch, roll=roll)
+    assert solved[4] == 0.7 and np.max(np.abs(solved - q)) < JOINT_TOLERANCE
+    kept = ik.solve_ik(xyz[0], xyz[1], xyz[2], q)  # roll defaults to that of current_q
+    assert kept[4] == 0.7
 
 
 def test_non_finite_input_is_rejected():
