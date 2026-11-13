@@ -5,6 +5,8 @@
 
 **範囲**: 「出発点から MoveIt（OMPL）で中間の姿勢に出る → 止まっていることを確かめて Servo（forward controller）に切り替える → Python から単発の小さい補正（`tools/send_servo_twist.py`）→ Servo を止めて JTC に戻す → MoveIt で出発点へ戻す」まで。**VR・共通の層（ユーザーのブリッジ）・モード管理ノード・解析 IK は、この手順書の範囲外**（末尾の「後の段階」に目次だけ）。
 
+> **【注（2026-11-13）W3 以降は、Servo の見直しが決まるまで実行できない。** 実機の W 段階（W0・W1・W2・W5・W6 は合格、W4 は省略）で、**W3 は腕が動かなかった**（Servo の status は全周期 0）。結果と調査の計画は `docs/servo_w3_investigation_plan.md`。この手順書の W3・W4 と Q1〜Q6 は、見直しの結論が出るまで保留（直しは見直しのあとに 1 回）。**以下の実測値は、2026-11-13 の W 段階の実測で訂正した。**
+
 段階は R0 → R1 → R2 → R3 → W0 → W1 → W2 → W3 → W4 → W5 → W6。**前の段階が合格するまで次へ進まない。** 各ステップに「実行するコマンド」「確認すること」「合格の条件」がある。
 
 ---
@@ -14,7 +16,7 @@
 1. **実行するのはユーザーだけ。** 新しい端末（conda を activate していない端末）を使う。端末は、launch 用（ログを流す。**操作しない**）と、操作用（コマンドを打つ）の 2 つ以上。
 2. **止めるのは Ctrl-C（SIGINT）だけ。** `kill -9`、`pkill`・`killall`（名前での kill）、端末を閉じる、PC の電源断はしない（トルクが ON のまま残る）。ほかのプロセスを止めるのは、**自分で起動したものを、控えた PID で `kill -INT`**（S4）だけ。
 3. **書き込みモード（W 段階）の前に、腕を折りたたみ姿勢にして、手で支える。** 止める前にも、支える。Ctrl-C でドライバがトルクを OFF にする（腕は脱力して落ちる）。
-4. **腕の周りに物を置かない。** ケーブルが引っかからないようにする。**床（実際の高さは未測定。`base_link` の取り付け面は z ≈ −0.0024 m）に近づく姿勢・指令にしない。** 指は、真下の接近で先端のフレームより約 6〜7 mm 下に出る。この手順書の動きは、先端が**床から十分高い**（中間の姿勢 T で先端 z ≈ 0.059 m）範囲だけで、**下げる向き（−z）は 1 回 5 mm 以内、累計 15 mm 以内**にする。
+4. **腕の周りに物を置かない。** ケーブルが引っかからないようにする。**床に近づく姿勢・指令にしない。床は腕の取り付け面と同じ高さ（`base_link` の z ≈ −0.0024 m。2026-11-13 の実測）。** 床までの距離は **TCP（指先の間）で測る**（グリッパーの見た目の最下面は、姿勢の影響が大きいので使わない。参考: 見た目の最下面から床まで、出発点で 55 mm、T で 65 mm）。指は、真下の接近で先端のフレームより約 6〜7 mm 下に出る。この手順書の動きは、先端が**床から十分高い**（中間の姿勢 T で先端 z ≈ 0.055 m（実測）、出発点で 0.033 m（実測））範囲だけで、**下げる向き（−z）は 1 回 5 mm 以内、T からの正味の下がりが 15 mm 以内（先端 z ≥ 0.045 m を優先）**にする。
 5. **非常停止はサーボの外部電源（12 V）を切る**（USB だけではない）。常に片手を電源の近くに置き、もう片手で腕を支える。切ると腕が落ちる（下の「12 V を切る条件」）。
 6. ログの `FAULT:` または `COMMUNICATION LOST` が出たら、その段階を中止して、支えながら Ctrl-C。原因を報告してから再開する。
 7. **前の段階のログの末尾を確認してから次へ**（下の「停止したあとの確認」）。
@@ -173,7 +175,7 @@ timeout 5 ros2 topic echo /servo_node/collision_velocity_scale --once      # dat
 
 準備:
 1. R1 と同じ起動（`servo_R2.log`）。
-2. **腕を手で、中間の姿勢 T に置く**（pan 0°、lift −22°、elbow +30°、wrist_flex +83°、roll 0°。先端 z ≈ 0.059 m。接近軸が真下）。**きっちり合わせなくてよい**（±3° で可）。実測を控える: `ros2 topic echo /joint_states --once --field position`。
+2. **腕を手で、中間の姿勢 T に置く**（pan 0°、lift −22°、elbow +30°、wrist_flex +83°、roll 0°。先端 z ≈ 0.055 m（実測）。接近軸はほぼ真下）。**きっちり合わせなくてよい**（±3° で可）。実測を控える: `ros2 topic echo /joint_states --once --field position`。
 3. 切り替え（読み取り専用でも行う。手順は W2 と同じ）: コマンド A（止まっていること。**手を放して 1 秒静止**）→ `ros2 service call /servo_node/start_servo std_srvs/srv/Trigger` → `ros2 service call /servo_node/pause_servo std_srvs/srv/Trigger` → `ros2 control switch_controllers --strict --deactivate arm_controller --activate forward_position_controller` → `ros2 control list_controllers`（forward が `active`、arm が `inactive`）。
 
 送信（腕は**手で静止させておく**。トルク OFF なので、手を放すと重力で動く。姿勢を保つため、**手で支えたまま**送る）:
@@ -230,7 +232,7 @@ grep -E "WRITE mode:|write mode active:" ~/so_arm101_check/servo_W0.log
 - **`write mode active: … Per-cycle step limit: 39 ticks (angle joints). startup_read_retries=0`**（INFO）。
 - `[probe] … ACCEPTED on all joints`（NOT accepted でも起動は続く。報告）。
 - 10 秒待つ。腕が動いていないこと。`FAULT` が出ていないこと。`ros2 control list_controllers` で arm が `active`、forward が `inactive`。
-- **止め方**: 腕を支えたまま **Ctrl-C を 1 回**（S5）。**「停止したあとの確認」の 2 行**（`[deactivate] torque OFF and Lock=1 confirmed` と `deactivated. …`）を確認。`rate_limited=0`、`port_contention=0`、`monitors` が約 10。
+- **止め方**: 腕を支えたまま **Ctrl-C を 1 回**（S5）。**「停止したあとの確認」の 2 行**（`[deactivate] torque OFF and Lock=1 confirmed` と `deactivated. …`）を確認。`rate_limited=0`、`port_contention=0`、`monitors` は約 1 秒に 1 回（W0 の実測は 59 秒で 58 回。W6 は約 87 分で 5153 回。起動時間に比例する）。
 - 続けて、**読み取り専用で起動**して（R0a のコマンド。`servo_W0_after.log`）、`[diag]` の SRAM が `torque_enable=0 lock=1`、`acceleration=50`、`6/6 joints match`。
 
 合格: L1 の 2 行が上の値で出る／腕が動かない／`rate_limited=0`・`port_contention=0`／停止後に `torque_enable=0 lock=1`。**L1 の 2 行が出ない（または値が違う）なら、先へ進まず報告。**
@@ -247,8 +249,8 @@ grep -E "WRITE mode:|write mode active:" ~/so_arm101_check/servo_W0.log
   ```
   L1 の 2 行（W0 と同じ）が出ていること。`ros2 topic echo /joint_states --once` で**出発点を控える**（W6 で戻す先）。
 - RViz の MotionPlanning: **Planner は OMPL（Pilz は使わない。出発点の elbow が上限を超えるため）**。**Velocity Scaling と Acceleration Scaling は 0.1 のまま**（0.125 を超えると、ドライバの上限で削られる）。Planning タブで **Goal State を `<current>` に選び直し**、Joints タブで次の**整数の度**に設定する（スライダーは整数の度）:
-  **shoulder_pan 0、shoulder_lift −22、elbow_flex +30、wrist_flex +83、wrist_roll 0**（gripper は触らない）。これが姿勢 T（先端 (0.177, 0, 0.059) m、接近軸は真下、自己衝突まで約 97 mm、Servo の 5×5 の条件数 約 23）。
-- **Plan してから、Execute の前に確認する**: アニメーションで**動かしていない関節（gripper を含む）が動かない**こと、動きが滑らかで、**先端が下がらない**こと（出発点の先端 z は約 0.022 m。**Show Trail で先端の軌跡が出発点より下に行かない**こと。下がるなら中止）。
+  **shoulder_pan 0、shoulder_lift −22、elbow_flex +30、wrist_flex +83、wrist_roll 0**（gripper は触らない）。これが姿勢 T（先端は計画値 (0.177, 0, 0.059) m、**実測は (0.172, 0.000, 0.055) m**、接近軸はほぼ真下、自己衝突まで約 97 mm、Servo の 5×5 の条件数 約 23（実測 22.3））。
+- **Plan してから、Execute の前に確認する**: アニメーションで**動かしていない関節（gripper を含む）が動かない**こと、動きが滑らかで、**先端が下がらない**こと（出発点の先端 z は実測 0.033 m（計画値は 0.022 m）。**Show Trail で先端の軌跡が出発点より下に行かない**こと。下がるなら中止）。
 - Execute。**1 回ごとに動きが止まってから次へ。** 見ること: 滑らかに動く／終点で止まる／**`step limit` の WARN が arm 関節で出ない**（Scaling 0.1 では削られない設計。出たら報告）／`FAULT` なし。
 - 終点で、実測を読む: `ros2 topic echo /joint_states --once --field position`。**T から約 0.05 rad 以内**（開く向きの手前止まり 約 0.04 rad を含む）。先端の位置: `ros2 run tf2_ros tf2_echo base_link gripper_frame_link`（数秒見て Ctrl-C）。**先端 z が 0.04 m 以上**であること（床から十分高い）。
 
@@ -275,7 +277,7 @@ grep -E "WRITE mode:|write mode active:" ~/so_arm101_check/servo_W0.log
 
 目的: Servo で、先端が指令の向きに動くこと。**実速度の比**（期待に対する実測。モックでは約 0.47）と、**動き出す最小の速度**、**方向ごとの止まる位置**を測る（計画 11.1 の Q1〜Q6。**記録だけで、合否にしない**）。
 
-- **床に近づかない**: 姿勢 T の先端 z は 約 0.059 m。**下げる向き（−z）は 1 回 5 mm 以内、累計 15 mm 以内**。**上げる向き（+z）・前後（x）・横（y）は 1 回 10 mm 以内**。1 回ごとに、先端 z を `tf2_echo` で確認し、**0.045 m を下回りそうなら −z は送らない**。
+- **床に近づかない**: 姿勢 T の先端 z は 実測 0.055 m。**下げる向き（−z）は 1 回 5 mm 以内、T からの正味の下がりが 15 mm 以内**。**上げる向き（+z）・前後（x）・横（y）は 1 回 10 mm 以内**。1 回ごとに、先端 z を `tf2_echo` で確認し、**0.045 m を下回りそうなら −z は送らない**。
 - ツールの上限（超える指定は拒否される）: 成分 0.5（`--allow-fast` で 1.0）、時間 3 秒、先端の総移動量 2 cm、frame は `base_link` か `gripper_frame_link`。**作れない向きの回転（rx。pan ≈ 0 のとき）は、ツールが拒否する**。
 - 各回の手順（**毎回**）: コマンド A（止まっている）→ `--dry-run` → 本番（Enter）→ 終了後に先端の位置（`tf2_echo`）と関節の実測を記録。
 
@@ -286,7 +288,7 @@ python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 0.5 --seconds 1
 ```
 期待（`scale` × 時間）: +5 mm。見ること: **先端が上に動く**（`tf2_echo base_link gripper_frame_link` の z が増える。動かなくてもよい。Q1 の不感帯の可能性。記録）。**向きが逆（下に動く）なら、直ちに中止して報告**。**腕が急に動く、異音、`FAULT` なら S1→S2→S3**。**上に動くことを確かめてから、ほかの向きに進む。**
 
-**W3b. 下げる向き（床に近づく。1 回 3 mm、累計 15 mm 以内）**: `--linear 0 0 -0.3 --seconds 1`（−3 mm）。先端 z が 0.045 m を下回りそうなら送らない。**W3c. 前後・横**: `--linear 0.5 0 0 --seconds 2`（+10 mm）、`--linear 0 0.5 0 --seconds 2`（+10 mm。pan と roll が動く）。**W3d. ピッチ**: `--angular 0 0.5 0 --seconds 2`。
+**W3b. 下げる向き（床に近づく。1 回 3 mm、T からの正味の下がりが 15 mm 以内）**: `--linear 0 0 -0.3 --seconds 1`（−3 mm）。先端 z が 0.045 m を下回りそうなら送らない。**W3c. 前後・横**: `--linear 0.5 0 0 --seconds 2`（+10 mm）、`--linear 0 0.5 0 --seconds 2`（+10 mm。pan と roll が動く）。**W3d. ピッチ**: `--angular 0 0.5 0 --seconds 2`。
 
 見ること（各回）: **送信中の `/servo_node/status`**（0 以外なら、減速・停止の理由。値は 1 近づく特異点で減速、2 特異点で停止、3 衝突で減速、4 衝突で停止、5 関節の端、6 離れる特異点で減速。**ツールの最後の行に、送信中の値と回数が出る**。status は動かす指令を処理している周期だけ値が付く）／先端が**指令の向き**に動く／**ほかの軸のずれ**が小さい（モックでは 0.01 mm 以内。実機では記録）／向き（姿勢）が大きく変わらない／`status` が 0／`READ-ONLY` の WARN は出ない（書き込みモード）／**`step limit` の WARN が arm で出ない**／`FAULT` なし。
 
@@ -295,7 +297,7 @@ python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 0.5 --seconds 1
 | 測る項目 | 測り方 | 記録 |
 |---|---|---|
 | **Q1 動き出す最小の速度** | z の 1 方向に、入力を 0.1 → 0.2 → 0.3 → 0.5（各 2 秒。同じ入力を 3 回） | 各回の関節の変化と、期待との比。**比が 0.5 を超える最小の入力**（0.5 tick 未満の指令は動かない見込み＝約 0.023 rad/s） |
-| **Q2 方向ごとの手前止まり** | 開く向き・閉じる向きのそれぞれで、期待 5 mm → 10 mm → 20 mm（入力と時間で調整。**−z は累計 15 mm まで**） | 止まった後の先端の変位と、期待との差 [mm]（開く向きで約 0.04 rad ≒ 先端で 4〜10 mm の手前止まり、という推測と比べる） |
+| **Q2 方向ごとの手前止まり** | 開く向き・閉じる向きのそれぞれで、期待 5 mm → 10 mm → 20 mm（入力と時間で調整。**−z は T からの正味の下がりが 15 mm まで**） | 止まった後の先端の変位と、期待との差 [mm]（開く向きで約 0.04 rad ≒ 先端で 4〜10 mm の手前止まり、という推測と比べる） |
 | **Q3 小さな補正の繰り返し** | 同じ方向に 2 mm を 5 回（毎回止まるのを待つ） | 1 回ごとの変位と累積。**積み上がるか、動かないままか** |
 | **Q4 方向の反転** | +5 mm → −5 mm → +5 mm（z。−z は 5 mm 以内に収める） | 各回の変位。反転で失われる量 |
 | **Q5 戻りの再現性** | 出発の位置 → +10 mm → −10 mm → 出発の位置からの差。3 回 | 往復の再現性 [mm] |
@@ -324,8 +326,8 @@ python3 ~/ros2_so-arm101/tools/send_servo_twist.py --linear 0 0 0.5 --seconds 1
 4. `ros2 control list_controllers`（**arm が `active`、forward が `inactive`**。両方 inactive なら arm を activate）。**コマンド A**（切り替えの前後で 0.003 rad 以内。飛ばない）。
 5. **W5b. gripper の開閉（L1 の確認）**: ドライバの上限（0.06 rad/周期）で、gripper の開閉が完了すること。
    ```bash
-   time python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper 0.5 --seconds 3 --yes
-   time python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper -0.5 --seconds 3 --yes
+   time python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper 0.5 --seconds 5 --yes
+   time python3 ~/ros2_so-arm101/tools/send_joint_delta.py gripper -0.5 --seconds 5 --yes
    ```
    見ること: action の `result status: 4`（SUCCEEDED）、`gripper` の `step limit … ramping toward it` の WARN は出てよい（gripper の目標は階段状。**arm 関節で出てはいけない**）。**開閉にかかった時間**（全開閉 約 0.6 秒の見込み）を報告。**完了しない、または中断するなら報告**。
 6. **L1 の効き（MoveIt の実行）**: W6 の MoveIt の実行で `step limit` の WARN が arm で出ないこと（Scaling 0.1）。

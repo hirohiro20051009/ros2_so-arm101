@@ -2263,3 +2263,21 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **`status` の調査（計画 15.2）**: status は動かす指令を処理している周期だけ値が付き（`servo_calcs.cpp:322-326`、`utilities.cpp:143・152`、`servo_calcs.cpp:686・692・713`）、止まっている周期は 0。特異点は、離れる向きで条件数が 100〜160 のとき、status も減速も付かない。モックで再現（条件数 124.1）: 送信中は status 3（衝突）または 5（関節の端）、前後は 0。ユーザーの観察は、指令を処理していない周期に読んだため、と考えられる。
 - **手順書の修正**: pause の後も status は出続けるので、R1 の「status が止まる」を「commands が止まる」に（Twist を送らないときは pause の前でも commands は出ないので、pause の効き目は送信中に確かめる）。S2 に「ツールは送る前に必ず `unpause_servo` を呼ぶので、pause は止めておく鍵にならない」。W3 の最初の指令を +z 5 mm に（向きを確かめてから先へ）。0 章の `colcon build` は、ビルド済みなら不要の注記。S4 は確認済みに。
 - **「無視してよい出力」の候補（D14。ユーザーの決定待ち）**: (1) `servo_node` の octomap の ERROR・WARN（`move_group` のものと同じ種類）、(2) `servo_node_main` の終了時の `class_loader` の `SEVERE WARNING!!! Attempting to unload library while objects created by this loader exist`、(3) `Intra-process communication is disabled`・`No kinematics plugins defined`・`No kinematics solver instantiated for group 'arm'` の WARN 3 つ。
+
+## Servo の実機 W 段階の結果と、W3（腕が動かない）の調査の計画（2026-11-13。記録と計画のみ。コード・設定の変更、モック・ノードの起動、ビルド、シリアルポートを開く操作なし）
+
+- 詳細は `docs/servo_w3_investigation_plan.md`。ユーザーが 2026-11-13 07:49〜09:22 に実行（ログ `~/so_arm101_check/servo_W0.log`・`servo_W0_after.log`・`servo_W1.log`・`servo_W3_cmd.txt`・`servo_W6_after.log`）。実機は停止済み（トルク OFF、出発点、12 V は入れたまま）。
+- 結果: W0・W1・W2・W5・W6 合格（W4 は省略）。**W3 は腕が動かない**（Servo の status は全周期 0。+z 5 mm の 1 回目に先端が x −1.66・z −1.29 mm 動いただけで、2〜5 回目は 0）。5 回目の commands − 測った位置は 1.4〜1.7 tick で一定（積み上がらない）。ドライバの 1 周期の上限 39 tick には関係なし。見立て（推測）: Servo は測定位置を起点にするため、1〜2 tick の差では STS3215 が動き出さない。
+- 実測の更新: 出発点の先端 (0.217, 0.017, 0.033) m、T の先端 (0.172, 0.000, 0.055) m。床は取り付け面と同じ高さ（z ≈ −0.0024 m）。次からは TCP 基準で測る。
+- **残課題に追加**: (1) RViz の Joints タブの目標が、Plan の後に現在の姿勢へ戻ることがある。見立て（確定ではない）: 最初に Start State・Goal State の両方を `<current>` に選び直す。実績を積む。(2) Servo の補正が実機で動かない（調査の計画あり）。(3) D14 は決定待ち。
+- 決定待ち: 手順書の直し（案 P: 事実の訂正を先に／案 Q: 見直しの後）、調査 E1〜E3 の開始、不感帯などの読み出しをドライバに足す案。
+
+## W3 の調査（E1〜E3）と手順書の事実の訂正（案 P）、依存の監査の計画（2026-11-13。読み取り・計算・文書調査のみ。モック・ノードの起動、ビルド、シリアルポートを開く操作なし）
+
+- 詳細は `docs/servo_w3_investigation_plan.md`（6・7 章）。**修正（ユーザーのレビュー）**: (1) 「閉じる向き（−z）も動かなかった」は根拠が弱い。−z は入力 0.3 の 1 回だけで、1 周期の差は +z 1.0 の 0.3 倍（lift +0.08、elbow +0.42、wrist_flex −0.51 tick。計算）で、`lround` で消えた可能性が高い。**入力の上限 1.0 でも動かなかったと言えるのは +z（重力に逆らう向き）だけ**。(2) 「27 tick」は旧校正の W3.5 の elbow（inventory）の値。T の elbow の手前止まりは 0.0265 rad ≒ 17 tick。(3) D-2（解析 IK + JTC）は、実装のリスクは最小だが、`open_loop_control: true` で手前止まりが残るので、**補正の精度という目的は単独では満たさない**。組み合わせ（接近方向の統一、D-4、D-1+D-3）を表に追加。(4) 重力の向きは、出発点・T とも elbow で + 向き（URDF の質量・重心から計算。inventory の「開く向き = elbow −」と一致）。T では lift も + 向き、wrist_flex はほぼ釣り合い。
+- **A（moveit_servo 2.5.10）**: 起点は毎周期の**測定位置**（`servo_calcs.cpp:680`・`:937-945`）。前回の指令を起点にする設定は無い。平滑化は 1 次 Butterworth（係数 1.5。`y_n = 0.4(x_n + x_{n−1} + 0.5 y_{n−1})`）で、W3 の記録の最初の 2 周期の差（定常の 0.40・0.88 倍）と一致。インストール版（`2.5.10-1jammy.20261006.192111`）と読んだ版（タグ 2.5.10）は、`servo_calcs.h`・`butterworth_filter.h` がバイト単位で同一。`.cpp` はインストール版に無いので、行番号の対応は未確認。
+- **C（文書調査。第三者の資料。公式の STS3215 の表では未確認）**: 不感帯は 0x1A・0x1B（各 1 バイト、0〜16、1 = 約 0.087°、既定 1）、P は 21。ドライバは不感帯を読んでいない。
+- **手順書 `docs/servo_real_check.md`**: 案 P の分（H1〜H3・H5・H6・H8: 実測値、床の測り方（TCP 基準）、T からの正味の下がり・z ≥ 0.045 m、monitors の説明、gripper の `--seconds 5`、W3 以降は保留の注記）を反映。H4・H7・H9 は見直しの後。
+- **ドライバに不感帯などの読み出しを足す案**: 計画のみ（`servo_w3_investigation_plan.md` 7 章）。実装は計画を見てから別に承認。
+- **依存の監査の計画**: `docs/dependency_audit_plan.md`（読み取りのみ。実行は承認後）。
+- **`colcon test`（前後の比較）**: 作業の前（`git stash` で docs の変更を外した HEAD 2bb511f）も後も **266 件、失敗 0**（bringup 86、calibration 73、description 2、hardware 105、moveit_config 0）。`src/` の変更なし。前回の記録の 265（66a9acc）との差 +1 は、その後の 2bb511f（送信ツールの修正）の分と見られる（各回の件数の記録は未確認）。注: 新しいシェルで `source /opt/ros/humble/setup.bash` と `install/setup.bash` をしないと、15 件が失敗する（環境の読み込みの不足。コードの問題ではない）。
