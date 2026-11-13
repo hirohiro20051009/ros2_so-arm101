@@ -12,10 +12,12 @@
    - 作業は段階ごとに計画を出し、承認を得てから実行する
    - 1段階ごとに colcon build が通ることを確認し、git commit する
    - 実機（サーボ）を動かすコマンドは実行しない。必要なら私に依頼する
-   - 起動したものを止めた後は、ps と `ros2 node list` の両方で残りがないことを確認する。`ros2 node list` だけに残り、ps が空なら、`ros2 daemon stop; ros2 daemon start` の後にもう一度確認する
+   - 起動したものを止めた後は、ps と `ros2 node list --no-daemon` の両方で残りがないことを確認する。`--no-daemon` だけに残り、ps が空なら、数秒待ってもう一度確認し、それでも残るなら報告して指示を待つ。ros2 daemon には触らない（stop・start をしない）。`--no-daemon` が使えるコマンドには必ず付け、daemon を自動で起動させない
    - MoveIt本体の設定（URDF・関節リミット・planning_frame・IK solver）は勝手に変えない
    - pkill -f や killall など、名前・パターンでプロセスを止めない（ユーザーが実機の launch を動かしていることがあり、止めるとトルクが切れて腕が落ちる）。止めるのは、自分で起動したプロセスを、控えた PID で kill -INT するだけ
    - コミットの前に、関係するパッケージの colcon test を実行し、失敗があればコミットの前に報告する
+   - 作業ツリーやインデックスや履歴を変える git の操作（stash・checkout・reset・clean・restore・amend・rebase など）は、push の前でも事前に承認を得る。承認されたコミットのための git add・git commit と、承認された削除の git rm は除く。確認のためのコマンド（status・diff・log・ps・test の結果表示など）に、これらの操作をつなげない（確認は確認だけで 1 つのコマンドにする）
+   - launch（モックなど）は「前景」で起動する。前景とは、`&` を付けず、Bash の run_in_background で `exec ros2 launch ...` として動かすこと（`&` の子は、非対話の bash が SIGINT を無視する設定にするので、`kill -INT` で止まらない）。PID は exec の前に自分で控え、起動の直後に /proc/<PID>/status の SigIgn に SIGINT（0x2）が立っていないことを確認する。止めるのは、控えた PID への `kill -INT` だけ。モックは ROS_DOMAIN_ID=87 と RMW_IMPLEMENTATION=rmw_cyclonedds_cpp で動かす
    ## 最終構成（目標）
    - so_arm101_description / so_arm101_moveit_config
    - so_arm101_hardware : ros2_control SystemInterface（Feetechドライバ、use_mock_hardwareで切替）

@@ -493,3 +493,83 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 - **件数**: pytest 64（45 + 新規 19 = `test_ik_roll` 12 + `test_ik_limits` 7）。**途中の報告で新規を「13 件」と書いたのは数え違いで、正しくは 12 件**（pytest の 64 と一致）。`colcon test` 全体は **320 件、失敗 0・エラー 0・スキップ 0**: bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 93**（pytest 64 + lint 19（copyright 8・pep257 8・flake8 1・xmllint 1・lint_cmake 1）+ CTest の要約 10）。`find install -xtype l` は空。numpy 1.21.5（`python3 -s`）と 1.26.4（通常）の両方で pytest が通る。
 - **P1 の値の作り方（roll = 0 の退行の試験）**: 値は `test_ik_roll.py` に数値で書き込み（試験は git・外部のファイルを読まない）。コミット `4aadc04`（P1。`b1b51f5` と `src/so_arm101_ik` は同一）の `analytic_ik.py`・`urdf_kinematics.py`・`__init__.py` を `git show` でリポジトリの外のスクラッチに取り出して import し、各姿勢 q の「目標 = FK(q) + (0.004, −0.003, 0.002) m」に対する `solve_ik`（current_q = q、roll = 0）の結果を repr()（17 桁）で記録した。
 - **次**: P3（`tools/ik_model_check.py` と MoveIt の fixture）。モックの起動が要るので、実機を使っていないことの確認と許可を得てから。
+
+
+### 7.11 P3 の実装の結果（2026-11-13。コミット `1d73be8`。ユーザーが実機・launch を使っていないと返答した後に、モックで fixture を取得）
+
+**1. 作成・変更したファイル**（承認の範囲。新しい依存なし。`package.xml` は変更なし）
+
+| ファイル | 内容 |
+|---|---|
+| `so_arm101_ik/model_check.py`（新規） | ROS なしの純粋関数。fixture の姿勢、CSV の読み書き、URDF の sha256 による古さの判定、接近軸の pitch、表の行・要約・整形 |
+| `tools/ik_model_check.py`（新規） | 読み取りだけの道具（表の表示、`--record-fixture`）。`/joint_states` の購読と `/compute_fk` の呼び出しだけ。`--record-fixture` のときだけ `/move_group/get_parameters`（`robot_description` の読み取り） |
+| `test/data/moveit_fk.csv`（新規） | 105 行の fixture（git 管理） |
+| `test/test_moveit_fixture.py`（16）・`test_model_check.py`（8）・`test_ik_model_check_static.py`（3） | 新規の試験 27 件 |
+| `CMakeLists.txt` | 試験名 3 つの追加だけ |
+| `test/test_fk_chain.py` | NAMED_POSES の改名（`start (C3)` → `start (C3, old)`）と追加（`start (W1)`）だけ（案 A） |
+
+**2. 許容の表**（試験の定数は `model_check.py`）
+
+| 比較 | 許容 | 実測の最大 |
+|---|---|---|
+| 鎖の FK と MoveIt（位置） | 0.001 mm | 3.0e-13 mm |
+| 鎖と MoveIt の姿勢 | 1e-8 rad | 1.1e-15 rad |
+| 解析 FK と MoveIt（位置） | 0.01 mm（7.7 の「解析 FK と URDF の鎖」と同じ） | 0.00442 mm（random-094） |
+| 解析 FK の接近軸の pitch と MoveIt の姿勢の pitch | **4e-5 rad**（**事後承認**。鎖から作った姿勢で測った最大 1.3e-5 rad の約 3 倍。MoveIt の実測でも 1.26e-5 rad） | 1.26e-5 rad |
+
+**3. 実測の差（rms と、名前付きの姿勢ごと）**
+
+| 比較 | 最大 | rms |
+|---|---|---|
+| 鎖と MoveIt（位置） | 3.0e-13 mm | 1.7e-13 mm |
+| 鎖と MoveIt（姿勢） | 1.1e-15 rad | 5.1e-16 rad |
+| 解析 FK と MoveIt（位置） | 0.00442 mm | 0.00187 mm |
+| pitch | 1.26e-5 rad | 7.3e-6 rad |
+
+| 姿勢 | 鎖と MoveIt [mm] | 解析 FK と MoveIt [mm] | pitch の差 [rad] |
+|---|---|---|---|
+| zero | 2.0e-13 | 0.00000 | 2.4e-17 |
+| start (W1) | 1.8e-13 | 0.00059 | 2.0e-7 |
+| T (W1) | 1.1e-13 | 0.00095 | 7.7e-8 |
+| home | 1.7e-13 | 0.00072 | 1.7e-11 |
+| stretched | 2.0e-13 | 0.00029 | 4.4e-12 |
+
+許容はすべて満たした（緩めていない）。**決定 5（URDF の突き合わせ）**: `move_group` の `robot_description` から作った鎖は、インストール済みの URDF の鎖と、105 姿勢で位置 1e-9 m 以内・姿勢 1e-9 rad 以内で一致した。
+
+**4. fixture のメタ情報**: `urdf_sha256` 279b8e7dfa210e5d9d59b0147b6d70e596444139dbc6ea4c3157960ae31aac18、MoveIt は ros-humble-moveit-core 2.5.10-1jammy.20261005.213935、取得は 2026-11-13T14:05:38Z、`git_commit` 8ccc896（`git_dirty` true。道具などが未コミットだったため）、`tool_sha256` 74af5dd1…38af、seed 20261113、`base_link` から `gripper_frame_link`、105 行（名前付き 5 + 乱数 100）。
+
+**5. 取得の後の変更（事実。前の報告の訂正を含む）**
+- コミット `1d73be8` の `tools/ik_model_check.py` の sha256 は、CSV の `tool_sha256` と一致する（作業ツリーとも一致。道具は取得の後に変更していない。最終更新は 13:57:53Z）。**fixture は取り直していない**。
+- 取得（14:05:38Z）より**後**に変えたのは、lint の折り返しとインデントだけ: `model_check.py` のエラーメッセージの文字列の折り返し（E501。2 回）、`test_model_check.py`・`test_moveit_fixture.py` の長い行の折り返し（E501）、`CMakeLists.txt` の試験名のリストのインデント（lint_cmake）。関数の計算・FK の値には関係しない。`test_fk_chain.py` の更新時刻が取得の後なのは、下の `git stash` の事故が書き直したためで、内容は変えていない。
+- 静的試験の許可リスト（`git rev-parse`・`git status`・`dpkg-query -W` に限る）の変更は、14:05:05Z で、取得の**前**。**前回の報告の「取得の後に変えたのは lint と許可リスト」は不正確で、許可リストの変更は取得の前だった**。
+- 最初の `colcon test` では、ik の lint が 4 件（flake8 の E501 が 3、lint_cmake が 1）落ち、直した後の再実行で、さらに `model_check.py` の E501 が 1 件出て直した。最終の `colcon test` は 359 件、失敗 0。
+
+**6. `git stash` の事故**: 結果を調べるコマンドの末尾に、意図せず `git stash -q` を入れてしまい、実行された（確認のコマンドに git の操作をつなげた）。すぐに `git stash pop` で戻した（stash は空、差分は事故の前後で同じ、未追跡ファイルは対象外）。履歴の書き換えはない。この再発を防ぐため、CLAUDE.md に git の操作の規則を足した（承認されたコミットのための `git add`・`git commit` と承認された削除の `git rm` は除く）。
+
+**7. 決定 1〜10 の結果**
+
+| 項目 | 結果 |
+|---|---|
+| 1. 純粋関数の置き場 | `so_arm101_ik/model_check.py`（ROS なし）。道具が import |
+| 2. 名前付き 5 個 | zero、start (W1)、T (W1)、home、stretched。`start` は W1 の実測値（2026-11-13 07:54） |
+| 3. 四元数の列 | 追加した（qx..qw）。姿勢の独立な基準になった |
+| 4. 乱数の種 | 20261113、URDF の関節リミットの内側 |
+| 5. robot_description の突き合わせ | 実施。一致 |
+| 6. sha256 の対象 | インストール済みの `urdf/so101_new_calib.urdf` |
+| 7. ROS_DOMAIN_ID | 87（`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`、ros2 は `--no-daemon`） |
+| 8. 許容 | 上の 2 の表（pitch は事後承認） |
+| 9. コミットの分け方 | (a) `1d73be8`（コード・fixture・試験）、(b) 本節・inventory・CLAUDE.md |
+| 10. 実機の使用中 | コードだけ書き、ビルド・モックはユーザーが「使っていない」と返答した後 |
+
+**8. 計画との差**
+- **roll の差の列は出していない**: 解析モデルの roll は関節角 q5 そのもので、MoveIt の姿勢から取り出せない。代わりに `dpitch`（接近軸の pitch の差、模型 − MoveIt）と `orient`（鎖と MoveIt の姿勢の差。roll の違いはここに出る）を出す。
+- 道具の既定は、今の姿勢・±10 mm の 6 方向・roll の掃引。`--cases`、`--target X Y Z`（mm）、`--ik-range-margin`（既定 0.02 rad）、`--csv` がある。
+- 静的試験は、`run_text` の呼び出しが `git rev-parse`・`git status`・`dpkg-query -W` の固定のリストだけであることを AST で確かめる（`run_text` 自身は任意のコマンドを受けるが、`subprocess.run` はその 1 か所だけ）。
+
+**9. モックの表（読み取りだけ。モックの初期姿勢 home）**: |d| の最大 0.0008 mm、許容を超えた行 0、結果なしの行 1。**1 行（`target-10x`）が IK 失敗（`IKJointLimitError`）**: home は lift が範囲の端（-1.57。下限 -1.74533）に近く、x を 10 mm 縮める解が範囲外になる **[推測。原因の候補を調べていない]**。表には理由が出る。
+
+**10. 起動と停止**: 起動前の `ps` と domain 87 の `ros2 node list --no-daemon` は空。launch は `run_in_background` で `exec` し、PID 87694 を控えた（`SigIgn` に SIGINT なし、`SigCgt` に 0x2）。`/compute_fk` と `/move_group/get_parameters` を `ros2 service list --no-daemon` で確認して記録。停止は `kill -INT 87694` だけ（3 秒で終了。`ros2_control_node` の deactivate・shutdown は Successful、`move_group` の exit code -11 は既知）。停止後の `ps` と `ros2 node list --no-daemon`（domain 87）は空。daemon には触っていない。
+
+**11. 件数**: `colcon test` 全体 **359 件、失敗 0**。bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 132** = pytest 92（既存 64 + 案 A の 1 + 新規 27）+ lint 27（copyright 12、pep257 12、flake8 1、lint_cmake 1、xmllint 1）+ CTest の要約 13。
+
+**12. 次**: P4（`DiffMode`。純粋な計算）。まだ始めない。

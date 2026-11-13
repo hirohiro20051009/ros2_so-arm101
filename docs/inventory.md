@@ -2376,3 +2376,14 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - `colcon test`（全パッケージ）: **320 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 93 = pytest 64 + lint 19 + CTest の要約 10）。新規の試験は 12 + 7 = 19 件（途中の「13 件」は数え違い）。
 - P1 の値（roll = 0 の退行の試験）は `4aadc04` の `analytic_ik.py` から、スクラッチで作って試験に数値で書き込んだ（手順は 7.10）。
 - 次: P3（モックの MoveIt の FK との比較。実機を使っていないことの確認後）。
+
+## `so_arm101_ik` の P3（2026-11-13。コミット `1d73be8`。`docs/analytic_diff_plan.md` 7.11。ユーザーが「実機・launch は使っていない」と返答した後にモックを起動）
+
+- **作ったもの**: `so_arm101_ik/model_check.py`、`tools/ik_model_check.py`（読み取りだけ）、`test/data/moveit_fk.csv`（MoveIt の FK の fixture 105 行。`urdf_sha256` 279b8e7d…ac18、MoveIt 2.5.10、2026-11-13T14:05:38Z）、試験 3 つ（27 件）。`CMakeLists.txt` は試験名の追加だけ、`test_fk_chain.py` は NAMED_POSES の改名（`start (C3, old)`）と追加（`start (W1)`）だけ。新しい依存なし。
+- **MoveIt との一致**: 鎖の FK と MoveIt は最大 3e-13 mm、解析 FK と MoveIt は最大 0.0044 mm（rms 0.0019 mm）、pitch は最大 1.26e-5 rad（許容 4e-5 rad は事後承認）。`robot_description` の突き合わせも一致。
+- **モック（`mock:=true use_rviz:=false`、`ROS_DOMAIN_ID=87`、`RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`）**: `run_in_background` で `exec`、PID 87694 を控え、`SigIgn` に SIGINT なしを確認。`kill -INT` だけで停止（3 秒）。停止後の `ps` と `ros2 node list --no-daemon` は空。daemon には触っていない。`move_group` の終了時の exit code -11 は既知。
+- **`git stash` の事故**: 結果を調べるコマンドの末尾に `git stash -q` を誤って入れて実行した。すぐに `git stash pop` で戻した（stash は空、差分は同じ）。CLAUDE.md に git の操作の規則を足した。
+- **取得の後の変更**: `tools/ik_model_check.py` は変更なし（sha256 が `tool_sha256` と一致）。取得の後に変えたのは lint の折り返しとインデントだけ（7.11 節の 5）。fixture は取り直していない。
+- **`colcon test`（全パッケージ）: 359 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 132 = pytest 92 + lint 27 + CTest の要約 13）。
+- **CLAUDE.md の直し**: daemon の行（`--no-daemon`、daemon に触らない）、git の操作の規則、launch の「前景」の定義（`&` を使わず `run_in_background` で `exec`。`SigIgn` の確認）。
+- 次: P4（`DiffMode`）。
