@@ -2340,3 +2340,9 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **更新後の一致**: URDF の関節原点から導いた値にすると、roll ≈ 0 で差は 0.35 mm 以下。**roll を含む模型（TCP の外れ k = 7.903 mm、ψ0 = 178.79°、y0 = −0.177 mm、LT = 159.23 mm、D4 = 0）で、200 姿勢（roll ±2.5 rad）の rms 0.0056 mm、最大 0.012 mm**。
 - **扱い（ユーザーの決定）**: `so_arm101_ik`（6 つ目のパッケージ）に移すときに、**URDF から導く関数（`derive_constants`）と試験（手書きの定数 = 導いた値、FK の URDF との差 ≤ 0.1 mm）で直す**。詳細は `docs/analytic_diff_plan.md` の 7 章。旧ワークスペースのファイルは変更しない。
 - **同じ記録に**: クォータニオン経路のラッパーは、真下の姿勢を `so101_ik` の pitch（−90°）に直さない（RPY の pitch は −2.5° 付近）。**VR の段階の課題**（明示的な pitch・roll だけを受けるうちは問題なし）。`ros_bridge.py` は `0.0.0.0`・認証なしなので、ブリッジを作るときに localhost に限る。外部のコードの参照は無し（ユーザーの確認）。MIT の表示は `Copyright (c) 2026 hiro`。
+
+## moveit_config のクリーンビルド（2026-11-13。ユーザーの承認。実機・launch は使われていないことを `ps` で確認）
+
+- 消したのは `build/so_arm101_moveit_config` と `install/so_arm101_moveit_config` だけ（`log/` は触っていない）。`colcon build --symlink-install --packages-select so_arm101_moveit_config`（isolated）で再ビルド。
+- **消した `install/` の古い複製（git 管理外。Servo の削除で残っていたもの）の内容の出どころ**: `launch/servo.launch.py`（1420 バイト、11 月 5 日、git blob `c2ead66a271647d579b3527d550e01106dfa32fa`）は git の履歴の 19273db（2026-11-05）の版、`config/servo.yaml`（4611 バイト、blob `e39a59c1c247a5b7dc8469a913b99d403542cbcb`）は 3bc04f8（2026-11-05）の版と一致。**`git show <commit>:src/so_arm101_moveit_config/…` で取り出せる**（削除は 8dc64f2、直前は c764829）。
+- 前後の比較: `install/` の diff は、`servo.launch.py`・`config/servo.yaml`（moveit_config）と、前の bringup の `servo.yaml`・`servo_joint_limits.yaml` の消失に加え、**`launch/__pycache__/*.pyc`（launch を実行したときに作られた生成物 5 個とそのディレクトリ）も無くなった**（再ビルドで消えた。launch の実行で再生成される）。`find install -xtype l` は 0 件。`colcon test`（source 後）**227 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0）。robot_description の sha256 は 6 通りとも前と同一、`--show-args` は 21。
