@@ -63,10 +63,10 @@ def test_check_is_the_first_action():
 
 
 def test_declared_arguments():
-    assert len(DECLARED) == 22
+    assert len(DECLARED) == 21
     assert 'hardware' not in DECLARED
     for name in ('mock', 'read_only', 'torque_limit', 'use_rviz',
-                 'monitor_dynamics', 'rviz_config', 'use_servo'):
+                 'monitor_dynamics', 'rviz_config'):
         assert name in DECLARED
 
 

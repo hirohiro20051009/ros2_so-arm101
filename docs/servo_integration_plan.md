@@ -1,5 +1,7 @@
 # MoveIt Servo（Diff-IK）を bringup に統合する計画
 
+> **【Servo は削除済み（2026-11-13）】** MoveIt Servo 一式（`use_servo`、forward controller、`servo.yaml`、送信ツールなど）は、(d) 解析 IK の差分モードの採用（`docs/analytic_diff_plan.md`）に伴い削除した。**削除の直前のコミットは `c764829`**（`git checkout c764829 -- <path>` で取り出せる。一覧は `docs/servo_removal_plan.md`）。**以下は削除前の記録**で、書き換えていない。
+
 2026-11-12。**調査と計画だけ。コード・launch・設定の変更、モック・実機の起動はしていない**（ファイルを読む、`xacro` の展開、`MoveItConfigsBuilder` の Python 実行、numpy による運動学の計算、公式ソースの取得だけ。ノードもポートも使っていない）。承認が出るまで実装しない。
 
 

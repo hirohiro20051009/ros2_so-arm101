@@ -1,6 +1,8 @@
 # Servo 一式の削除の計画
 
-作成: 2026-11-13。**計画だけ。削除・ファイルの変更・ビルド・モック・ノードの起動はしていない。** ユーザーの承認を得てから実行する（CLAUDE.md の削除の規則: 一覧と理由を示し、承認を得てから `git rm`）。
+作成: 2026-11-13。**【実行済み（2026-11-13。削除の直前のコミット `c764829`。結果は `docs/inventory.md` の「Servo 一式の削除」の節）】** 以下は実行前の計画のまま。
+（当初の記述: 計画だけ。削除・ファイルの変更・ビルド・モック・ノードの起動はしていない。） ユーザーの承認を得てから実行する（CLAUDE.md の削除の規則: 一覧と理由を示し、承認を得てから `git rm`）。
+**承認と決定（ユーザー、2026-11-13）: 削除を承認。J1: `servo_math.py` は削除。J2: `moveit_config` 側の `servo.launch.py`・`servo.yaml` と、`moveit_config/package.xml` の `moveit_servo` の依存も削除（R6・R7・E7 を追加）。bringup のクリーンビルドを承認（実機は使っていない。ビルドの直前に `ps` で launch・`ros2_control_node` などが動いていないことを確認し、動いていれば自分では止めずに報告）。以前 moveit_config の Servo を残した理由は `docs/inventory.md` に記録として残す。削除の直前のコミットは `c764829`。コミットは削除だけで 1 つ。**
 前提（ユーザーの決定、2026-11-13）: (d) 解析 IK の差分モードを採用する。**(d) が実現できる見込みがある**と判断できたら Servo 一式を削除する。**判断と根拠は `docs/analytic_diff_plan.md` の 5 章**（見込みあり・条件つき: 解析 IK の定数の更新、ラッパーの姿勢の対応、実機での摩擦の確認）。この計画はその続き。
 区別: **[事実]** はリポジトリの確認、**[推測]** は未確認。
 
@@ -21,6 +23,8 @@
 | R3 | `tools/send_servo_twist.py` | 284 | Servo に Twist を送る実機の道具。Servo が無ければ使えない |
 | R4 | `tools/servo_math.py` | 128 | Servo の Jacobian・drift の計算。使い手は R3 と R5 だけ（**判断 J1**） |
 | R5 | `src/so_arm101_bringup/test/test_servo_integration.py` | 468 | Servo の静的試験（35 件）。CMake の登録（E5）も消す |
+| **R6** | `src/so_arm101_moveit_config/launch/servo.launch.py` | 55 | Servo のノードを起動する launch。KDL を渡すので drift と両立せず（`servo_integration_plan.md` 1.2）、実行時に使われない。**J2 の決定で追加** |
+| **R7** | `src/so_arm101_moveit_config/config/servo.yaml` | 64 | MoveIt Setup Assistant 由来の元の設定（bringup の `servo.yaml` とは別物。実行時に使われない）。**J2 の決定で追加** |
 
 ### 2.2 編集（ファイルは残す。Servo の部分だけ取り除く）
 
@@ -31,14 +35,15 @@
 | E3 | `src/so_arm101_bringup/package.xml` | `<exec_depend>moveit_servo</exec_depend>`（`:18`）、`<exec_depend>forward_command_controller</exec_depend>`（`:19`） |
 | E4 | `src/so_arm101_bringup/test/test_launch_arg_check.py` | `len(DECLARED) == 22` → 21、名前の列から `'use_servo'`（`:66-70`） |
 | E5 | `src/so_arm101_bringup/CMakeLists.txt` | `ament_add_pytest_test(test_servo_integration …)` とそのコメント（`:37-39`） |
+| **E7** | `src/so_arm101_moveit_config/package.xml` | `<exec_depend>moveit_servo</exec_depend>`（`:24`）。**J2 の決定で追加**（`moveit_servo` への依存がリポジトリから消える） |
 | E6 | `src/so_arm101_description/…` / `so_arm101_moveit_config/config/so101_new_calib.urdf.xacro` のコメント | `docs/servo_integration_plan.md 3.3.2` を参照するコメント（L1 の説明）。**L1 の値・引数は残す**。コメントは「Servo の」の語を整える程度（**判断 J3**。コメントだけなので省略可） |
 
 ### 2.3 判断を仰ぐもの（別扱い）
 
 | # | 物 | 得失 |
 |---|---|---|
-| **J1** | `tools/servo_math.py` の**一部（`chain_from_urdf`・`jacobian`）は Servo 専用ではない**（URDF から FK と幾何 Jacobian を作る numpy の関数）。(d) の試験（URDF の FK との一致）と、将来の Diff-IK で使えそう | **残す**: 試験に使える。「Servo だけが使うもの」の削除の方針と合わない部分が残る（drift・射影の関数は不要）。**削る**: Servo の語・不要な関数が残らない。(d) の試験が必要なら、`so_arm101_ik` の試験に**自前の URDF の FK（30 行程度）**を書く。**推奨: 削除**（(d) は `so_arm101_ik` に自前の FK を持つ。`servo_math` を残すと、「Servo のものが残る」ことになる） |
-| **J2** | **`src/so_arm101_moveit_config/launch/servo.launch.py`（55 行）と `config/servo.yaml`（64 行）、`package.xml` の `<exec_depend>moveit_servo</exec_depend>`（`:24`）**（ユーザーが以前の判断で残した Setup Assistant 一式の一部） | **残す**: 「Setup Assistant 一式を残す」判断と一貫。コストはゼロ（実行時に使われない）。**失**: `servo.launch.py` は `kinematics`（KDL）を渡すので、**drift と両立しない**（`servo_integration_plan.md` 1.2 で確認）＝**そのまま起動すると誤った設定になる**。`moveit_servo` の依存が残る。「Servo を削除した」と矛盾する。**消す**: 一貫。誤用を防ぐ。`moveit_servo` への依存が全パッケージから消える。**失**: Setup Assistant を再実行すると `servo.yaml` が再生成されうる（再生成を選んだ場合のみ）。`git` から戻せる。**推奨: 消す**（`servo.launch.py`・`servo.yaml`・`moveit_servo` の依存の 3 点。**ユーザーの判断**） |
+| **J1（決定: 削除）** | `tools/servo_math.py` の**一部（`chain_from_urdf`・`jacobian`）は Servo 専用ではない**（URDF から FK と幾何 Jacobian を作る numpy の関数）。(d) の試験（URDF の FK との一致）と、将来の Diff-IK で使えそう | **残す**: 試験に使える。「Servo だけが使うもの」の削除の方針と合わない部分が残る（drift・射影の関数は不要）。**削る**: Servo の語・不要な関数が残らない。(d) の試験が必要なら、`so_arm101_ik` の試験に**自前の URDF の FK（30 行程度）**を書く。**推奨: 削除**（(d) は `so_arm101_ik` に自前の FK を持つ。`servo_math` を残すと、「Servo のものが残る」ことになる） |
+| **J2（決定: 消す）** | **`src/so_arm101_moveit_config/launch/servo.launch.py`（55 行）と `config/servo.yaml`（64 行）、`package.xml` の `<exec_depend>moveit_servo</exec_depend>`（`:24`）**（ユーザーが以前の判断で残した Setup Assistant 一式の一部） | **残す**: 「Setup Assistant 一式を残す」判断と一貫。コストはゼロ（実行時に使われない）。**失**: `servo.launch.py` は `kinematics`（KDL）を渡すので、**drift と両立しない**（`servo_integration_plan.md` 1.2 で確認）＝**そのまま起動すると誤った設定になる**。`moveit_servo` の依存が残る。「Servo を削除した」と矛盾する。**消す**: 一貫。誤用を防ぐ。`moveit_servo` への依存が全パッケージから消える。**失**: Setup Assistant を再実行すると `servo.yaml` が再生成されうる（再生成を選んだ場合のみ）。`git` から戻せる。**推奨: 消す**（`servo.launch.py`・`servo.yaml`・`moveit_servo` の依存の 3 点。**ユーザーの判断**） |
 | J3 | E6 のコメント | 省略してよい（docs が参照先として残る） |
 
 ### 2.4 残すもの（削除しない）

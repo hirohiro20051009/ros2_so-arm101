@@ -1,5 +1,7 @@
 # Servo 実機 W 段階の結果と、W3（腕が動かない）の調査計画
 
+> **【Servo は削除済み（2026-11-13）】** MoveIt Servo 一式（`use_servo`、forward controller、`servo.yaml`、送信ツールなど）は、(d) 解析 IK の差分モードの採用（`docs/analytic_diff_plan.md`）に伴い削除した。**削除の直前のコミットは `c764829`**（`git checkout c764829 -- <path>` で取り出せる。一覧は `docs/servo_removal_plan.md`）。**以下は削除前の記録**で、書き換えていない。
+
 作成: 2026-11-13。**記録と計画だけ。コード・launch・設定・手順書の変更なし。モック・ノードの起動、ビルド、シリアルポートを開くコマンドは実行していない。** 実機は停止済み（トルク OFF、出発点、12 V は入れたまま）。
 実行したのはユーザー（2026-11-13 07:49〜09:22）。ログ: `~/so_arm101_check/` の `servo_W0.log`、`servo_W0_after.log`、`servo_W1.log`、`servo_W3_cmd.txt`、`servo_W6_after.log`。
 区別: **[事実]** はユーザーの報告またはログ・ソース。**[推測]** は未確認。

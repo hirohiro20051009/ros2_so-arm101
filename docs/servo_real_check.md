@@ -1,5 +1,7 @@
 # 実機確認手順: MoveIt Servo（Diff-IK。use_servo）
 
+> **【Servo は削除済み（2026-11-13）】** MoveIt Servo 一式（`use_servo`、forward controller、`servo.yaml`、送信ツールなど）は、(d) 解析 IK の差分モードの採用（`docs/analytic_diff_plan.md`）に伴い削除した。**削除の直前のコミットは `c764829`**（`git checkout c764829 -- <path>` で取り出せる。一覧は `docs/servo_removal_plan.md`）。**以下は削除前の記録**で、書き換えていない。
+
 対象: `use_servo:=true` の実機。段階 R（読み取り専用。腕は動かない）と段階 W（書き込みモード。**腕が動く。サーボにトルクが入る**）。**実行するのはユーザーだけ**（Claude は実機を動かさない）。
 計画と根拠: `docs/servo_integration_plan.md`（6.2 がこの手順書の目次。14 章がモックの結果）。書き込みモードの基本は `docs/feetech_write_check.md`（W0〜W4。この手順書は、その共通の約束と止め方を引き継ぐ）。校正の状態は `docs/so_arm101_calibration_check.md`。
 

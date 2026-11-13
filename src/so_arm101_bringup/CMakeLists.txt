@@ -34,9 +34,6 @@ if(BUILD_TESTING)
   set(ENV{PYTEST_DISABLE_PLUGIN_AUTOLOAD} 1)
   ament_add_pytest_test(test_launch_arg_check test/test_launch_arg_check.py
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
-  # static tests of the MoveIt Servo integration (no node is started)
-  ament_add_pytest_test(test_servo_integration test/test_servo_integration.py
-                        ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
 endif()
 
 ament_package()

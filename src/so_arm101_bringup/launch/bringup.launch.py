@@ -34,10 +34,6 @@ LeRobot 経路は削除した（タグ stage2c-done に残っている）。
 
 robot_state_publisher / ros2_control_node / move_group は1つずつ、
 コントローラ名・トピックは mock / 実機で共通（/arm_controller, /gripper_controller, /joint_states）。
-
-use_servo:=true（既定 false）のときだけ、MoveIt Servo（Diff-IK。servo_node）と、その出力を受ける
-forward_position_controller（--inactive で読み込むだけ）を足す。false のときは、今までと同じノード・コントローラだけ
-（docs/servo_integration_plan.md）。Servo は起動しても、start_servo を呼ぶまで何も出さない。
 """
 
 import difflib
@@ -54,7 +50,6 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_configs_utils.launch_utils import DeclareBooleanLaunchArg
-import yaml
 
 
 # Names added by "ros2 launch" itself (--launch-prefix / --launch-prefix-filter).
@@ -91,11 +86,6 @@ def _check_launch_arguments(context, declared_names, *args, **kwargs):
     raise RuntimeError(message)
 
 
-def _read_yaml(path):
-    with open(path) as f:
-        return yaml.safe_load(f)
-
-
 def generate_launch_description():
     mock = LaunchConfiguration("mock")
     serial_port = LaunchConfiguration("serial_port")
@@ -125,11 +115,9 @@ def generate_launch_description():
         .to_moveit_configs()
     )
     moveit_launch = moveit_config.package_path / "launch"
-    bringup_config = os.path.join(get_package_share_directory("so_arm101_bringup"), "config")
-    controllers_yaml = os.path.join(bringup_config, "controllers.yaml")
-    use_servo = LaunchConfiguration("use_servo")
-    servo_params = _read_yaml(os.path.join(bringup_config, "servo.yaml"))
-    servo_joint_limits = _read_yaml(os.path.join(bringup_config, "servo_joint_limits.yaml"))
+    controllers_yaml = os.path.join(
+        get_package_share_directory("so_arm101_bringup"), "config", "controllers.yaml"
+    )
 
     ld = LaunchDescription()
     # 宣言していない引数の検査。最初の動作（どのノードより前）。宣言の一覧は、末尾で埋める
@@ -190,14 +178,6 @@ def generate_launch_description():
     )
     ld.add_action(DeclareBooleanLaunchArg("use_rviz", default_value=True))
     ld.add_action(DeclareBooleanLaunchArg("db", default_value=False))
-    ld.add_action(
-        DeclareBooleanLaunchArg(
-            "use_servo", default_value=False,
-            description="true で MoveIt Servo（servo_node）と forward_position_controller"
-            "（inactive）を足す。Servo は start_servo を呼ぶまで何も出さない"
-            "（手順は docs/servo_integration_plan.md）",
-        )
-    )
 
     def include(name, condition=None, args=None):
         return IncludeLaunchDescription(
@@ -231,43 +211,9 @@ def generate_launch_description():
     )
 
     # controller spawner（moveit_controllers.yaml のコントローラ名 + joint_state_broadcaster）
-    # forward_position_controller は use_servo:=true のときだけ、--inactive（読み込むだけ）で spawn する
-    ld.add_action(
-        TimerAction(
-            period=3.0,
-            actions=[
-                include("spawn_controllers.launch.py"),
-                Node(
-                    package="controller_manager",
-                    executable="spawner",
-                    arguments=["forward_position_controller", "--inactive"],
-                    output="screen",
-                    condition=IfCondition(use_servo),
-                ),
-            ],
-        )
-    )
+    ld.add_action(TimerAction(period=3.0, actions=[include("spawn_controllers.launch.py")]))
 
     ld.add_action(include("move_group.launch.py"))
-
-    # MoveIt Servo（use_servo:=true のときだけ）。robot_description は他のノードと同じ。
-    # robot_description_kinematics は渡さない（逆 Jacobian の経路。drift を使うため。docs 2.5）。
-    # robot_description_planning は Servo 専用の関節速度の上限（MoveIt の joint_limits.yaml は変えない）
-    ld.add_action(
-        Node(
-            package="moveit_servo",
-            executable="servo_node_main",
-            name="servo_node",
-            output="screen",
-            parameters=[
-                {"moveit_servo": servo_params},
-                moveit_config.robot_description,
-                moveit_config.robot_description_semantic,
-                {"robot_description_planning": servo_joint_limits},
-            ],
-            condition=IfCondition(use_servo),
-        )
-    )
     ld.add_action(
         include(
             "moveit_rviz.launch.py",
