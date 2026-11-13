@@ -2351,3 +2351,15 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 
 - シェルの `python3`（`-I` なし）は `~/.local/lib/python3.10/site-packages/numpy`（**1.26.4**）を拾う。`python3 -I` や、システムの `python3-numpy`（`dpkg`: **1.21.5**、`/usr/lib/python3/dist-packages`）とは別の版。`tools/` のスクリプト（`pose_margin.py` など）と、`colcon test` の Python の試験は、通常の `python3` で動くので 1.26.4 を使う。
 - **扱い（ユーザー）**: 対策なし（anyio と pytest 6.2.5 の非互換の件（案 0）と同種）。`so_arm101_ik`（P1）の `package.xml` は `python3-numpy` を `exec_depend` に書く（rosdep のキー。システム版に解決される）。**numpy 1.21.5・1.26.4 のどちらでも動く書き方にする**（`docs/analytic_diff_plan.md` 7.7）。
+
+
+## `so_arm101_ik` の P1（2026-11-13。ユーザーの承認。`docs/analytic_diff_plan.md` 7.7・7.8。実機・launch は使われていない）
+
+- **作ったもの**（新規のみ。既存のコードは変更していない）: `src/so_arm101_ik/`（`package.xml`、`CMakeLists.txt`、`so_arm101_ik/{__init__,urdf_kinematics,analytic_ik}.py`、`test/{test_constants,test_fk_chain,test_ik_roundtrip}.py`）。URDF の鎖の FK と `derive_constants`、roll を含む閉じた式の FK、roll = 0 の解析 IK。依存は 7.7 の承認どおり（`python3-numpy`、試験は `ament_index_python`・`so_arm101_description` ほか）。
+- **ビルド**: `colcon build --packages-select so_arm101_ik --symlink-install`（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source。ほかのパッケージはビルドしていない）。`find install -xtype l` は 0 件。`install/so_arm101_ik` は `local/lib/python3.10/dist-packages/so_arm101_ik{,-0.1.0-py3.10.egg-info}`（`.py` 3 つは symlink）と `share/`（ament_index、colcon-core、cmake、environment、hook、`package.xml`、`local_setup.*`、`package.*`）。
+- **`colcon test`（全パッケージ、source 後）: 295 件、失敗 0**。内訳: bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 68**（= xunit 60（pytest 45、lint 15）+ CTest の要約 8）。前の 227 は不変。
+- **変わっていないことの確認**: `gen_rd6.sh` の `robot_description` の sha256 6 通りが前と同一（`d8eebdcd27762b2b`（mock 2 通り）、`f8dc8da49a238a75`、`088bdfa09bdeb0ca`、`c5a19e7a006e269c`、`1461b070b550512d`）。`--show-args` は 21。起動したプロセスなし（`ps` 空）。
+- **既知のずれ（定数）の解消**: 先端のずれ 6〜11 mm は、手書きの定数を URDF から導いた値にして 0.01 mm 以下になった（最悪 4.6 µm）。試験が URDF・定数の変更で落ちる。
+- **出発点の扱い（記録）**: 出発点の elbow +1.69009 が URDF の上限（+1.69）を超えるので、差分モードを出発点の近くから始めると今の姿勢を IK で再現できない（roll も −0.0453（W1 の 2026-11-13 07:54 の実測。C3 直後の記録は −0.0483）で、P1 の IK は roll = 0 だけ）。P2 以降で扱いを決める。
+- **事後承認（ユーザー）**: FK は roll を含め IK は roll = 0 だけにしたこと（7.1 を 7.7 で置き換え）、除く条件に radial < 0.01 m を足したこと（ランダムの約 28%。別の試験あり）、表の外の許容（pan の回転の符号の試験 2 µm ほか。一覧は 7.8）。
+- 次: P2（roll を含む IK、7.1）、P3（`tools/ik_model_check.py`、モックの MoveIt の FK との比較）。

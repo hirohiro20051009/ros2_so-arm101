@@ -15,7 +15,7 @@
 - **入出力 [事実]**: 入力は `base_link` の XYZ [m]、`current_q`（5 要素、rad）、任意で pitch・roll [rad] またはクォータニオン。出力は `q`（5 要素の `numpy` 配列、rad。ROS の関節名の順 shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll）。`fk(q)` は `(XYZ, pitch, roll)`。エラーは `IKError`（`IKUnreachableError`・`IKJointLimitError`）。**gripper は扱わない**。
 - **依存 [事実]**: `math` と `numpy` だけ（ROS・LeRobot・MoveIt に依存しない）。ほかの旧ファイル（`collect_cal.py`・`contact_test.py`）が `import so101_ik as A` で使う。
 - **帰属・ライセンス [事実]**: 旧ワークスペースの git で、コミット 1b6d489（2026-11-05、作者 `hirohiro20051009`）。ファイルにライセンス・著作権の行は無い。**ユーザー自身のコード**（CLAUDE.md の「自作の解析 IK」）。外部のコードを参考にしたかは、ユーザーの記入が無かったので**未確認**（前の依頼の記入欄は空欄）。載せるときに MIT の表示を足す。
-- **ガード [事実]**: `radial ≈ 0`（pan 軸の真上）での `atan2` の不安定さを避ける検査は**無い**。`within_limits` は**厳密な不等式**（許容幅なし）。**今の出発点の elbow は +1.6901 で、URDF の上限 1.69 を 0.0001 rad 超えている**ので、**出発点そのものは「範囲外」と判定される**（出発点の付近の枝は選べない）。
+- **ガード [事実]**: `radial ≈ 0`（pan 軸の真上）での `atan2` の不安定さを避ける検査は**無い**。`within_limits` は**厳密な不等式**（許容幅なし）。**今の出発点の elbow は +1.6901 で、URDF の上限 1.69 を 0.0001 rad 超えている**ので、**出発点そのものは「範囲外」と判定される**（出発点の付近の枝は選べない）。**差分モードを出発点の近くから始めると、今の姿勢を IK で再現できない。P2 以降で扱いを決める**（P1 の `analytic_ik.within_limits` は旧コードと同じ厳密な判定のまま。出発点は roll も −0.0453（W1 の 2026-11-13 07:54 の実測。C3 直後の記録は −0.0483）で、P1 の IK は roll=0 だけなので、どちらにしても P2 まで IK には通せない）。
 
 ### 1.2 幾何の値の一覧と、今の URDF との突き合わせ
 
@@ -195,6 +195,8 @@ CLAUDE.md の最終構成には **`so_arm101_ik`（解析 IK + Diff-IK）** と 
 
 ### 7.1 roll による先端のずれを IK の模型に入れる案（TCP が roll の軸から 7.9 mm 外れている）
 
+> **【7.7 で置き換え（2026-11-13）】** この節の「段階」（P1 は roll を固定した、k を含まない模型）は、7.7 節の承認で置き換えた: **P1 の FK は roll を含める（k・ψ0・y0 を導く。D4 = 0）。IK は roll = 0 だけ（|roll| ≤ 1e-9）で、roll ≠ 0 は `ValueError`。IK で roll を扱うのは P2**。7.8 に実装の結果。
+
 - **これは「TCP と把持の中心のずれ」（ユーザーが別に対処）とは別の、URDF の幾何の問題**（`gripper_frame_link` が roll の軸の上に無い）。
 - **[事実。計算] roll を含む模型が URDF と一致する**: URDF の順運動学に対し、次の模型を 200 姿勢（roll ±2.5 rad、pan ±1.0 rad を含む）でフィットした結果、**rms 0.0056 mm、最大 0.012 mm**:
   - 面内（pan の鉛直面）: `radial = AP + L1 cos α1 + L2 cos α2 + LT cos p + k cos(ψ + ψ0)(−sin p)`、`z = Z0 + HP + L1 sin α1 + L2 sin α2 + LT sin p + k cos(ψ + ψ0) cos p`（`p` = 接近軸の pitch、`ψ = S5 q5` = roll）。
@@ -314,8 +316,10 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 | 手書きの定数と導いた値 | 長さ **0.1 mm**（相当）、角度 1e-5 rad の目安 | **0.1 mm** はユーザーの指定。URDF が変わる・定数が書き換わると落ちる |
 | 実機の tf の値（W1 の T）との一致 | 1 mm | 1 mm 刻みの記録（`(0.172, 0.000, 0.055)`）。粗い健全性の確認 |
 | （P3 から）MoveIt の `/compute_fk` の記録（fixture）との一致 | **0.001 mm** | 下の (f) |
+| **表の外で追加（事後承認。2026-11-13）** | 下の 7.8 の「表の外の許容の一覧」 | pan の回転の符号の試験は **2 µm**（3.14159 の丸めで pan の軸が 2.7e-6 rad 傾く）ほか |
 
 **5. 除く条件（IK の往復。有効数字の問題で、別の試験にする）**
+- **腕が pan 軸の反対側へ折り返す姿勢（符号つきの radial < 0.01 m）**（**事後承認で追加**。IK は radial ≥ 0 の側だけを解くので、`IK(FK(q)) = q` が成り立たない。ランダム姿勢の約 28% が当たる。別の試験で見る。7.8）
 - **2 つの枝の距離が近い**（(g)。下）。**腕がほぼ完全に伸びる・折りたたまれる**（`|D| > 1 − 1e-5`）。
 - **`r' < 0.01 m`**（pan 軸の真上。pan が不定）。
 - **どれかの関節が範囲の端から 1e-3 rad 以内**（範囲で候補が切り替わる）。
@@ -332,3 +336,36 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 - **単位は rad、数値は 0.01**。
 
 **6. `~/.local` の numpy を拾う件**: シェルの `python3` は `~/.local` の numpy 1.26.4 を拾い、システム版（`python3-numpy` 1.21.5。`python3 -I` ではこちら）と異なる。**対策はしない（記録のみ。anyio の件（案 0）と同種）**。`so_arm101_ik` は numpy 1.21.5・1.26.4 の両方で動く書き方にする（古い版にない関数を使わない）。**試験は両方の numpy で通ること**を、ビルド後に確認する（`python3 -I` でシステム版、通常の `python3` で `~/.local` 版。ただし `colcon test` は通常の環境）。
+
+
+### 7.8 P1 の実装の結果（2026-11-13。ビルド・`colcon test` の後）
+
+**ファイル**: `src/so_arm101_ik/` の `package.xml`、`CMakeLists.txt`、`so_arm101_ik/{__init__,urdf_kinematics,analytic_ik}.py`、`test/{test_constants,test_fk_chain,test_ik_roundtrip}.py`（7.7 の一覧どおり。一覧の外のファイル・依存なし）。
+
+**事後承認された 3 点（ユーザー）**
+1. **7.1 と 7.7 の食い違い**: FK は roll を含める。IK は roll = 0 だけで、roll ≠ 0 は `ValueError`（P2 で扱う）。7.1 に「7.7 で置き換え」の注記。
+2. **除く条件に「符号つき radial < 0.01 m」を追加**（pan 軸の反対側へ折り返す姿勢）。IK は radial ≥ 0 の側だけを解くので、これらの姿勢の `IK(FK(q)) = q` は成り立たない（IK は「到達不可」にするか、別の姿勢を返す）。**ランダム姿勢（関節の範囲を一様）の約 28% が当たる**（5000 姿勢の数値確認で 1415 件）。**別の試験**（`test_excluded_conditions_give_finite_values_or_an_explicit_error`）で、有限の値か明示的な `IKError` で、返したときは位置が 0.001 mm 以内で合うことを見ている。往復の試験の対象は 3000 姿勢から除いたあとの残り（500 件以上あることも試験で確認）。
+3. **表の外の許容（下）**。
+
+**表の外の許容の一覧**（7.7 の許容の表にない値を置いた試験。すべて）
+
+| 試験 | 値 | 理由 |
+|---|---|---|
+| `test_pan_rotates_the_tip_…`（pan を回しても z・pan 軸からの距離が変わらない） | **2 µm**（2e-6 m） | pan の関節の rpy に丸めた 3.14159 があり、軸が 2.7e-6 rad 傾く |
+| 同（pan の回転の向き = S1 = −1） | 1e-5 rad | 同上 |
+| `test_rotation_helpers`（回転行列の直交性・rpy の順・Rodrigues） | 1e-12 | 倍精度の丸め。URDF の丸めは関係しない |
+| `test_roll_moves_the_tip_…`（roll 1.0 で先端が動く量） | 7.0〜8.5 mm、鎖と模型の動く量の差 0.01 mm | 計画の 1.2 節の値（7.6 mm） |
+| `test_derived_values_are_the_known_geometry`（導いた値の粗い健全性） | 長さ 0.1 mm、角度 0.01°、D4 は 1e-5 rad | 導出そのものを手書きの数値と独立に確かめる |
+| `test_a_changed_urdf_is_detected`・`test_a_changed_constant_is_detected` | URDF の 1 mm の変更が 4 か所で検出される／各定数を許容の 2 倍動かすと検出される | 「URDF が変わる・定数が書き換わると落ちる」ことの確認 |
+| `test_joint_limits_equal_the_urdf` | 1e-9 rad | URDF の `<limit>` と手書きの Q_MIN/Q_MAX の一致 |
+| IK の解の姿勢（pitch の往復）、最近傍の枝の選択 | 1e-9 rad | 関節空間の往復と同じ（表の 1e-9 を pitch・枝の選択にも適用） |
+| `test_position_round_trip_for_moved_targets` | 位置 0.001 mm（表と同じ）。目標を ±10 mm 動かし、300 件以上で解けること | 「FK(q) だけでなく新しい解」の確認 |
+| `test_limits_are_inclusive_…` | 1e-6 rad（範囲の外へのずれ） | 範囲の判定が全関節で包含的であること |
+| コードの `ROOT_TOLERANCE`（余弦定理の値 D が 1 + 1e-9 まで到達可能とする）・`ROLL_TOLERANCE`（|roll| ≤ 1e-9） | 1e-9 | 旧 `so101_ik.py` の 1e-9 を移した値と、roll=0 の判定 |
+
+**そのほか**
+- 「2 つの枝の距離が近い」の除く条件（0.01 rad）は「ほぼ完全に伸びる」（|D| > 1 − 1e-5）と同じしきい値（7.7 の (g)）なので、試験の除外の理由としては常に後者が先に当たる。条件は両方とも残してある。
+- 報告の文「`ik_geometry` は枝の距離と |D| を試験に出し、`solve_ik` は最近傍の枝を選びます」が途中で切れて見えたのは、表のセルの中の `|D|` の縦線が区切りに解釈されたため（文は切れていない）。
+- 数値の確認（ビルド前、スクラッチで）: 手書きの定数と URDF の鎖の FK の最悪差 4.6 µm（許容 0.01 mm）、π/2・π に直した URDF との差 約 1e-12 mm（1e-5 mm）、解析 IK→解析 FK 約 2e-13 mm（0.001 mm）、IK→URDF の鎖 約 2.9 µm（0.01 mm）、関節空間 約 2e-13 rad（1e-9）、T の tf 0.2 mm 以内（1 mm）、手書きと導いた値の差 最大 5e-11。pytest は ~/.local の numpy 1.26.4 とシステム版 1.21.5（`python3 -s`）の両方で 45 件が通る。
+- 手書きの定数（導いた値）: AP 0.0303992、HP 0.0542000、L1 0.116000、L2 0.135000、LT 0.159227 m、D2 −13.9677°、D3 +2.2075°、D4 +0.0004°、k 7.9031 mm、ψ0 178.791°、y0 −0.1759 mm。
+- **試験の件数**: `so_arm101_ik` は 60 件（pytest 45 = `test_constants` 5 + `test_fk_chain` 14 + `test_ik_roundtrip` 26、lint 15 = copyright 6・flake8 1・pep257 6・xmllint 1・lint_cmake 1）。`colcon test-result` の合計は **295 = 227 + 68**（68 = 60 + CTest の要約 8（`Testing/` の 3 pytest + 5 lint）。ほかのパッケージの数え方と同じ）。失敗 0。
