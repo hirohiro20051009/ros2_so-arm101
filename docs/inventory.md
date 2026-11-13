@@ -2369,3 +2369,10 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **出発点は差分モードの起点にならない**: 出発点（elbow +1.6901、先端の z 33.9 mm）は床の規則（45 mm）より低く、折りたたみの特異点の近く（|D| = 0.987）にあるため、差分モードの起点にならない。差分モードは、T のような姿勢へ移ってから始める。（根拠 [事実。スクラッチ計算]: 出発点の先端は (217.2, 17.7, 33.9) mm、pitch −35.2°。先端を 3 mm 動かすと関節が最大 0.14 rad（x 方向）動く。T は 3 mm で 0.02〜0.026 rad。）
 - **roll は閉じた式で解く**（反復なし。往復 1e-12 rad）。2 つの枝で pan・roll は同じなので、枝の選び方は P1 のまま。
 - **範囲外の出発点**: IK の関数は `q_min`・`q_max` を引数に（既定は厳密）。差分モードは厳密な範囲＋入口で拒否。読み取りの道具だけ ε = 0.02 rad。校正の範囲は使わない（URDF・MoveIt の範囲と食い違うため）。
+
+### `so_arm101_ik` の P2 の実装（2026-11-13。コミット `3cbba67`。`docs/analytic_diff_plan.md` 7.10。実機・launch は使われていない）
+
+- roll を閉じた式で解く IK、IK の範囲の引数（既定は厳密）を実装。変更は `src/so_arm101_ik/` の 5 ファイルだけ（`analytic_ik.py`、`CMakeLists.txt`、`test_ik_roundtrip.py`（1 試験の置き換え）、`test_ik_roll.py`・`test_ik_limits.py`（新規））。
+- `colcon test`（全パッケージ）: **320 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 93 = pytest 64 + lint 19 + CTest の要約 10）。新規の試験は 12 + 7 = 19 件（途中の「13 件」は数え違い）。
+- P1 の値（roll = 0 の退行の試験）は `4aadc04` の `analytic_ik.py` から、スクラッチで作って試験に数値で書き込んだ（手順は 7.10）。
+- 次: P3（モックの MoveIt の FK との比較。実機を使っていないことの確認後）。

@@ -484,3 +484,12 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 | 14 | ファイル | **7.9.5 の表（`analytic_ik.py` 変更、`test_ik_roll.py`・`test_ik_limits.py` 新規、`CMakeLists.txt` の試験名、既存の 1 試験を置き換え）** | 依存の追加なし |
 | 15 | 試験の件数 | **pytest +10〜14、合計 295 → 約 310〜315（実数は実装後に記録）** | 7.9.5 |
 | 16 | P3 との順番 | **P2 → P3（fixture → 道具）→ P4** | 独立な基準（MoveIt）を P4 の前に取る。実機の使用中は P4 の純粋な計算を先に進められる |
+
+
+### 7.10 P2 の実装の結果（2026-11-13。コミット `3cbba67`。ビルド・`colcon test` の後）
+
+- **変更・作成したファイル**（承認の範囲）: `analytic_ik.py`（変更）、`test/test_ik_roll.py`・`test/test_ik_limits.py`（新規）、`CMakeLists.txt`（試験名の追加だけ）、`test/test_ik_roundtrip.py`（1 試験の置き換えだけ）。新しい依存なし。
+- **置き換えた試験**: 旧 `test_roll_other_than_zero_is_not_supported_at_this_stage` → 新 `test_roll_is_supported_and_is_used_as_given`（件数は変わらない）。
+- **件数**: pytest 64（45 + 新規 19 = `test_ik_roll` 12 + `test_ik_limits` 7）。**途中の報告で新規を「13 件」と書いたのは数え違いで、正しくは 12 件**（pytest の 64 と一致）。`colcon test` 全体は **320 件、失敗 0・エラー 0・スキップ 0**: bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 93**（pytest 64 + lint 19（copyright 8・pep257 8・flake8 1・xmllint 1・lint_cmake 1）+ CTest の要約 10）。`find install -xtype l` は空。numpy 1.21.5（`python3 -s`）と 1.26.4（通常）の両方で pytest が通る。
+- **P1 の値の作り方（roll = 0 の退行の試験）**: 値は `test_ik_roll.py` に数値で書き込み（試験は git・外部のファイルを読まない）。コミット `4aadc04`（P1。`b1b51f5` と `src/so_arm101_ik` は同一）の `analytic_ik.py`・`urdf_kinematics.py`・`__init__.py` を `git show` でリポジトリの外のスクラッチに取り出して import し、各姿勢 q の「目標 = FK(q) + (0.004, −0.003, 0.002) m」に対する `solve_ik`（current_q = q、roll = 0）の結果を repr()（17 桁）で記録した。
+- **次**: P3（`tools/ik_model_check.py` と MoveIt の fixture）。モックの起動が要るので、実機を使っていないことの確認と許可を得てから。
