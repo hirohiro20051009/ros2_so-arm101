@@ -2496,3 +2496,13 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 
 - `tools/diff_mode_run.py` の `record:`・`exit:`・不感帯の表示・`interrupted:` の `print` に `flush=True` を付けるか検討する（確認の表示とステップの表示は既に flush している。`tee` につないでも確認はため込まれない。実機では `python3 -u` で実行した）。今回はコードを変更していない。
 - 手順書（`docs/diff_mode_real_check.md`）の `moveit` 経路・`--auto` の記述は、`moveit` 経路の整理と合わせて見直す（既存の項目）。
+
+## `so_arm101_ik` の大きな移動の道具（`tools/ik_move_run.py`。実装とモックの確認。2026-11-15）
+
+計画・結果・手順は `docs/large_move_plan.md`（16 章が結果）と `docs/large_move_real_check.md`。実機は使われていない（モックだけ。`ROS_DOMAIN_ID=87`）。コードは変更していない（この節は記録だけ）。
+
+- **コミット**: `9464d65`（計画）、`72ffa2e`（段 1: `ik_move.py`、試験 3 つ、`tools/ik_move_run.py`、`CMakeLists.txt`）、`a8c6ca0`（段 A: Ctrl-C の行、`ALREADY_AT_GOAL`）。
+- **件数**: `colcon test` 全体 591 件、失敗 0（ik 364 = pytest 294 + lint 49 + CTest 21）。見込み（約 565）との差の理由は 16.2（守りごとに試験を分けたこと、`parametrize`、守りを外す確認で見つかった穴を塞ぐ試験）。
+- **モックの確認の要点**: `allowed_start_tolerance` は 0.01（実行時のログ）。加速度 1.0・速度 5.0・Scaling 0.1。M3 は V2b の実測の姿勢から解けない（`JOINT_LIMIT`）→ M3' = (0.230, 0.060, 0.060)、M2・M3' は `--pitch-deg -91.0 --roll-deg 0`。終点のずれは許容以下で、許容に比例（H1 が成り立つ。RViz の許容は未確認）。Ctrl-C で進行中のゴールは最後まで続く。
+- **実機で見る点**: 着いた点（測定）は、測定の床の余裕 3 mm と手前止まり 7.39 mm、desired と測定の差の余裕 0.026 rad の 2 つで保証されない。M3' は elbow が開く向きに約 0.61 rad 動くので、`SHORT` になる可能性がある（16.9）。
+- **材料（git 管理外。`/tmp` の下なので再起動で消えうる）**: `/tmp/claude-1000/-home-hirok-ros2-so-arm101/e1755a91-8ede-4d9e-bc80-0ab14d9b0d83/scratchpad/` の `mut.sh`・`mut2.sh`・`mut3.sh`（守りを外す確認）、`mut_result.txt`・`mut_result2.txt`、`stage2/`（`place.sh`、`tool.sh`、`killer.sh`、モックのログ、`b/`・`b2/`・`c/`・`d/`・`e/` の CSV）。必要なら `~/so_arm101_check/` に写す（まだ写していない）。

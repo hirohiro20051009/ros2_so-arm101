@@ -270,6 +270,8 @@ T の値（事実。`diff_mode_real_check.md:24` と 7.12.4）: T の目標の�
 
 ### 11.1 目標（F。具体的な座標）
 
+> **2026-11-15 の決定:** M3 は実機の T（V2b の実測）から解けない可能性があるため、**M3' = (0.230, 0.060, 0.060)** に変更した。M2・M3' には `--pitch-deg -91.0 --roll-deg 0` を付ける（16.8）。以下は計画の当時の記述（履歴）。
+
 | 段 | 目標 | 先端の移動 | 使う理由 |
 |---|---|---|---|
 | M2 | `--goal 0.200 0.000 0.060` | 約 23〜32 mm（T の基準しだい。下の表）。**当初の「約 28 mm」は W1 の T の実測 (172.39, −0.37, 55.23) からの値で、2026-11-15 の V2b の T ではない** | 小さな一歩。IK・枝・全点の最小 z・到達の表を実機で見る |
@@ -407,3 +409,184 @@ moveit_config・launch・SRDF・`package.xml`・MoveIt の設定: **変更なし
 - M2・M3 の目標が解けるか、全点の最小 z（実装後のモックで確かめる。11.3）。手計算の移動量だけを置いた。
 - 加速度 0.1 rad/s² は、設定値と V2b の所要時間からの見積り。実行時の値は未確認（12.4 の 1 で確認）。
 - 度とラジアンの取り違えのうち、±180 の内側のもの（`--roll-deg 3.14` など）は、入口では見つからない（2 章）。
+
+## 16. 実装と結果の記録（2026-11-15）
+
+事実（コード・試験・モックの出力で確かめたもの）と **[推測]** を分ける。CSV・ログの全文は写さない（パスと要点だけ。16.10）。実機は使われていない（モックだけ）。
+
+### 16.1 コミット
+
+| コミット | 内容 |
+|---|---|
+| `9464d65` | この計画（`large_move_plan.md`）。`analytic_diff_plan.md` に 1 行のリンク、`inventory.md` に V7 のスクリプトの場所 |
+| `72ffa2e` | 段 1: `ik_move.py`、試験 3 ファイル、`tools/ik_move_run.py`、`CMakeLists.txt`（試験名 3 つ） |
+| `a8c6ca0` | 段 A: Ctrl-C の行、`ALREADY_AT_GOAL`（`ik_move.py`、`tools/ik_move_run.py`、試験 3 ファイル） |
+
+### 16.2 試験の件数（実数と見込みの差）
+
+| 時点 | pytest（ik） | lint（ik） | CTest の要約（ik） | ik の合計 | 全体 |
+|---|---|---|---|---|---|
+| 計画の見込み（10 章） | +56（46〜66）= 268 | 49 | 21 | 約 338（328〜348） | 約 565（555〜575） |
+| 段 1 の実数（`72ffa2e`） | **+76** = 288 | 49 | 21 | **358** | **585** |
+| 段 A の見込み（段 1 の実数から） | +7（288 → 295） | 49 | 21 | 約 365（363〜367） | 約 592（590〜594） |
+| 段 A の実数（`a8c6ca0`） | **+6（288 → 294）**。新しい 3 ファイルの合計は 82 件（40 + 32 + 10） | 49 | 21 | **364** | **591** |
+
+- 段 1 の差（pytest +20、見込みの範囲の上限 +66 を +10 超え）の理由: 計画の内訳（純粋 約 28・動作 約 19・静的 約 9）に対して、実際は純粋 40・動作 27・静的 9 だった。守りごとに試験を分けたこと（options 6、開始 3、各理由、全点 4、計画 5、再検査 3、到達 3 など）、`parametrize` の展開（目標 2、確認 2×2）、守りを外す確認で見つかった穴を塞ぐ試験（`NOT_SETTLED`、`NO_BRANCH`）を足したことによる。lint（+8）と CTest の要約（+3）は見込みどおり。
+- 段 A の差（+6、見込み +7）: `ik_move` の列の確認を、新しい試験にせず既存の試験に足したため。
+- 全体のうち他のパッケージは変わらない（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0）。numpy の 2 版（`python3 -s` 1.21.5 と `python3` 1.26.4）の両方で、新しい試験 82 件が通る。手動の flake8（99 文字）は `tools/ik_move_run.py` で問題なし。
+
+### 16.3 計画との食い違い（実装側が計画を変えず、報告したもの）
+
+1. **`DiffMode.start(q_goal, q_goal)` は `NO_BRANCH` の検出だけに使った**（計画の 3.3 は入口のまとめとして使う案）。床・radial・abs(D)・端の余裕・厳密な範囲は、自前の検査（`goal_checks`、`ik_move.py`）で、DiffMode の `DiffModeConfig` の値を import して行う。理由: 理由コードをこの道具で統一するため、守りを外す確認で 1 つずつ外せるようにするため。「通った目標は DiffMode の開始点になれる」ことは、ランダムな 300 点の試験（`test_a_goal_that_passes_is_a_valid_start_of_the_differential_mode`）で確かめる。
+2. **0.989 と 0.051 の出どころ**: DiffMode の既定（入口 0.99・0.05）より厳しいが、**DiffMode が動いている間の目標の検査（`_excess`）の内側の限界と同じ**（`diff_mode.py:504-505`: `max_abs_d − margin_abs_d`、`min_radial + margin_radial`）。これで、着いた点が DiffMode の境界（`AT_LIMIT`）に最初から乗らない。余裕 0.001（abs(D)）と 0.001 m（radial）の値は、`analytic_diff_plan.md` 7.12.4 の表で**推測の値**（丸め 1e-9 より十分大きく、感度を損なわない小ささ。実測の根拠はない）。
+3. **計画に書いていなかった動作（4 点）**: ① 拒否・停止でも CSV に 1 行書く（`--dry-run` を除く）。② `--dry-run` は q_desired が無くても動く（読み取り専用の起動のため。計画の 11.2 の M0 には書いてあった）。③ 計画の直後に、q_meas が `STOP_TOL`（0.003 rad）以内で動いていないかを確かめる（`ARM_MOVED`）。④ `START_FLOOR_MEASURED` を、送る直前の再検査でも見る。
+4. **定数の import**（`ik_move.py` の 3 行）: `FIRST_DESIRED_TOL = _CONFIG.max_windup`、`BAND_MM = _CONFIG.deadband_enter * 1000.0`、`LIMIT_ROUNDING = dm.LIMIT_ROUNDING`（書き写しだったものを import に直した。ユーザー承認）。import できなかったもの（元の定数が無い）: `step_runner.py:597` の `wait(0.1)` と同じ値、`ik_move.py:325` の `ceil` の丸め 1e-9。新しく決めた値（元の定数なし）: `MAX_TIP_MOVE` 0.15、`MAX_JOINT_MOVE` 1.0、`MAX_ANGLE_DEG` 180、`MAX_PLAN_DURATION` 20、`PATH_STEP` 0.01、`REACHED_MM` 10。
+5. **静的試験の直し（`FIRST_DESIRED_TOL`）**: 4 の import で、`test_the_limits_of_the_move_are_constants_that_the_goal_check_uses` が（右辺がリテラルでなくなって）落ちた。ユーザーの承認の条件どおり、**`FIRST_DESIRED_TOL` だけ**、右辺が `_CONFIG.max_windup`（`ast.Attribute`、値が `Name` の `_CONFIG`、属性が `max_windup`）であることを認め、他の定数（`MAX_TIP_MOVE` など）は今までどおりリテラルに限った。守りを外す確認（この試験について 1 回）: (a) 値を `check_plan` の引数から受ける、(b) `_CONFIG.max_steps`、追加の (c) リテラル 0.06、(d) `MAX_TIP_MOVE = _CONFIG.max_distance`（他の定数に属性を許さない）は、**すべて同じ試験が落ちた**。
+   `test_the_limits_are_values_of_the_differential_mode_and_of_the_plan`（値が DiffModeConfig と等しいこと）はそのまま残した。
+
+### 16.4 守りを外す確認（スクラッチのコピー。リポジトリの作業ツリーは変えていない）
+
+段 1（47 項目）。最初は 44 項目で試験が落ち、生き残りが 3 件だった。直して再実行した結果は、47 項目すべてで落ちた。
+
+| 外した守り | 落ちた試験（代表） |
+|---|---|
+| 開始の床（`START_FLOOR_MEASURED`） | `test_the_start_pose_below_the_floor_is_refused_by_the_measured_floor` ほか 3 件 |
+| 目標の床（`goal_checks` の検査。`solve_goal` の前検査も同時） | `test_a_target_below_the_floor_is_refused_and_the_floor_is_the_goal_floor` ほか |
+| 端の余裕（0.02）、厳密な範囲 | `test_a_goal_outside_the_joint_range_is_refused_in_two_steps`、`test_a_joint_goal_near_a_limit_is_refused` |
+| `SINGULAR`、`BRANCH_SWITCH`、`NO_BRANCH` | `test_a_pose_near_the_stretched_arm_is_singular`、`test_the_other_elbow_branch_is_refused_for_a_joint_goal_and_a_target` |
+| 先端 0.15 m、関節 1.0 rad | `test_the_move_is_limited_for_the_tip_and_for_every_joint` ほか |
+| ±180 度、pitch・roll と関節の併用、入力は 1 つだけ | `test_an_angle_in_degrees_must_be_inside_plus_minus_180` ほか |
+| 定数 4 つ（0.15、1.0、0.06、0.045）を変える | `test_the_limits_are_values_of_the_differential_mode_and_of_the_plan` ほか |
+| 計画: 最初の点（desired・測定）、最後の点、速さ、長さ、全点の床・範囲、検査を使わない | `test_the_first_point_is_checked_against_the_desired_and_the_measurement`、`test_a_plan_through_the_floor_is_refused_although_both_ends_are_above_it` ほか |
+| 再検査 5 つ、結果の無視、計画中の `ARM_MOVED` | `test_the_arm_moved_the_desired_changed_or_another_goal_is_active` ほか |
+| 確認 2 回、実行時間の上限 | `test_no_send_confirmation_no_execution`、`test_a_run_that_takes_too_long_is_not_sent` |
+| 到達（常に `REACHED`）、送信失敗の無視、整定の判定 | `test_succeeded_is_not_an_arrival_when_the_arm_did_not_move`、`test_an_arm_that_does_not_stop_is_not_judged` |
+| ツール: `plan_only` を False、キャンセルの追加、scaling 引数、検査の順、直接の JTC クライアント、モジュールに ROS の import、`execute` を 2 回 | 静的試験の各 1 件 |
+
+- 最初の生き残り 3 件と直し: ① 整定の「止まった」判定を外す → `test_an_arm_that_does_not_stop_is_not_judged` を足した。② ツールに JTC 直接のクライアントを足す → 静的試験が `from … import 名前` の名前を見ていなかった。直した。③ モジュールに ROS の import を足す → ROS を source していない環境で、`rclpy` の import エラーで偶然落ちていた（試験が捕まえたものではなかった）。ROS を source して再実行し、`test_the_module_has_no_ros_and_the_tool_has_no_direct_route` が落とすことを確かめた。
+- 目標の床は冗長（`solve_goal` の前検査と `goal_checks` の検査が重なる）なので、`goal_checks` 側だけ外した場合は関節入力の経路の試験が落とし、両方外した場合は 2 件が落ちる。
+
+段 A（11 項目、Ctrl-C の行と `ALREADY_AT_GOAL`）。すべて落ちた。
+
+| 外した守り | 落ちた試験（代表） |
+|---|---|
+| Ctrl-C の行を書かない | `test_ctrl_c_writes_one_row_of_what_is_known_without_reading_or_waiting` ほか 3 件 |
+| `goal_cancelled` を True に、`goal_sent`・`q_meas_last` を書かない、送信確認の段階の記録 | 同じ試験、`test_ctrl_c_during_the_plan_and_during_the_execution_is_recorded` |
+| 割り込みの処理で待つ・取り消す・送る | 同じ試験と `test_the_interruption_only_says_logs_and_returns`（静的） |
+| 割り込みの処理で入力を読む | 静的試験が落とす。pytest 全体は `KeyboardInterrupt` の再発生で中断した（静的試験だけを流すと落ちる） |
+| 「すでに目標にいる」の分岐を外す、遠い 1 点まで同じ扱い | `test_an_arm_that_is_already_at_the_goal_is_told_so_and_nothing_is_executed`、`test_a_single_point_plan_far_from_the_goal_is_still_refused_as_empty` |
+
+### 16.5 段 A の内容（コード）
+
+- **Ctrl-C（終了コード 130）にも CSV に 1 行**: 列は `stage`（最後に入った段階）、`goal_sent`、`goal_in_flight`、`goal_cancelled`（`_log()` の中のリテラル False。取り消さない）、`q_meas_last`（最後に読んだ関節角）、`label`（`INTERRUPTED`）、`note`。割り込みの処理は、表示・行の記録・結果の返却だけで、入力を読まず、待たず、送らず、取り消さない。止まる経路（`_Stop`）の行にも同じ列が入る。`--dry-run` では書かない。静的試験で、割り込みの処理が呼べる関数を `_say`・`_log`・`update`・`RunResult` に限り、`execute` の呼び出しが 1 か所のままであることを保証する。
+- **`ALREADY_AT_GOAL`**: 計画が 1 点だけで、q_meas と目標の差が許容（`--moveit-tolerance`）以内なら、`ALREADY_AT_GOAL`（終了コード 2）で止まる。メッセージは「the arm is already at the goal (…): MoveIt planned a single point, so nothing was executed」。1 点でも目標から遠い場合は、これまでどおり `PLAN_REFUSED`（`EMPTY`）。
+
+### 16.6 段 2: モックの確認 a〜e（2026-11-15。`mock:=true use_rviz:=false`、`ROS_DOMAIN_ID=87`、cyclonedds、前景の `exec`。PID 58318、SigIgn に SIGINT なし。停止は `kill -INT` だけ）
+
+**モックを開始点に置く方法（モックの中だけ）**: モックの初期姿勢は折りたたみ（`initial_positions.yaml`: −1.57、1.57、0.8。先端 z = 0.0302 m）。T などへは、リポジトリの外のスクリプト（`place.sh`。`ros2 action send_goal` で JTC に 1 点の軌道を送る）で置いた。ユーザー了承済み（domain 87 のモックだけ）。開始点: **S1** = T の目標（0、−0.383972、0.523599、1.448623、0）、**S2** = V2b の実測（0、−0.38282、0.56234、1.45610、−0.00690。`V3_px2.csv` の `q_meas_before`）。
+
+**a. 実行時の値**
+
+| 項目 | 値 | 出どころ |
+|---|---|---|
+| `max_acceleration`・`max_velocity`（5 関節） | 1.0・5.0 | `ros2 param get /move_group robot_description_planning.joint_limits.<関節>.…` |
+| `default_*_scaling_factor` | 0.1 | 同上（道具もリクエストで 0.1 を設定） |
+| `trajectory_execution.allowed_start_tolerance` | `param get` は「Parameter not set」。実行時のログ `Validating trajectory with allowed_start_tolerance 0.01` で **0.01** | モックの launch のログ（8 回とも） |
+
+加速度 1.0 × 0.1 = 0.1 rad/s²（8.1 の見積り）は、設定値として確認できた。
+
+**b. 事前確認（S1・S2 から。モックは摩擦なし）**
+
+| 開始 | 目標 | 結果 | 先端の移動 | 長さ | 最大の速さ | 全点の最小 z |
+|---|---|---|---|---|---|---|
+| S1 | M2 | 解ける（候補 1、枝 1） | 23.4 mm | 2.86 s | 0.140 rad/s | 0.0588 m |
+| S1 | M3 | 解ける | 87.5 mm | 5.58 s | 0.275 rad/s | 0.0588 m |
+| S1 | 戻し | 同じ姿勢で EMPTY（この時点では `PLAN_REFUSED`。段 A で `ALREADY_AT_GOAL`） | 0 | － | － | － |
+| S2 | M2 | 解ける | 31.9 mm | 3.51 s | 0.173 rad/s | 0.0541 m |
+| S2 | **M3** | **拒否: `JOINT_LIMIT`（全候補が関節範囲の外）** | － | － | － | － |
+| S2 | 戻し | 解ける | 9.3 mm | 1.24 s | 0.058 rad/s | 0.0541 m |
+
+M3 が S2 から解けない原因: `--goal` は pitch を今の姿勢のまま保ち、V2b の実測の pitch では wrist_flex が上限（95°）を超える。S2 で通る候補を dry-run で確かめた: (0.240, 0.060, 0.060) は wrist 93.3°（余裕 1.15° に近い）、**(0.230, 0.060, 0.060) は wrist 90.9°（余裕 約 4°）**。→ 決定: M3' = (0.230, 0.060, 0.060)（16.8）。
+
+**c. 終点のずれ（`--joints-deg 0 -22 30 83 0`、M3 の終点から、各 5 回。3 つの差の最大絶対値 [rad] の最小〜最大）**
+
+| `--moveit-tolerance` | 計画の最後の点 − 目標 | 止まった後の reference − 目標 | 止まった後の q_meas − 目標 | 先端の誤差の最大 |
+|---|---|---|---|---|
+| 0.0005 | 0.00041〜0.00049 | 0.00041〜0.00048 | 0.00041〜0.00048 | 0.10 mm |
+| 0.001 | 0.00069〜0.00099 | 0.00070〜0.00099 | 0.00070〜0.00099 | 0.30 mm |
+| 0.005 | 0.00347〜0.00484 | 0.00347〜0.00485 | 0.00347〜0.00485 | 1.46 mm |
+| 0.01 | 0.00595〜0.00966 | 0.00595〜0.00966 | 0.00595〜0.00966 | 2.51 mm |
+
+- 集計は `python3 -I -`（標準ライブラリだけ。CSV を読むだけ）。
+- 事実: ずれは 20 回すべてで許容以下で、許容に比例し、許容 0.01 では最大 0.0097 rad。reference の終点は計画の最後の点と一致。→ **H1（OMPL は許容の中の点を終点にする）が成り立ち、H3（JTC の終点が最後の点と違う）は否定された**（この道具の経路で）。H2（RViz のスライダーの丸めなど）はモックでは試せない。
+- 12 章の読み方: V2b・V8 の 0.0082 rad は、この道具の経路では H1 で説明できた（許容 0.01 で最大 0.0097）。**RViz の許容の値は未確認のまま**（12.2。`goal_joint_tolerance` の既定 1e-4 という話は、インストール済みのヘッダー・ドキュメントでは確かめられなかった）。**[推測]** RViz の許容がおよそ 0.008 以上だった可能性と整合する。
+
+**d. Ctrl-C のとき進行中のゴール（`ExecuteTrajectory` の実行中に、道具の PID へ `kill -INT`）**
+
+- 最初の 2 回は、kill が実行の終わった後に届いて無効だった（別の bash の `killer.sh` が「Send」のプロンプトの 2.5 秒後に kill する形に直して成功）。
+- 3 回目: 道具は終了コード 130、「a goal was in flight; it is not cancelled and goes on to its end」。reference は kill の後も 3.09 秒間動き続け、最後の値と `q_goal` の差は最大 0.00075 rad（許容 0.001 の内側）。ログに `Controller 'arm_controller' successfully finished` と `Execution completed: SUCCEEDED` が kill の約 3.2 秒後に出た。→ **進行中のゴールは、道具が終わっても止まらず、軌道の最後まで続く**（計画 8.2、決定 11 の見込みどおり）。
+- 当時は Ctrl-C のとき CSV の行が書かれなかった（段 A で直した。16.5、16.8）。
+
+**e. M0〜M3 の通し**
+
+| 段 | 結果 |
+|---|---|
+| M0（モックの初期姿勢で `--dry-run --goal 0.200 0.000 0.060`） | `START_FLOOR_MEASURED`（z = 0.0302 m）、終了コード 3 |
+| M1（T で dry-run） | 全検査を通る |
+| M2（S1・S2）＋戻し | 実行、`REACHED`（0.02〜0.07 mm、戻しは 0.14〜0.19 mm）。終了コード 0 |
+| M3（S1）＋戻し | `REACHED`（0.09 mm、戻しは 0.17 mm） |
+| M3'（S2）＋戻し | `REACHED`（0.20 mm、戻しは 0.32 mm） |
+
+モックは摩擦も手前止まりも無い（`desired − q_meas` は 0）ので、到達の誤差は手前止まりの見積り（7.39 mm）とは比べられない。
+
+### 16.7 気づいた点（段 2 の途中）
+
+- 同じ姿勢の目標（S1 での戻し）は、当時は `PLAN_REFUSED`（`EMPTY`）で「すでに目標にいる」と分からなかった → 段 A で `ALREADY_AT_GOAL`。
+- 実行の終わりの `move_group` の exit −11 は、これまでと同じ既知の挙動。
+
+### 16.8 M3 → M3'、pitch・roll、段 B の確認（2026-11-15）
+
+**決定（ユーザー、2026-11-15）**: M3 は M3' = (0.230, 0.060, 0.060)。実機の T のばらつきに目標の姿勢が左右されないよう、手順書の M2・M3' では `--pitch-deg -91.0 --roll-deg 0` を明示する。
+
+**pitch・roll の値の出どころ（手計算）**: T の目標の関節（0、−22、30、83、0 度）の FK。`analytic_ik.py` の式 `pitch = S2·q2 + S3·q3 + S4·q4 + D4`（S2=S3=S4=−1、`D4` = 6.5055536e-06）から、pitch = −(−22+30+83)° + 0.00037° = −90.9996°（丸めて **−91.0°**）、roll = S5·q5 = **0°**。`analytic_diff_plan.md` 7.12.4 の表の「pitch −91.0°」と一致する（ユーザーの計算とも一致）。
+
+**S1・S2 から `--dry-run` と計画の要約（実行なし。pitch・roll を明示）**
+
+| 開始 | 目標 | 結果 | 先端の移動 | 長さ | 最大の速さ | 全点の最小 z |
+|---|---|---|---|---|---|---|
+| S1 | M2 | 解ける（候補 1、枝 1、abs(D) 0.038） | 23.4 mm | 2.86 s | 0.140 rad/s | 0.0588 m |
+| S1 | M3' | 解ける（候補 1、枝 1、abs(D) 0.366） | 80.3 mm | 4.96 s | 0.245 rad/s | 0.0588 m |
+| S2 | M2 | 解ける | 31.9 mm | 3.12 s | 0.153 rad/s | 0.0541 m |
+| S2 | M3' | 解ける | 86.0 mm | 5.11 s | 0.253 rad/s | 0.0541 m |
+
+- **q_goal は開始点によらず同じ**（pitch・roll を明示した効果）: M2 は −0.00328、−10.457、18.326、83.132、0 度。M3' は −17.428、9.235、−5.265、87.030、0 度。
+- wrist_flex の端までの余裕（手計算。上限 95.0° = 1.65806 rad）: M2 は 83.13° で **0.207 rad**、M3' は 87.03° で **0.139 rad**（要求 0.02 rad の約 7 倍）。他の関節はもっと余裕がある。
+
+**Ctrl-C の行の確認（1 回、`killer.sh` の方法）**: S2 から M3' を実行し、「Send」のプロンプトの 2.5 秒後に `kill -INT`。終了コード 130、CSV は 1 行で、`stage = execute`、`goal_sent = True`、`goal_in_flight = True`、`goal_cancelled = False`、`label = INTERRUPTED`、`q_meas_last` = S2 の姿勢。ログに実行の完了（`SUCCEEDED`）が約 5.2 秒後に出た。
+
+**後片付け**: モックの停止は、自分で起動した PID への `kill -INT` だけ。停止後、`ps` に ROS のプロセスなし、`ros2 node list --no-daemon` は 2 つの domain とも空。ros2 daemon のプロセスは、段 B の停止後の確認では見えなかった（開始時は PID 39502 があった。こちらでは触っていない）。
+
+### 16.9 実機の M2・M3' で見る点
+
+**「着いた点が DiffMode の開始点になれる」は、目標についての保証であり、実機の手前止まりがあると、着いた点（測定）については保証されない。** 理由は 2 つ。
+
+1. **測定の床の余裕**: `DiffMode.start` は `FLOOR_MEASURED`（測定の z が 0.045 m 未満）で拒否する。目標の床は 0.048 m なので、余裕は 3 mm。T の手前止まりは先端で 7.39 mm（7.16.4 の 4）。向きによっては測定の z が 0.045 を割りうる **[推測]**。→ M2・M3' の後、`FK(q_meas).z` を見て、0.045 との差を記録する。
+2. **desired と測定の差の余裕**: `NOT_SETTLED` は、desired と測定の差が 0.06 rad を超えると拒否する。T の elbow の差は 0.034 rad なので、余裕は 0.026 rad。→ `reference − q_meas`（CSV の `stuck`）の最大を記録する。
+
+加えて、道具が終わった後の desired は q_goal ではなく計画の終点で、許容 0.001 rad の中で q_goal とずれうる。abs(D)・radial の余裕 0.001 の境界に近い目標では、desired が境界を越える可能性がある **[推測]**。
+
+**[推測] M3' は SHORT になる可能性がある。** 実機の T から M3' へは、lift +0.544、elbow −0.614（約 0.61 rad。モックの S2 から。elbow が開く向き＝自重に逆らう向き）、wrist_flex +0.069、pan −0.305 rad 動く。腕も伸びるので、手前止まりが T の 0.034 rad より大きくなりうる。10 mm（`REACHED`）を超えれば `SHORT`（終了コード 4）。手前止まりは 0.040〜0.053 rad で動く、0.032 以下では動かない、という観察（7.16.4 の 1）がある。0.032〜0.040 の間は未観察。
+
+### 16.10 材料の場所（リポジトリの外・git 管理外。`/tmp` の下なので再起動で消えうる）
+
+`/tmp/claude-1000/-home-hirok-ros2-so-arm101/e1755a91-8ede-4d9e-bc80-0ab14d9b0d83/scratchpad/` の下:
+- `mut.sh`・`mut2.sh`・`mut3.sh`（守りを外す確認のスクリプト）、`mut_result.txt`・`mut_result2.txt`（結果の表）。
+- `stage2/`: `place.sh`（モックを置く）、`tool.sh`（道具をモックに対して実行）、`killer.sh`（Ctrl-C の確認）、`mock.log`・`mock2.log`（モックの launch のログ）、`b/`・`b2/`（事前確認の CSV）、`c/`（終点のずれの CSV 40 本）、`d/`（Ctrl-C の確認の CSV・ログ・reference の記録）、`e/`（M0〜M3 の通しの CSV）。
+
+### 16.11 未確認・限界（実装後）
+
+- RViz の許容の既定値（`goal_joint_tolerance` の 1e-4 という話）は未確認のまま（12.2）。H1 は、この道具の経路でだけ確かめた。
+- 実機の手前止まりが加わった到達の誤差、M3' が `SHORT` になるか、実機の T で M3' が解けるか。
+- 他方の枝が範囲内に残る頻度（計算していない）。
+- モックは摩擦も手前止まりも無いので、`REACHED` の誤差（0.02〜0.32 mm）は実機の見込みにならない。
+- wrist_flex の余裕（0.207・0.139 rad）は手計算（FK の式と IK の出力から）。
