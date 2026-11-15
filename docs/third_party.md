@@ -63,3 +63,10 @@ LeRobot 経路と、そのための道具・ブリッジを、リポジトリか
 - ライセンス: **Apache License 2.0**（`third_party/SO-ARM100/LICENSE` に同じ版のコピー。NOTICE は無い）。
 - 扱い: URDF と `meshes/*.stl`（13 個。385e8d7 の `Simulation/SO101/assets/*.stl` とバイト一致）は**無変更**。`SHA256SUMS` と試験（`urdf_original_checksums`）で保護。インストールされる URDF は、ビルド時に `cmake/gen_urdf.cmake` が**メッシュのパスの接頭辞だけ**を置換して生成する別ファイル（先頭に変更の旨のコメント 1 行）。試験 `urdf_generated_matches_original` が、逆置換でオリジナルとバイト一致することを確かめる。
 - 以前の URDF は nimiCurtis/so101_ros2（MIT）経由のコピー。内容は TheRobotStudio の 385e8d7 と同一（`docs/original_urdf_plan.md`）。
+
+## 実行時に使う apt パッケージ（配布しない。2026-11-16、カメラの段 C1-a）
+
+`so_arm101_camera` の launch が、次の apt パッケージを実行時に起動する。コードはリポジトリに入れていない（コピーも改名もしない）。リポジトリに入れるのは、それぞれに渡す yaml（`config/realsense.yaml`、`config/apriltag.yaml`）だけで、yaml は新しく書いた（apt の例のコメント・本文は写していない）。そのため `THIRD_PARTY_NOTICES.md` には足さない（計画 `docs/camera_stage_plan.md` 5 章）。
+
+- `realsense2_camera` 4.58.4（Apache License 2.0）。`rs_launch.py` を include する。
+- `apriltag_ros` 3.4.0（MIT、Christian Rauch）。`apriltag_node` を起動する。

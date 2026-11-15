@@ -1,0 +1,6 @@
+# Read by: realsense2_camera (rs_launch.py launch arguments, passed by camera.launch.py). Written by hand.
+# Same settings as the old start-up (readme.txt of the old workspace, lines 30-33). Every key must be
+# an argument of rs_launch.py (checked by test_camera_config.py).
+depth_module.depth_profile: 640x480x15
+rgb_camera.color_profile: 640x480x15
+align_depth.enable: true
