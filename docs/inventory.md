@@ -1983,6 +1983,11 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 **将来の目標**
 - AprilTag による Eye-to-Hand のキャリブ（確立済み）を、パッケージ（`so_arm101_calibration`）に統合する。
 - Diff-IK（MoveIt Servo）を統合する。
+- **リリース時の整理の方針（ユーザーの判断。2026-11-15 に追記。実施はリリースの時）**
+  1. **試験**: 「安全の守り・模型の一致」の試験を各パッケージの `test/` に残す（`colcon test` で自動に走る）。開発中だけに使った試験は削る。**削る前に、その試験しか捕まえられない守りがないかを、守りを外して落ちるかどうかで確かめる**（P4 の M1〜M10 と同じ方法。`docs/analytic_diff_plan.md` 7.13）。
+  2. **スクリプトの置き場所**: 不具合のときに手で実行する再検証のスクリプトは `verification/` に、外部から制御するサンプルは `examples/` に分ける（どちらも `COLCON_IGNORE` を置く）。実機の道具は今の `tools/` のまま。
+  3. **マニュアル**: 日本語で整備する（全体の README、安全の注意、launch の引数、キャリブのツール、`so_arm101_ik` と `DiffMode` の使い方）。`DiffMode` の使い方は P5・P6 の後。
+  4. **`docs/` の歴史的な記録**は `docs/history/` へ移すことを検討する。
 
 **IK の経緯**
 - Diff-IK は **MoveIt Servo** を使う。
