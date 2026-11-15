@@ -433,3 +433,9 @@ def test_the_text_and_the_csv_row_show_the_numbers():
     assert row['plan_reasons'] == 'A B' and row['tip_error_mm'] == '1.5'
     with pytest.raises(ValueError):
         mv.move_record(nonsense=1)
+    # the columns of an interrupted run: where it was, whether a goal went out, never cancelled
+    for column in ('stage', 'goal_sent', 'goal_in_flight', 'goal_cancelled', 'q_meas_last'):
+        assert column in mv.MOVE_CSV_FIELDS
+    row = mv.move_record(stage='execute', goal_sent=True, goal_in_flight=True,
+                         goal_cancelled=False, q_meas_last=T_MEAS)
+    assert row['goal_cancelled'] is False and row['goal_in_flight'] is True

@@ -21,7 +21,10 @@
   ゴールは軌道の最後まで進む（約 6 秒まで）。急ぐときは手順書の止め方 S5・S6（腕が落ちる。支えること）。
 - SUCCEEDED は到達の根拠にしない（open_loop_control: true）。止まってから測った関節角で判定する。
 - 終了コード: 0 REACHED（先端の誤差 10 mm 以内）、2 停止、3 開始の拒否、4 SHORT（10 mm 超）、130 Ctrl-C。
-- CSV（--csv。既定は ik_move_<日時>.csv。--dry-run では作らない）に 1 回の実行 1 行を書く。
+- CSV（--csv。既定は ik_move_<日時>.csv。--dry-run では作らない）に 1 回の実行 1 行を書く。Ctrl-C（130）や
+  停止のときも 1 行書く（stage: 最後の段階、goal_sent・goal_in_flight: ゴールを送ったか・進行中か、
+  goal_cancelled: 常に False、q_meas_last: 最後に読んだ関節角）。Ctrl-C では何も読まず、何も待たない。
+- すでに目標にいて MoveIt の計画が 1 点だけのときは ALREADY_AT_GOAL（終了コード 2）で止まる。
 """
 import argparse
 import csv

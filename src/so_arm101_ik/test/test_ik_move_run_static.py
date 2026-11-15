@@ -197,6 +197,26 @@ def test_the_send_is_made_in_one_place_after_two_confirmations_and_the_recheck()
     assert len(lines['recheck_before_send']) == 1
 
 
+def test_the_interruption_only_says_logs_and_returns():
+    module = _tree(MODULE)
+    run = [n for n in ast.walk(module) if isinstance(n, ast.FunctionDef) and n.name == 'run'
+           and _enclosing(n, _parents(module), ast.ClassDef).name == 'MoveLoop'][0]
+    handlers = [h for h in ast.walk(run) if isinstance(h, ast.ExceptHandler)
+                and _name_of(h.type) == 'KeyboardInterrupt']
+    assert len(handlers) == 1
+    called = {_name_of(c.func) for h in handlers for c in ast.walk(h) if isinstance(c, ast.Call)}
+    # no send, no plan, no read, no wait, no confirmation, no cancel in the interruption
+    assert called <= {'_say', '_log', 'update', 'RunResult'}, called
+    assert {'_log', 'RunResult'} <= called
+    # the row says that nothing was cancelled, as a literal
+    log = [n for n in ast.walk(module) if isinstance(n, ast.FunctionDef) and n.name == '_log'][0]
+    cancelled = [k for c in ast.walk(log) if isinstance(c, ast.Call) for k in c.keywords
+                 if k.arg == 'goal_cancelled']
+    assert len(cancelled) == 1 and isinstance(cancelled[0].value, ast.Constant)
+    assert cancelled[0].value.value is False
+    assert len(_calls(module, 'execute')) == 1
+
+
 def test_the_limits_of_the_move_are_constants_that_the_goal_check_uses():
     module = _tree(MODULE)
     names = {t.id: n.value for n in module.body if isinstance(n, ast.Assign)

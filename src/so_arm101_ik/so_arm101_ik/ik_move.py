@@ -83,7 +83,8 @@ MOVE_CSV_FIELDS = (
     'plan_ok', 'plan_reasons', 'plan_duration', 'plan_points', 'plan_peak_pos_speed',
     'plan_peak_vel_speed', 'first_vs_desired', 'first_vs_meas', 'last_vs_cmd', 'path_min_z',
     'q_meas_after', 'q_desired_after', 'joint_error', 'tip_error_mm', 'tip_error_vec_mm',
-    'ref_error_mm', 'stuck', 'label', 'wait_settle', 'note')
+    'ref_error_mm', 'stuck', 'label', 'wait_settle', 'stage', 'goal_sent', 'goal_in_flight',
+    'goal_cancelled', 'q_meas_last', 'note')
 
 
 # ------------------------------------------------------------------------------- options
@@ -556,6 +557,9 @@ class MoveLoop:
         self.run_timeout = run_timeout
         self.sent = 0
         self.in_flight = False
+        self.goal_sent = False  # True once execute() has been entered
+        self.stage = 'start'  # the last stage that was entered (for the row of an interruption)
+        self.last_meas = None  # the last q_meas that was read
         self.row = {}
 
     # ------------------------------------------------------------------------------ helpers
@@ -573,7 +577,8 @@ class MoveLoop:
             desired_ok = inputs.q_desired is not None and sr.is_fresh(inputs.desired_at, now)
             if meas_ok and (desired_ok or not need_desired):
                 desired = np.array(inputs.q_desired, float) if desired_ok else None
-                return desired, np.array(inputs.q_meas, float)
+                self.last_meas = np.array(inputs.q_meas, float)
+                return desired, self.last_meas.copy()
             if now >= end:
                 missing = []
                 if need_desired and not desired_ok:
@@ -607,6 +612,10 @@ class MoveLoop:
             raise _Stop('RUN_TIMEOUT', 'the run is longer than %.0f s' % self.run_timeout)
 
     def _log(self):
+        """Write the row: what is known, and where the run was (a goal is never cancelled)."""
+        self.row.update(stage=self.stage, goal_sent=self.goal_sent,
+                        goal_in_flight=self.in_flight, goal_cancelled=False,
+                        q_meas_last=self.last_meas)
         self.io.log_row(move_record(**self.row))
 
     # -------------------------------------------------------------------------------- run
@@ -619,13 +628,18 @@ class MoveLoop:
         except _Stop as stop:
             self._say('STOP %s: %s' % (stop.reason, stop.detail))
             self.row.setdefault('note', '%s: %s' % (stop.reason, stop.detail))
-            if self.row and not self.dry_run:
+            if not self.dry_run:
                 self._log()
             return sr.RunResult(stop.exit_code, stop.reason, None, self.sent, stop.detail)
         except KeyboardInterrupt:
             detail = ('a goal was in flight; it is not cancelled and goes on to its end'
                       if self.in_flight else 'no goal was in flight')
             self._say('INTERRUPTED: nothing is sent or cancelled any more (%s)' % detail)
+            # one row of what is known; no input is read and nothing is waited for here
+            self.row.update(label='INTERRUPTED',
+                            note='INTERRUPTED at stage %s (%s)' % (self.stage, detail))
+            if not self.dry_run:
+                self._log()
             return sr.RunResult(sr.EXIT_INTERRUPTED, 'INTERRUPTED', None, self.sent, detail)
 
     def _input_name(self):
@@ -634,7 +648,9 @@ class MoveLoop:
         return 'goal' if self.goal is not None else 'offset'
 
     def _run(self, t0):
+        self.stage = 'read'
         q_desired, q_meas = self._read(need_desired=not self.dry_run)
+        self.stage = 'goal'
         plan = solve_goal(q_meas, self.goal, self.offset, self.joints_deg, self.pitch_deg,
                           self.roll_deg)
         self._say(goal_lines(plan, q_meas, q_desired) or 'GOAL (none)')
@@ -651,8 +667,10 @@ class MoveLoop:
         if self.dry_run:
             self._say('DRY-RUN: the goal passes every check. Nothing was planned or sent.')
             return sr.RunResult(sr.EXIT_OK, 'DRY_RUN', None, 0)
+        self.stage = 'confirm_start'
         self._confirm('Start from this state? Plan the move (nothing moves yet). '
                       '[Enter = yes, n = no]')
+        self.stage = 'plan'
         planned = self.sender.plan(plan.q_goal, self.moveit_tolerance)
         if not planned.ok:
             self.row.update(plan_ok=False, note=planned.note)
@@ -660,6 +678,15 @@ class MoveLoop:
         q_desired_p, q_meas_p = self._read()
         if not float(np.max(np.abs(q_meas_p - q_meas))) <= RECHECK_MEAS_TOL:
             raise _Stop('ARM_MOVED', 'the measured angles changed while planning')
+        gap = float(np.max(np.abs(q_meas_p - plan.q_goal)))
+        if len(planned.points) <= 1 and gap <= self.moveit_tolerance + LIMIT_ROUNDING:
+            self.row.update(plan_ok=False, plan_reasons=('EMPTY',),
+                            plan_points=len(planned.points))
+            raise _Stop('ALREADY_AT_GOAL',
+                        'the arm is already at the goal (the largest joint difference is %.5f rad,'
+                        ' within the tolerance %.4f rad): MoveIt planned a single point, so '
+                        'nothing was executed' % (gap, self.moveit_tolerance))
+        self.stage = 'check_plan'
         check = check_plan(planned.points, planned.joint_names, plan.q_goal, q_desired_p, q_meas_p,
                            self.moveit_tolerance)
         self._say(plan_lines(check))
@@ -671,21 +698,27 @@ class MoveLoop:
                         path_min_z=check.path.min_z)
         if not check.ok:
             raise _Stop('PLAN_REFUSED', 'nothing was executed (%s)' % ','.join(check.reasons))
+        self.stage = 'confirm_send'
         self._confirm('Send this trajectory? [Enter = yes, n = end]')
         self._check_run_time(t0)
+        self.stage = 'recheck'
         q_desired_n, q_meas_n = self._read()
         bad = recheck_before_send(q_meas_p, q_desired_p, q_meas_n, q_desired_n,
                                   self.io.other_active_goals(), planned.points,
                                   planned.joint_names, plan.q_goal, self.moveit_tolerance)
         if bad is not None:
             raise _Stop(bad[0], bad[1])
+        self.stage = 'execute'
+        self.goal_sent = True
         self.in_flight = True  # a KeyboardInterrupt in execute() leaves a goal that goes on
         done = self.sender.execute(planned, c.duration)
         self.in_flight = False
         if not done.ok:
             raise _Stop('SEND_FAILED', done.note)
         self.sent += 1
+        self.stage = 'settle'
         after, waited = self._settle()
+        self.stage = 'done'
         desired_after = self._read(need_desired=False)[0]
         arrival = judge_arrival(plan.q_goal, plan.target, after, desired_after)
         self._say(arrival_lines(arrival))

@@ -249,6 +249,88 @@ def test_ctrl_c_in_a_confirmation_sends_nothing_and_exits_with_130():
         assert 'no goal was in flight' in io.said[-1]
 
 
+def _interrupted_row(arm, io=None, sender=None, **kwargs):
+    loop, _, io, sender = _loop(arm=arm, io=io, sender=sender, **kwargs)
+    result = loop.run()
+    assert result.exit_code == sr.EXIT_INTERRUPTED and result.reason == 'INTERRUPTED'
+    assert len(io.rows) == 1, io.rows
+    return io.rows[0], io, sender
+
+
+def test_ctrl_c_writes_one_row_of_what_is_known_without_reading_or_waiting():
+    stops = {}
+
+    def stop_at(position):
+        def hook(count, io):
+            if count == position:
+                stops['t'] = io.t
+                raise KeyboardInterrupt()
+        return hook
+    for stage, position, planned in (('confirm_start', 1, 0), ('confirm_send', 2, 1)):
+        arm = FakeArm(T_MEAS)
+        row, io, sender = _interrupted_row(arm, io=FakeIO(arm, on_confirm=stop_at(position)))
+        assert row['stage'] == stage and row['label'] == 'INTERRUPTED'
+        assert row['goal_sent'] is False and row['goal_in_flight'] is False
+        assert row['goal_cancelled'] is False and len(sender.planned) == planned
+        assert sender.executed == [] and stage in row['note']
+        assert row['q_meas_last'] == ' '.join('%.5f' % v for v in T_MEAS)
+        assert io.t == stops['t'], 'the interruption must not wait'
+
+
+def test_ctrl_c_during_the_plan_and_during_the_execution_is_recorded():
+    arm = FakeArm(T_MEAS)
+
+    def interrupt():
+        raise KeyboardInterrupt()
+    row, io, sender = _interrupted_row(arm, sender=FakeSender(arm, on_plan=interrupt))
+    assert row['stage'] == 'plan' and row['goal_sent'] is False
+    arm = FakeArm(T_MEAS)
+    row, io, sender = _interrupted_row(arm, sender=FakeSender(arm, on_execute=interrupt))
+    assert row['stage'] == 'execute' and row['goal_sent'] is True
+    assert row['goal_in_flight'] is True and row['goal_cancelled'] is False
+    assert 'goes on to its end' in io.said[-1]
+
+
+def test_ctrl_c_in_a_dry_run_writes_no_row_and_before_any_input_still_writes_one():
+    arm = FakeArm(T_MEAS)
+
+    class Interrupted(FakeIO):
+        def read_inputs(self):
+            raise KeyboardInterrupt()
+    loop, _, io, _ = _loop(arm=arm, io=Interrupted(arm), dry_run=True)
+    assert loop.run().exit_code == sr.EXIT_INTERRUPTED and io.rows == []
+    loop, _, io, _ = _loop(arm=arm, io=Interrupted(arm))
+    assert loop.run().exit_code == sr.EXIT_INTERRUPTED
+    assert len(io.rows) == 1 and io.rows[0]['stage'] == 'read'
+    assert io.rows[0]['q_meas_last'] in (None, '') and io.rows[0]['goal_sent'] is False
+
+
+def test_an_arm_that_is_already_at_the_goal_is_told_so_and_nothing_is_executed():
+    t_goal = np.radians([0.0, -22.0, 30.0, 83.0, 0.0])
+    arm = FakeArm(t_goal)
+
+    def one_point(q0, q_goal):
+        return [sr.TrajPoint(0.0, tuple(q0))]
+    loop, _, io, sender = _loop(arm=arm, goal=None, joints_deg=(0, -22, 30, 83, 0),
+                                sender=FakeSender(arm, build=one_point))
+    result = loop.run()
+    assert result.reason == 'ALREADY_AT_GOAL' and result.exit_code == sr.EXIT_STOPPED
+    assert 'already at the goal' in result.detail and 'already at the goal' in io.said[-1]
+    assert sender.executed == [] and len(io.prompts) == 1
+    assert len(io.rows) == 1 and io.rows[0]['plan_reasons'] == 'EMPTY'
+
+
+def test_a_single_point_plan_far_from_the_goal_is_still_refused_as_empty():
+    arm = FakeArm(T_MEAS)
+
+    def one_point(q0, q_goal):
+        return [sr.TrajPoint(0.0, tuple(q0))]
+    loop, _, io, sender = _loop(arm=arm, sender=FakeSender(arm, build=one_point))
+    result = loop.run()
+    assert result.reason == 'PLAN_REFUSED' and 'EMPTY' in result.detail
+    assert 'already at the goal' not in result.detail and sender.executed == []
+
+
 def test_ctrl_c_during_the_execution_says_that_the_goal_goes_on():
     arm = FakeArm(T_MEAS)
 
