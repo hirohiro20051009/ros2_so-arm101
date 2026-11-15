@@ -2481,6 +2481,8 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 
 `/tmp/claude-1000/-home-hirok-ros2-so-arm101/d4f1922d-c370-4c18-8a21-0314cf881cf6/scratchpad/v7/` の `extract.py`・`analyze.py`・`resid.py`・`events.py`（読み取りだけ）、出力 `tables.txt`、bag の中間ファイル `bag.pkl`（`bag_prev.pkl` は同一の複製）。**`/tmp` の下なので再起動で消えうる**。数字を作り直すときは、`extract.py` を（ROS の環境を source して）`python3 extract.py <bag のディレクトリ> bag.pkl` で実行し、`analyze.py` を実行する。
 
+V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）と tables.txt は ~/so_arm101_check/diff_20261115_V2/v7_scripts/ に控えた（git 管理外）。bag.pkl は作り直す：cd して python3 extract.py ../bag_V2 bag.pkl、続けて python3 analyze.py（ROS を source してから。-I は付けない）。
+
 ### 結果の要点（詳細は 7.16）
 
 - 道具の 10 回の送信は、すべて `OK`。`REFUSED`・`NOT_SETTLED`・`OTHER_GOAL`・`DESIRED_MISMATCH` はなし。`windup_after` は 0.0179〜0.0349 rad。
