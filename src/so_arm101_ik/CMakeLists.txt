@@ -20,7 +20,8 @@ if(BUILD_TESTING)
           test_constants test_fk_chain test_ik_roundtrip test_ik_roll test_ik_limits
           test_model_check test_moveit_fixture test_ik_model_check_static
           test_diff_mode test_diff_mode_safety
-          test_step_runner test_step_loop test_diff_mode_run_static)
+          test_step_runner test_step_loop test_diff_mode_run_static
+          test_ik_move test_ik_move_loop test_ik_move_run_static)
     ament_add_pytest_test(${test_name} test/${test_name}.py
                           ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   endforeach()
