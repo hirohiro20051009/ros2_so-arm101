@@ -2506,3 +2506,43 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - **モックの確認の要点**: `allowed_start_tolerance` は 0.01（実行時のログ）。加速度 1.0・速度 5.0・Scaling 0.1。M3 は V2b の実測の姿勢から解けない（`JOINT_LIMIT`）→ M3' = (0.230, 0.060, 0.060)、M2・M3' は `--pitch-deg -91.0 --roll-deg 0`。終点のずれは許容以下で、許容に比例（H1 が成り立つ。RViz の許容は未確認）。Ctrl-C で進行中のゴールは最後まで続く。
 - **実機で見る点**: 着いた点（測定）は、測定の床の余裕 3 mm と手前止まり 7.39 mm、desired と測定の差の余裕 0.026 rad の 2 つで保証されない。M3' は elbow が開く向きに約 0.61 rad 動くので、`SHORT` になる可能性がある（16.9）。
 - **材料（git 管理外。`/tmp` の下なので再起動で消えうる）**: `/tmp/claude-1000/-home-hirok-ros2-so-arm101/e1755a91-8ede-4d9e-bc80-0ab14d9b0d83/scratchpad/` の `mut.sh`・`mut2.sh`・`mut3.sh`（守りを外す確認）、`mut_result.txt`・`mut_result2.txt`、`stage2/`（`place.sh`、`tool.sh`、`killer.sh`、モックのログ、`b/`・`b2/`・`c/`・`d/`・`e/` の CSV）。必要なら `~/so_arm101_check/` に写す（まだ写していない）。
+
+## `so_arm101_ik` の大きな移動の道具の実機の確認 M0〜M3'（2026-11-15。結果は `docs/large_move_plan.md` 17 章、手順書は `docs/large_move_real_check.md`。docs だけのコミット。`colcon test` は省略。コードは変更していない）
+
+実機はユーザーが動かした（19:48〜20:13）。Claude は CSV・ログ・bag を読み取りだけで整理した（実機・launch・ros2 の起動・daemon は使っていない。bag の最後の `/joint_states` は、sqlite3 を読み取り専用で開く Python で読み、スクリプトは `/tmp/claude-1000/-home-hirok-ros2-so-arm101/f9eb61c8-d58c-464f-9c31-40d04fca3734/scratchpad/last_js.py`、出力は同じ場所の `last_js.out`）。**以下の材料は git 管理外**（`~/so_arm101_check/large_20261115_M/`）で、タグやコミットからは戻せない。CSV・ログの全文は写さず、sha256 と要点だけを控える。
+
+### 材料（パスは `~/so_arm101_check/large_20261115_M/` からの相対。大きさはバイト）
+
+| ファイル | 大きさ | sha256 |
+|---|---|---|
+| `M0_dry.log` | 824 | `02d91dfa815f90d518908ac9cbe04ed16b9d02d081acbabf99c521328ecec289` |
+| `M0_launch.log`（読み取り専用の起動） | 34377 | `7152910e93345abd4fb24a06058d81017ae13aa76c43b4fdd10a67b4ad8bc525` |
+| `M1_launch.log`（書き込みモードの起動。M1〜最後の RViz の戻し、停止まで） | 66760 | `fae21ff5ea8dc9966a87afb572c13ad7806c27bf13e1f9bc8f69916d8cbb7d60` |
+| `M1_M2dry.log` | 570 | `02baacda5004e3dcff18ffbcb6a184b80a5054c2a6966de6418239478d1c32aa` |
+| `M1_M3pdry.log` | 569 | `c85dab5c374abdb721dd3978e4688c4ca463dd7b34a54a0f75144d5b030281e1` |
+| `M2.log` | 1233 | `ce4e6735985e31f139154767a30ccb28a91b6b5b2b6d32259134a9654e342ea0` |
+| `M2.csv` | 1095 | `5be615f91eec6070bf4548844aea9b0192c1522ddc30d02d3f02e1810b57c240` |
+| `M2_return.log` | 1239 | `c9e68a319a52502bf97186c466bdf000aec7e2495091d41b25c203e467d79f88` |
+| `M2_return.csv` | 1099 | `0de63ce24350bcd61cd8c53c121e3501f9c6e8c75409f3d0637006f502a9243f` |
+| `M3p.log` | 1234 | `88426400a7cc75d5348f650e9b1ea91ffb6f3de8ee28dc3f152f36fb5ef9a38f` |
+| `M3p.csv` | 1097 | `5cd9cd7d723d95c92970bef3dd725e4e5a121611d86b825847fc26359de6dcb4` |
+| `M3p_return.log` | 1241 | `2c1907f92155e423fc86450a7acf8c0bc972b8f92e273bd99a4569d564db0627` |
+| `M3p_return.csv` | 1099 | `8c93142d69e7b71b43aeaa8f3d25f9167e33ab6ec4bfea2b2f0001f8b2cc11a6` |
+| `bag_M/bag_M_0.db3` | 49840128 | `8472686388a3598b0f88f4d809723ec8b1f11c4a75595e79c9f9a26e8b61fe48` |
+| `bag_M/metadata.yaml` | 1514 | `c90066dd2d67d5efbb27c697dba73ea1bf26acbced31cea1de3f6bf5c00cddf3` |
+
+### bag の metadata の要点
+
+- `bag_M`: sqlite3、期間 993.10 秒（19:54:52.656〜20:11:25.756）、総数 74,484 件。`/joint_states`（`sensor_msgs/msg/JointState`）49,656 件、`/arm_controller/controller_state`（`control_msgs/msg/JointTrajectoryControllerState`）24,828 件。
+
+### 結果の要点（詳細は `docs/large_move_plan.md` 17 章）
+
+- M0（読み取り専用）: `START_REFUSED`（exit 3）。`START_FLOOR_MEASURED`（z = 0.0307 m）と `MOVE_JOINT_TOO_FAR` 3 件。送った数 0。
+- M2・M2 の戻し・M3'・M3' の戻しの 4 回とも `REACHED`（誤差 6.38・4.00・7.05・3.57 mm）。計画の終点のずれ（last vs goal）は 0.00069〜0.00093 rad。着いた点の z − 0.045 は +10.2〜+11.2 mm、desired − q_meas の最大は 0.0368 rad。**4 回とも DiffMode の開始の条件を満たしたが、一般の保証ではない。** M3' は `SHORT` にならなかった（16.9 の推測は外れた）。
+- 最後の RViz の戻し（−4、−85、+96、+25、−3 度）: 問題なく動作。腕を支え、止まってから S5 で停止した。bag の最後の実測（最後の 3 秒間は動きなし）は (−0.06598, −1.47989, 1.67475, 0.43883, −0.04680) rad。RViz の目標との差は最大 0.0056 rad、V2a の実測との差は最大 0.0123 rad。
+- 停止: `[deactivate]` の 2 行を確認。`reads=51982 retried=0 failed_cycles=0 goal_writes=51982 monitors=1028`、bus のカウンタはすべて 0。WARN・ERROR は 0 件。`startup_read_retries=0`、`[diag]` は 6/6。
+
+### 残課題に追加
+
+- (i) pan は指令との差が約 5 tick（約 0.0077 rad）だと動かなかった（M2・M2 の戻し）。**[推測]** 重力のかからない関節でも、小さな差は詰まらない。
+- (ii) `--joints-deg` のとき GOAL の行に `candidates=0` と出る（IK を解いていない印。`ik_move.py:238`・`241-244`。表示の改善はリリース時の整理で検討）。

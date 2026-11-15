@@ -2,7 +2,7 @@
 
 計画と結果: `docs/large_move_plan.md`（決定は 1 章、実機の段は 11 章と 16.8、モックの結果は 16.6・16.8、実機で見る点は 16.9）。コミットは `72ffa2e`（道具）と `a8c6ca0`（Ctrl-C の行、`ALREADY_AT_GOAL`）。
 
-> **実機を動かす段（M1 以降）はユーザーだけが実行する。Claude Code は実機に対して実行しない。** Claude が実行したのはモック（`ROS_DOMAIN_ID=87`）だけ。**この手順書の段は、まだ実機で一度も実行していない。**
+> **実機を動かす段（M1 以降）はユーザーだけが実行する。Claude Code は実機に対して実行しない。** Claude が実行したのはモック（`ROS_DOMAIN_ID=87`）だけ。**この手順書の M0〜M3' は、2026-11-15 にユーザーが実機で実施し、すべて合格した（結果は `docs/large_move_plan.md` 17 章）。**
 
 この道具: 解析 IK で関節の目標を出し、MoveIt に **計画だけ**させ（`plan_only`）、検査した軌道を `ExecuteTrajectory` で実行する。到達の判定は、止まってから測った関節角（`SUCCEEDED` は到達の根拠にしない。`open_loop_control: true`）。大きな移動の道具で、細かい補正（±3 mm）は `DiffMode`（`docs/diff_mode_real_check.md`）とカメラの段の仕事。
 
