@@ -2403,13 +2403,13 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **P5 に残したこと**: 起点を固定（アンカー）にするか（`LIMITED_DONE` の後の `start` のやり直しで、0.03 m の球をつないで遠くへ行ける）、最初の実機の `max_dq`（0.03 rad）、abs(D) の上限（0.99）の見直し。P6: VR の連続の指令での `max_steps`・`max_reversals`。
 - 次: P5（送り先。実機の確認 7.3）。
 
-## `so_arm101_ik` の P5（2026-11-15。コミット前。`docs/analytic_diff_plan.md` 7.14・7.15。実機は使われていない。モックは未実施）
+## `so_arm101_ik` の P5（2026-11-15。コード: コミット `10e3a6f`、docs: コミット `bdb4871`（と、記載の直しのコミット）。`docs/analytic_diff_plan.md` 7.14・7.15。実機は使われていない。モックの確認 1〜7 は実施済み）
 
 - **作ったもの**: `so_arm101_ik/step_runner.py`（純粋な補助と `StepLoop`。ROS・時計・I/O なし）、`tools/diff_mode_run.py`（ROS の入出力だけ。**実機を動かす。ユーザーだけが実行**）、試験 3 つ（`test_step_runner.py` 17、`test_step_loop.py` 27、`test_diff_mode_run_static.py` 9）、`CMakeLists.txt` の試験名 3 つの追加、手順書 `docs/diff_mode_real_check.md`（V0〜V8）。`diff_mode.py` ほか既存のコードは変更なし。新しい依存なし。
 - **`colcon test`（全パッケージ）: 498 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 271** = pytest 212 + lint 41 + CTest の要約 18。前は 426・ik 199。モックの確認の後に、確認の行バッファ・ワインドアップの記録・Ctrl-C の表示の試験を足して 490 → 498）。numpy 1.21.5・1.26.4 の両方で新しい pytest 53 件が通過。守りを 1 つずつ外した 25 個の変更（リポジトリの外の写し）で、対応する試験が落ちた。
 - **計画から変えた点**: `HOLD` は `--auto` でなくても Enter を求める（ユーザーの事後承認）。ほか 7.15 の表。
-- **`--offset` の起点（未決定。ユーザーが決める）**: T で `FK(q_meas)` と `FK(q_desired)` が 5.56 mm 離れているため、起点が `FK(q_meas)` のとき V3 の 2 mm は不感帯（3 mm）の内側で何も送られない（推奨: V3 を 5 mm に変える）。詳細は 7.15 の 7。決まるまで、起点のコードとモックの確認は保留。
-- 次: 起点の決定 → モックの確認 1〜7（3a を含む）→ コミット（コード → docs）。
+- **`--offset` の起点（ユーザーの決定: `FK(q_meas)`。V3 の offset は 5 mm）**: T で `FK(q_meas)` と `FK(q_desired)` が 5.56 mm 離れているため、起点が `FK(q_meas)` のとき V3 の 2 mm は不感帯（3 mm）の内側で何も送られない（推奨: V3 を 5 mm に変える）。詳細は 7.15 の 7。決まるまで、起点のコードとモックの確認は保留。
+- 次: ユーザーが `docs/diff_mode_real_check.md` で実機の確認（V1 → V2a〜V2c → V3 → V3b → V8）。その後に、カメラの段の前の「解析 IK で関節の目標を出して MoveIt で動かす道具」の計画。
 
 ### P5 の範囲の変更と記録（2026-11-15。ユーザーの方針。`docs/analytic_diff_plan.md` 7.15 の 8〜11）
 
