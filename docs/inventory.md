@@ -2387,3 +2387,13 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **`colcon test`（全パッケージ）: 359 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 132 = pytest 92 + lint 27 + CTest の要約 13）。
 - **CLAUDE.md の直し**: daemon の行（`--no-daemon`、daemon に触らない）、git の操作の規則、launch の「前景」の定義（`&` を使わず `run_in_background` で `exec`。`SigIgn` の確認）。
 - 次: P4（`DiffMode`）。
+
+## `so_arm101_ik` の P4（2026-11-15。コミット `e16bc0a`。`docs/analytic_diff_plan.md` 7.12・7.13。実機・launch は使われていない。モック・ノードは起動していない）
+
+- **作ったもの**: `so_arm101_ik/diff_mode.py`（`DiffMode`。解析 IK の差分モードの純粋な計算。numpy と標準ライブラリだけ、時計・ROS・I/O なし）、`test/test_diff_mode.py`（47 件）、`test/test_diff_mode_safety.py`（12 件）、`CMakeLists.txt` の試験名の追加。ほかのファイル（`analytic_ik.py`・`model_check.py`・`package.xml`・`tools/`）は変更なし。
+- **`colcon test`（全パッケージ）: 426 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 199** = pytest 151 + lint 33 + CTest の要約 15。前は 359・ik 132。ik の増分 +67 = pytest +59、lint +6、CTest +2）。numpy 1.21.5（`python3 -s`）と 1.26.4 の両方で pytest 151 件が通過。
+- **試験が落ちることの確認**: 守りを 1 つずつ外した 10 個の変更（スクラッチの写し）で、対応する試験が落ちた（`docs/analytic_diff_plan.md` 7.13 の表）。
+- **計画から変えた点（ユーザーの事後承認）**: `step` の `AT_LIMIT` は境界に触れていれば（`TOUCH = 1e-6`）、`NO_PROGRESS = 1e-7` rad、`StartRefused` の理由コード `NO_BRANCH`・`NOT_SETTLED`、出発点の拒否は 3 つ、`verify_command` の `target`（省略可。`step` の 1 か所の呼び出しは渡している）。`NOT_SETTLED` の閾値は `max_windup`（0.06 rad。推測）と同じ。
+- **計画の訂正**: 7.12.4 の「T で q3 の差を折り返すと 3.625 rad」は折り返す前の値（折り返した後は 2.659 rad = 2·acos(0.239)。5 関節の 2-ノルムは折り返した後 3.703、折り返す前 4.447）。元の記述は残し、訂正を付けた。
+- **P5 に残したこと**: 起点を固定（アンカー）にするか（`LIMITED_DONE` の後の `start` のやり直しで、0.03 m の球をつないで遠くへ行ける）、最初の実機の `max_dq`（0.03 rad）、abs(D) の上限（0.99）の見直し。P6: VR の連続の指令での `max_steps`・`max_reversals`。
+- 次: P5（送り先。実機の確認 7.3）。

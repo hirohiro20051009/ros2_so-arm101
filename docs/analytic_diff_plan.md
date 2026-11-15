@@ -827,6 +827,7 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 #### abs(D) の上限を 0.99 に緩める案（承認済み。数字の表現を直した）
 
 - **[事実。コードの式から。計算] 枝の距離**: 2 つの枝は `S3·q3 = β3 + π/2 + d2 − d3`（`cos β3 = D`）の β3 の符号だけが違い、**q3 の差を (−π, π] に折り返すと `2·acos(abs(D))`**（T で 3.625 rad、実測と一致）。**5 関節の折り返した 2-ノルムは、これ以上**。
+  **【訂正（2026-11-15。P4 の実装後。上の「T で 3.625 rad」は誤りで、元の記述は残す）】3.625 rad は折り返す前の q3 の差。折り返した後は 2.659 rad（= 2·acos(0.239)）**。T の 5 関節の 2-ノルムは、折り返した後 3.703 rad、折り返す前 4.447 rad（試験 `test_the_two_branches_are_at_least_2_acos_abs_d_apart`）。**保証の式（折り返した差 ≥ 2·acos(abs(D))）と 0.2831 rad（5.7 倍）は変わらない**。以前の「別の枝は 4.447 rad 離れている」も折り返す前の値。
 
 | `max_abs_d` | `2·acos(max_abs_d)` [rad] | `max_dq` の硬い上限 0.05 との比 |
 |---|---|---|
@@ -1027,3 +1028,74 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 | `LIMITED_DONE` の後の `start` のやり直しで、距離の起点（開始位置）も新しくなり、**0.03 m の球をつないで遠くへ行ける**。範囲と床の守りは残る。**起点を固定（アンカー）にするかは P5 で決める** | 7.12.2.3 |
 
 **次**: 実装（ビルドの許可は、ユーザーが実機を使っていないことを確認してから別に求める。P4 はモックも実機も要らない）。**この節は計画の記録で、コード・ビルドはしていない。**
+
+
+## 7.13 P4 の結果（2026-11-15。コミット `e16bc0a`。実機・launch は使われていない。モック・ノードは起動していない）
+
+**1. コミット**: コード `e16bc0a`（`src/so_arm101_ik/CMakeLists.txt`、`so_arm101_ik/diff_mode.py`、`test/test_diff_mode.py`、`test/test_diff_mode_safety.py` の 4 ファイル。+1986 行、−1 行）。この節と inventory の記録は別のコミット（docs のみ。`colcon test` は省いた）。
+
+**2. 作ったもの**: `diff_mode.py`（807 行。`numpy` と標準ライブラリだけ。時計・ROS・I/O なし）: `DiffModeConfig`（硬い上限と関係の検査）、`DiffMode.start`・`step`・`suggest_delta`・`outcome`・`state`、単独の `verify_command`、`max_fraction`（走査 16 + 二分 30）、`branch_of_q`・`abs_d_of_q`・`wrapped_norm`。試験は 59 件（`test_diff_mode.py` 47、`test_diff_mode_safety.py` 12）。`analytic_ik.py`・`model_check.py`・`package.xml`・`tools/` は変更なし。ビルドは `colcon build --symlink-install --packages-select so_arm101_ik` だけ。
+
+**3. 計画から変えた点（6 項目。ユーザーの事後承認。1・2・4・5 は 2026-11-15 に承認、3・6 は報告で確認）**
+
+| # | 変えた点 | 理由・値の出どころ |
+|---|---|---|
+| 1 | `step` は、全体が収まっても「`1 + TOUCH`（`TOUCH = 1e-6`）倍すると境界を越える」なら `AT_LIMIT`（計画は `s < 1` のときだけ） | `suggest_delta` が境界まで縮めた δ を `step` に渡すと `s = 1` で `OK` になり、`at_limit_run` が増えない。**[推測]** 値 1e-6 に実測の根拠はない（二分法の幅 3e-13 m より十分大きく、`min_delta` より十分小さい）。偶然境界に着いた `OK` が `AT_LIMIT` になりうるが無害 |
+| 2 | 「進まない」の許容 `NO_PROGRESS = 1e-7` rad（計画に数値なし） | 1e-9 では、y がほぼ 0 の T で x 方向に動かしたときの pan の変化（約 1e-10）が「進んだ」と数えられ、`STUCK` が出なかった。**[推測]** 値に実測の根拠はない |
+| 3 | `verify_command` に `target` を省略可の引数として追加（計画は 5 引数） | 「`FK(q_new)` と `target` の差」の検査に必要。**[事実。grep で確認]** `diff_mode.py` の呼び出しは `step` の 1 か所（660 行）だけで、`target=target_new` を渡している。送る経路は `step` のこの 1 か所だけ（ほかの `return` は何も送らない）。省略は試験（`test_diff_mode_safety.py`）だけ |
+| 4 | `StartRefused` の理由コードに `NO_BRANCH`（枝が一意に決まらない）と `NOT_SETTLED`（`q_desired` と `q_meas` が離れている）を追加 | 入口の検査 #5・#6 に理由の名前が必要だった |
+| 5 | 出発点（W1）の拒否は、`q_meas` も W1 にした試験では 3 つ（範囲 `JOINT_LIMIT`、床 `FLOOR`、測った床 `FLOOR_MEASURED`） | 7.12.3 の「2 つ」は `q_desired` の検査（#2・#3）の数え方。`FLOOR_MEASURED` は #6 で別。矛盾ではない |
+| 6 | 計画の記述の誤りの訂正（7.12.4）: 「T で q3 の差を折り返すと 3.625 rad」 | 3.625 は折り返す前。折り返した後は 2.659 rad（= 2·acos(0.239)）。5 関節の 2-ノルムは折り返した後 3.703、折り返す前 4.447。保証の式は変わらない。7.12.4 に、元の記述を残して訂正を付けた |
+
+- **`NOT_SETTLED` の閾値（依頼 2）**: **ワインドアップと同じ値**（`DiffModeConfig.max_windup`、既定 **0.06 rad**、硬い上限 0.08）。入口の検査 #6（7.12.3）の「`abs(q_desired − q_meas) ≤ max_windup`」をそのまま実装した（`diff_mode.py` 449 行）。**出どころ**: **[旧コード]** `MAX_OFFSET = 0.08`（`so101_diffik.py`。同じ種類の検査）、**[実測]** 手前止まり 17〜27 tick（0.026〜0.041 rad）を超える必要、**[推測]** 0.06 という値そのもの（7.12.4 のワインドアップの行と同じ）。別の閾値は設けていない。
+
+**4. `colcon test` の件数（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source。全パッケージ）**
+
+| パッケージ | 前 | 後 |
+|---|---|---|
+| bringup | 47 | 47 |
+| calibration | 73 | 73 |
+| description | 2 | 2 |
+| hardware | 105 | 105 |
+| moveit_config | 0 | 0 |
+| ik | 132 | 199 |
+| 合計 | 359 | **426（失敗 0・エラー 0・スキップ 0）** |
+
+**ik の増分 +67 と、見込み（7.12.6）との突き合わせ**
+
+| 区分 | 前 | 後 | 増分 | 見込み | 判定 |
+|---|---|---|---|---|---|
+| pytest | 92 | 151 | +59（`test_diff_mode` 47、`test_diff_mode_safety` 12） | +66（59〜73） | 範囲の下限 |
+| lint | 27 | 33 | +6（copyright 12 → 15、pep257 12 → 15。flake8・xmllint・lint_cmake は各 1） | +6 | 一致 |
+| CTest の要約 | 13 | 15 | +2 | +2 | 一致 |
+| ik の合計 | 132 | 199 | +67 | 約 +74 | 範囲内 |
+| 全体 | 359 | 426 | +67 | 約 433（426〜440） | 範囲の下限 |
+
+- 見込みの内訳（約 54 + 12）より少ないのは、同じ性質の試験を表を回す 1 つの試験にまとめたため（境界の 5 種類、約束の違反、再検査の表など）。他のパッケージの件数は変わっていない。
+- 最初の `colcon test` で flake8 の E501（`test_diff_mode.py` の 1 行が 99 文字超）が 1 件落ち、折り返して直した。再実行で 426 件すべて通過。
+
+**5. numpy の 2 版**（`so_arm101_ik/test/` 全体の pytest 151 件）
+
+| 版 | 結果 |
+|---|---|
+| システム 1.21.5（`python3 -s`） | 151 件すべて通過 |
+| `~/.local` の 1.26.4（`python3`） | 151 件すべて通過 |
+
+**6. 試験が落ちることの確認（M1〜M10）**: リポジトリの外のスクラッチに `so_arm101_ik` の写しを作り（`__file__` で写しが読まれていることを確認）、`diff_mode.py` に 1 つずつ変更を入れて、新しい 2 ファイルの試験を実行した。リポジトリの中のファイルは書き換えていない。
+
+| 外した守り | 落ちた試験 | 件数 |
+|---|---|---|
+| M1 送る直前の再検査: 厳密な関節の範囲（`JOINT_LIMIT`） | `test_verify_command_rejects_each_bad_command` | 1 |
+| M2 再検査: 指令の床（`FLOOR_CMD`） | `test_verify_command_rejects_each_bad_command` | 1 |
+| M3 再検査: 枝の番号（`BRANCH_SWITCH`） | `test_verify_command_detects_the_other_branch` | 1 |
+| M4 測った位置の床（`FLOOR_MEASURED`） | `test_a_measured_position_below_the_floor_stops`、`test_verify_command_rejects_each_bad_command` | 2 |
+| M5 dq の上限（`DQ_TOO_BIG`。再検査と `step`） | `test_a_difference_above_the_dq_limit_stops_without_shortening`、`test_verify_command_rejects_each_bad_command`、`test_random_walk_with_direct_steps_only_sends_safe_commands` | 3 |
+| M6 再検査: ワインドアップ | `test_verify_command_rejects_each_bad_command` | 1 |
+| M7 再検査: q3 からの abs(D) | `test_verify_command_rejects_each_bad_command`、`test_abs_d_is_the_same_limit_at_entry_and_at_the_last_check` | 2 |
+| M8 境界: 関節の範囲（`JOINT_RANGE`）を無効化 | `test_each_boundary_shortens_the_difference_to_its_inside_limit`、`test_a_joint_in_the_margin_band_does_not_approach_its_limit_and_the_others_move`、`test_random_walk_with_suggestions_only_sends_safe_commands`、`test_the_reach_from_t_in_six_directions` | 4 |
+| M9 起点を測った位置にする | `test_the_origin_is_the_previous_command_not_the_measurement` | 1 |
+| M10 ワインドアップのクリップ後に `target` を戻さない | `test_the_windup_clip_moves_the_target_back_to_the_command` | 1 |
+
+**7. 設計の記録: 再検査の守りは `verify_command` の単独の試験だけが捕まえる**: M1（範囲）・M2（指令の床）・M3（枝の番号）・M6（ワインドアップ）は、`step` の経路では目標の述語（境界）や先の検査が同じ違反を先に止めるため、`verify_command` を直接呼ぶ試験（`test_verify_command_rejects_each_bad_command`、`test_verify_command_detects_the_other_branch`）だけが落ちる。**これは設計どおり**: `verify_command` は IK・述語から独立に `q` だけから検査する最後の守りで、IK や述語のバグがあっても危険な指令を送らないためのもの。そのため、**この関数の単独の試験を消すと、再検査が壊れても気づけない**（試験を整理するときは、この表の試験を残す）。
+
+**8. 次**: P5（送り先。MoveIt 経由 / JTC 直接、`--route`。実機の確認 7.3）。P5 で決めること（記録済み）: 起点を固定（アンカー）にするか（7.12.2.3）、最初の実機の `max_dq`（0.03 rad）、`max_steps` の引き上げの要否、abs(D) の 0.99 を 0.98 に戻すか。P6 で決めること: VR の連続の指令での `max_steps`・`max_reversals` の扱い。
