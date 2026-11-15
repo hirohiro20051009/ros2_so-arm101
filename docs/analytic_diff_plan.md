@@ -72,6 +72,7 @@
 
 - **積算するのは先端の目標（`target`）で、起点は「前回の目標」**。`target_k = target_{k−1} + δ_k`。**測った位置から作り直さない**（W3 の原因）。
 - **モードに入るときの初期化**: **`q_cmd0` = 直前の目標（JTC の `desired` = `controller_state` の `desired.positions`）**、`target0 = FK(q_cmd0)`、`pitch_ref`・`roll_ref` = `FK(q_cmd0)` の pitch・roll。**測った位置では初期化しない**（W3 の 1 回目の垂れ: 測った位置から始めると、サーボが押していた分（`desired − measured` = 17〜27 tick）が消えて垂れる。キャンセルでも同じ。`diffik_accumulate_plan.md`・`diffik_tool_plan.md` 1.3）。
+  - **【注記 2026-11-15】元の記述の `desired.positions` は、Humble の `JointTrajectoryControllerState` では `reference.positions` が正（`desired` は非推奨の別名）。元の記述は残す。P5 では `reference` を使う（7.14.2）。**
 - **[事実] 往復の一致**: `IK(FK(q), current_q = q)` は `q` に戻る（`so101_ik` の FK と IK は同じモデルで、最近傍の枝を選ぶ）。**定数が古くても往復は一致する**ので、**初期化の直後の最初の指令は「今の目標のまま」になる**（動かない）。**定数の誤差（6〜11 mm）は、「絶対座標で指定した目標」が実際の位置とずれる形で効く**（相対の差分には小さい。1.2 の更新が必要な理由）。
 - **`desired` が取れない（`controller_state` が無い・古い）ときは、開始しない**（測った位置にフォールバックして垂れる、という挙動を避ける。ユーザーが明示すれば測った位置で開始してもよい）。
 - **MoveIt 経由のときの注意 [推測。ソースからの見立て。モックで確認]**: MoveIt の軌道の最初の点は、**MoveIt が持つ現在の状態（= 測った位置）**。`open_loop_control: true` の JTC は新しい軌道を `last_commanded_state_` から補間する（`joint_trajectory_controller.cpp:200-207`）ので、**最初の区間で目標が測った位置へ戻る**（押していた分が一度外れる）。**最後の目標は絶対値の `q_cmd` なので、積算の効果は失われない**が、**遷移の最初に垂れる可能性がある**。JTC 直接なら起点は `desired` で垂れない。
@@ -606,6 +607,8 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 
 **起点 [事実。2.2 の決定]**: `start` の `q_desired` は **JTC の `desired`**（P5 が `controller_state` から取って渡す）。`q_cmd = q_desired`、`target = target0 = FK(q_cmd).xyz`、`pitch_ref`・`roll_ref` も `FK(q_cmd)`。**`q_meas` から `target`・`q_cmd`・`pitch_ref`・`roll_ref`・`branch` を作らない**（W3 の 1 回目の垂れの教訓）。`q_desired` が `None`（取れない・古い）なら**開始しない**（測った位置にフォールバックしない）。
 
+> **【注記 2026-11-15】** 上の「JTC の `desired`」（`controller_state` の `desired`）は、Humble では `reference.positions` を読む（`desired` は非推奨の別名）。元の記述は残す。7.14.2 を参照。
+
 #### 7.12.2.0 停止と継続の分け方（原則に沿って書き直し）
 
 **原則**: **目標（`target_new`）の検査で外れたら境界（`AT_LIMIT`）**。**送る `q`（`q_new`）と測った位置（`q_meas`）の検査で外れたら停止（`REFUSED`）**。
@@ -1099,3 +1102,367 @@ MoveIt 経由の最初の区間の「垂れ」（軌道が測った位置から�
 **7. 設計の記録: 再検査の守りは `verify_command` の単独の試験だけが捕まえる**: M1（範囲）・M2（指令の床）・M3（枝の番号）・M6（ワインドアップ）は、`step` の経路では目標の述語（境界）や先の検査が同じ違反を先に止めるため、`verify_command` を直接呼ぶ試験（`test_verify_command_rejects_each_bad_command`、`test_verify_command_detects_the_other_branch`）だけが落ちる。**これは設計どおり**: `verify_command` は IK・述語から独立に `q` だけから検査する最後の守りで、IK や述語のバグがあっても危険な指令を送らないためのもの。そのため、**この関数の単独の試験を消すと、再検査が壊れても気づけない**（試験を整理するときは、この表の試験を残す）。
 
 **8. 次**: P5（送り先。MoveIt 経由 / JTC 直接、`--route`。実機の確認 7.3）。P5 で決めること（記録済み）: 起点を固定（アンカー）にするか（7.12.2.3）、最初の実機の `max_dq`（0.03 rad）、`max_steps` の引き上げの要否、abs(D) の 0.99 を 0.98 に戻すか。P6 で決めること: VR の連続の指令での `max_steps`・`max_reversals` の扱い。
+
+
+## 7.14 P5 の計画（2026-11-15。計画だけ。コード・ビルド・モック・コミットはしていない。承認後に実装。実機は Claude Code は動かさない。**レビューの反映（同日、2 回）: 7.14.9**）
+
+区別: **[事実]** はソース・既存の記録・読み取りで確認したこと。**[実測]** は実機・モックの記録の値。**[旧コード]** は `~/ros2_so101/test/` の値（読むだけ）。**[計算]** は P4 の計画・結果、または今回の計算。**[推測]** は未確認で、P5 のモック（ROS_DOMAIN_ID=87）または実機で確かめるもの。
+**範囲**: P5 は「`DiffMode` を使って 1 ステップずつ『動かす → 止まる → 測る』を回す道具」と、その実機の確認。**ノード化・VR の入力・ブリッジ・連続の指令は P6**（P5 に入れない）。`diff_mode.py`・`analytic_ik.py` は変更しない（必要が出たら止めて報告する）。
+
+> **【変更の注記 2026-11-15（ユーザーの方針。7.15 の 9）】** 実機の確認は **V1、V2a〜V2c、V3、V8 だけ**に縮めた。**V4〜V6（±3 mm への追い込み、MoveIt 経由との比較）は取りやめ、V7 は V3 の記録の整理だけ**。送り先は実機では `direct` だけを使う（`moveit` 経路は道具に残してコミットし、リリース時の整理の対象にする。7.15 の 11）。V3 の offset は 5 mm（7.15 の 8）。以下の 7.14 の記述（V4〜V6 の基準を含む）は、計画の記録として残す。
+
+### 7.14.1 作るもの（依頼 1）
+
+**構成（P3 と同じ流儀: ROS を持たない計算はパッケージ、ROS の部分は `tools/`）**
+
+| 場所 | 内容 |
+|---|---|
+| `src/so_arm101_ik/so_arm101_ik/step_runner.py`（新規。numpy と標準ライブラリだけ。ROS・時計・I/O を持たない） | ① 純粋な補助: 止まっている判定、`JointState`・`controller_state` の名前から 5 関節の並びへの変換、古さの判定、軌道の 1 点を作る、速度の検査（direct の 1 点の軌道・MoveIt の計画の軌道）、**計画の軌道の最初の点・最後の点の検査**、**`/move_action` のゴールを組み立てる `build_plan_goal_spec`（`plan_only` は常に真。引数で変えられない。7.14.3）**、`q_desired` と `q_cmd` の一致の検査（経路ごとの許容）、起点の球の検査、**引数の組み合わせの検査 `validate_run_options`**（7.14.2）、ゴールの結果の分類、1 ステップの記録の行。② **`StepLoop`**: 1 ステップずつの流れ（7.14.2）。**入出力は注入する**（`io`: 読む・送る・待つ・確認する・今の時刻）。実機・ROS なしで、偽の入出力と偽の腕（摩擦つき）で試験できる |
+| `tools/diff_mode_run.py`（新規。実機を動かす。**ユーザーだけが実行**） | ROS ノード。`io` の本物の実装（購読・action クライアント・端末の確認・`time.monotonic`）と、引数の読み込みだけ。**引数の検査は `validate_run_options` を呼ぶだけ**で、流れの判断は `StepLoop` に任せる（道具の中に判断を書かない） |
+| `docs/diff_mode_real_check.md`（新規。承認後） | 実機の手順書（7.14.5。止め方・コマンド A・各段の合格の基準） |
+
+**名前の案**: `diff_mode_run.py`（`DiffMode` を回す道具）。代案 `diff_step.py`。推奨は前者。
+
+**送り先（`--route moveit` または `--route direct`。必須。既定なし）**
+
+| 項目 | `--route direct`（JTC 直接） | `--route moveit`（MoveIt 経由） |
+|---|---|---|
+| 送るもの | `/arm_controller/follow_joint_trajectory`（`FollowJointTrajectory`）に、**5 関節すべての名前を持つ、`q_cmd` の 1 点の軌道**（`time_from_start` 既定 2.0 秒。`send_joint_delta.py` と同じ形） | **2 段**: ① `move_action`（`MoveGroup`）に **`plan_only = True`** で、`q_cmd` の `JointConstraint`（5 関節。許容 `--moveit-tolerance`）のゴール。**Scaling は 0.1 に固定し、引数を作らない**（`max_velocity_scaling_factor`・`max_acceleration_scaling_factor` とも 0.1）。`start_state.is_diff = True`（`ros_bridge.py` と同じ形。1.3 節）。**動かない** → ② **計画の軌道を検査**（7.14.3）→ ③ 通ったら、**検査した軌道そのもの**を `/execute_trajectory`（`ExecuteTrajectory`）で実行 |
+| 衝突チェック | **道具は呼ばない**（`/check_state_validity` は P5 に入れない: 小さい差分で、床・範囲・dq・枝・ワインドアップは `DiffMode` が検査する。出発点は T の付近が前提）。**[推測]** 必要になるのは T から離れるとき | MoveIt の計画が検査する（自己衝突・シーンの物体。床は無い。床は `DiffMode`） |
+| 起点 | `desired` から始まる（垂れない見込み。**[推測]** V で確認） | 軌道の最初の点は、MoveIt が持つ現在の状態＝測った位置の見込み（2.2 の **[推測]**）。**そのまま実行すると、JTC の目標が測った位置へ飛んで垂れる恐れがある**ので、**計画の軌道の最初の点を `q_desired` と比べ、許容を超えたら実行しない**（7.14.3）。**どちらから始まるかはモックで確かめる**（7.14.6） |
+
+- **既定は、実機で比べてから決める**（7.3）。P5 では `--route` を**必ず指定させる**（省略は拒否）。
+- **同時に両方へ送らない仕組み（3 重）。3 つの確認は、開始時だけでなく、送る直前に毎回行う**（各ステップの、`sender` を呼ぶ直前。`--auto` のときも省かない）:
+  1. **1 つの実行は 1 つの送り先だけを作る**（構造。生成のときに 1 回）: `--route` で、送り先のクラス（`DirectSender` または `MoveItSender`）を**1 つだけ**生成する。`StepLoop` は `sender.send(q_cmd)` の 1 経路だけを持つ。
+  2. **送る直前に、他のアクションのアクティブなゴールを見る**（毎回）: 次の 3 つの `_action/status` を購読し（**[推測]** トピック名はモックで確認。status は transient_local で、あとから購読しても最後の状態が来る **[推測]**）、**自分のゴールは終わっているので、どれかにアクティブ（`ACCEPTED`・`EXECUTING`・`CANCELING`）なゴールがあれば、すべて他者のもの**として、送らずに止める。
+     - **`--route direct` のとき、「もう一方」として見るもの**: `/move_action/_action/status`（`MoveGroup`）と `/execute_trajectory/_action/status`（`ExecuteTrajectory`）。**加えて、自分の送り先 `/arm_controller/follow_joint_trajectory/_action/status`**（前のステップのゴールが終わっていること）。
+     - **`--route moveit` のとき、「もう一方」として見るもの**: `/arm_controller/follow_joint_trajectory/_action/status`（`FollowJointTrajectory`。MoveIt が実行のときに JTC へ送るのと同じ action。**待機中にアクティブなゴールがあれば、RViz や別のツールが JTC を動かしている**）。**加えて、自分の送り先** `/move_action/_action/status` と `/execute_trajectory/_action/status`（前のステップが終わっていること）。
+  3. **`desired` と `q_cmd` の一致**（毎回）: 送る直前に**新しく読んだ** `q_desired` が `q_cmd`（前回送った値）と一致すること。許容は経路ごと: **`direct` は 1e-4 rad、`moveit` は `--moveit-tolerance` の 2 倍**（既定 0.001 rad なので 0.002 rad）。**V3 と V5 の合格の基準（7.14.5）と同じ値**。
+  - **静的な試験**（7.14.6。`test_diff_mode_run_static.py`）: 道具のソースで、2 つの送り先のクライアントを同時に作る形になっていないこと、`--route` が必須で既定がないこと、`create_publisher` が無いこと（`/joint_trajectory` トピックへ出さない）を AST で確かめる。**StepLoop の試験**（`test_step_runner.py`）: 2 ステップ目以降でも毎回 3 つの確認が呼ばれること。
+- **キャンセルしない**: JTC のキャンセルは**測った位置で保持**するので垂れる（2.6・`diffik_tool_plan.md` 1.3）。道具はゴールをキャンセルしない（`cancel_goal` を呼ばない。静的な試験で確かめる）。
+
+### 7.14.2 入力と、1 ステップの流れ（依頼 2）
+
+**入力の取り方**
+
+| 入力 | 取り方 | 取れない・古いときの扱い |
+|---|---|---|
+| `q_desired`（JTC の `desired`） | `/arm_controller/controller_state`（`control_msgs/JointTrajectoryControllerState`。**[事実]** `state_publish_rate: 50`）の **`reference.positions`**（**[事実。`ros2 interface show`]** Humble のメッセージでは `reference` が正で、`desired` は非推奨の別名。**2.2・7.12.2 の元の記述（`desired`）は残し、注記を付けた**。**モックで `reference` と `desired` が一致することを確かめる**）。`joint_names` で 5 関節の並びに直す（並びを仮定しない） | **開始しない**（測った位置にフォールバックしない。2.2）。**メッセージが来ない（既定 5 秒待つ）・NaN・5 関節がそろわない・古い（受信してから 0.3 秒超。受信時刻は道具の単調時計。ヘッダの時刻は使わない: 実機とモックで時計が違う）→ 開始しない／途中なら送らずに止める** |
+| `q_meas`（測った関節角） | `/joint_states`（`sensor_msgs/JointState`）の `position` を**名前で** 5 関節に（velocity は使わない: 1 tick/周期のノイズがある。コマンド A の注） | 来ない・NaN・古い（0.3 秒超）→ 開始しない／送らずに止める。**`q_meas` は「止まってから測った値」だけを `DiffMode` に渡す** |
+| 「止まっている」の判定 | **コマンド A と同じ考え方（`servo_real_check.md` の「止まっていることの確認」）**: `q_meas` を **0.6 秒あけて 2 回**読み、5 関節の差がすべて **0.003 rad（約 2 tick）以内**。アクティブなゴールが無いこと。**純粋関数 `is_stopped(a, b, tol=0.003)`** | 動いている間は `step`・`suggest_delta` を呼ばない（P4 の約束 7.12.5）。**整定の待ち**: ゴールの終了から最小 1.5 秒（**[旧コード]** `SETTLE = 1.5`）待ち、その後、止まるまでコマンド A をくり返す。**整定のタイムアウト 8 秒（[推測]）で、止まらなければ止める**（クリープは未測定。`diffik_tool_plan.md` 8.3） |
+| 一致の検査 | 7.14.1 の 3 つ目。**`direct` 1e-4 rad（[推測]。送った点がそのまま `desired` になるので、丸めの 1e-9 より十分大きい）、`moveit` は `moveit-tolerance` の 2 倍（既定 0.002 rad。MoveIt の最後の点は許容の中に収まる [推測]。モックで最終点のずれを測る）** | 外れたら**送らずに止める**（誰かが別に動かした、または `open_loop_control: true` で `desired` が前回の `q_cmd` のままという 7.12.5 の **[推測]** が外れた）。`start` からやり直す |
+
+**1 ステップの流れ（`StepLoop`）**
+
+| # | 処理 | 外れたとき |
+|---|---|---|
+| 0 | 開始: 入力を読む → `DiffMode.start(q_desired, q_meas, config)`（入口の検査 7.12.3。**起点の球**の検査 7.14.4）→ 開始の確認（Enter。常に求める） | `StartRefused` の理由を全部表示して終了（何も送らない） |
+| 1 | 入力の古さの検査、送り先の排他の検査（7.14.1 の 2・3。**開始のときと、各ステップの、次の 2 以降の前**） | 送らずに終了（理由を表示） |
+| 2 | `suggest_delta(goal, q_meas, gain)` | `IN_BAND`・`LIMITED_DONE` → 終わり。`HOLD` → 送らない（`q_cmd` 保持）。**`--auto` 中の `HOLD` は、続ける前に Enter の確認を求める**。`suggest_delta` を同じ `q_meas` でくり返さない（`HOLD` が続くと `SPIN` で `LIMITED_DONE`）。`REFUSED` → 停止 |
+| 3 | `step(delta, q_meas, requested_norm)`。`OK`・`AT_LIMIT` なら `q_cmd` を得る。**送る直前の再検査のため、`step` の前の `q_cmd`（`q_prev`）と、`state.target` を控える** | `REFUSED` → 停止（何も送らない） |
+| 4 | **表示と確認**（7.14.3）。表示: `q_meas`、`q_cmd`、dq（各関節と最大）、`target`、`FK(q_cmd)` の z、δ、`status`・`limits`、abs(D)、各関節の `q_cmd − q_meas`。**確認の待ちは 30 秒**。**`--auto` 中でも、`AT_LIMIT` のステップは Enter の確認に戻す** | 確認が `n`・30 秒の無入力・Ctrl-C → 送らずに終了（**`step` はすでに状態を進めたので、この実行は続けない**） |
+| 4b | **送る直前の再読み込みと再検査（Enter の後。`--auto` で確認を求めないステップも、送る直前に毎回）**: ① `q_desired`・`q_meas` を**読み直す**。② **古さの検査**（0.3 秒超なら送らない）。③ 読み直した `q_meas` が、`step` に渡した `q_meas` と 5 関節とも 0.003 rad 以内（確認を待つ間に腕が動かされていない。外れたら送らない）。④ **`desired` と `q_cmd` の一致**（経路ごとの許容。7.14.1 の 3）。⑤ **排他の `_action/status`**（7.14.1 の 2）。⑥ **`verify_command(q_cmd, q_prev, q_meas_new, branch, config, target)` をやり直す**（読み直した `q_meas` で。厳密な範囲・床・dq・ワインドアップ・測った床・abs(D)・枝） | どれか外れたら**送らずに終了**（理由を表示） |
+| 5 | **送る**（`sender.send(q_cmd)`）。`direct`: ゴールの受理（`ACCEPTED`）を確かめる。`moveit`: ① `plan_only` の計画 → **計画の軌道の検査**（7.14.3: 速度・最初の点・最後の点）→ ② `ExecuteTrajectory` の受理 | 拒否・タイムアウト・**計画の軌道が検査に落ちた** → **この実行は続けない**（`DiffMode` は `q_cmd` を進めたが、腕は動いていない。巻き戻す API は無い。`start` からやり直す）。**計画の軌道が落ちたときは、実行していない（何も動かない）と表示する** |
+| 6 | **結果を待つ**（`time_from_start`（`moveit` は計画の軌道の長さ）+ 3 秒のタイムアウト）。**`SUCCEEDED` は「測った位置に着いた」ことを意味しない**（7.14.3）。`ABORTED`・`CANCELED`・`REJECTED` → 止める | タイムアウト → キャンセルせず、送らずに終了（腕は途中かもしれない。表示する） |
+| 7 | **止まるのを待つ**（コマンド A。最小 1.5 秒の整定のあと）。止まったら `q_meas` を読む | 8 秒で止まらない → 終了 |
+| 8 | **記録（CSV に 1 行）**: ステップの番号、`status`・`limits`、`q_meas`（前・後）、`q_cmd`、`q_desired`（送る前・止まった後）、`FK(q_meas)`（前・後）、**先端の動き（前後の `FK(q_meas)` の差）と δ の比**、`outcome` の `residual`・`limit_gap`・`track_gap`、abs(D)、各待ちの秒数。**`direct`: 指令の速さ（dq の最大 ÷ `time_from_start`）。`moveit`: 計画の軌道の実際の最大の速さ（隣り合う点の `positions` の差 ÷ 時間の差と、`velocities` の最大の、両方。関節ごとと全体の最大）、軌道の長さ（秒）・点の数、最初の点と `q_desired` の差・`q_meas` の差（関節ごと）、最後の点と `q_cmd` の差。検査に通らず実行しなかったステップにも、同じ値を記録する** | — |
+| 9 | 1 へ（`max_steps` は `DiffMode` が `LIMITED_DONE` で止める） | — |
+
+- **終わりの出力**: `Outcome`（`kind`・`residual_norm`・`limit_gap`・`track_gap`・`limit_reason`・`steps`・`holds`）を表示し、CSV に書く。**エラーにしない**（`LIMITED` も正常終了。終了コード 0）。停止（`REFUSED`・タイムアウト・Ctrl-C）は終了コード 0 以外（Ctrl-C は 130）。
+- **`--dry-run`**: **クライアントを作らず、何も送らない**。入力を読み、`start`・`suggest_delta`・`step` の**最初の 1 回**を表示して終了。V1・V2 で使う。**読み取り専用の起動では `controller_state` が来ない可能性がある（[推測。V1 で確認]）ので、`--assume-desired-is-measured` を用意する。これは `--dry-run` のときしか受け付けない**（測った位置で始めると垂れるため）。
+- **引数の組み合わせの検査（コードと試験で保証）**: **純粋関数 `step_runner.validate_run_options(...)`** が、道具の引数を読んだ直後・**ノードやクライアントを作る前**に呼ばれ、次を拒否する（`ValueError`）: ① `--assume-desired-is-measured` が `--dry-run` なし、② `--route` なし（`--dry-run` でも必須）、③ `--goal` と `--offset` の両方・どちらも無し、④ `--auto` が 0 以下または `max_steps` 超、⑤ `--origin-radius` が 0.05 m 超・0 以下、⑥ `--max-dq` などが硬い上限超（`DiffModeConfig` の検査と同じ）、⑦ `--auto` が `--dry-run` と同時。**試験**: `test_step_runner.py` で組み合わせの表を回す（失敗は行の名前を表示）。**静的な試験**: 道具が `validate_run_options` を、最初のクライアントの生成より前に呼ぶこと、`assume_desired_is_measured` の値が `validate_run_options` と `--dry-run` の分岐以外で使われないことを AST で確かめる。
+- **誤差の出どころ**: P5 は **`goal`（`base_link` の XYZ [m]。`--goal X Y Z`、または今の先端からの `--offset dx dy dz`）と `FK(q_meas)`**（`suggest_delta` の中）。カメラは P5 に入れない。
+
+### 7.14.3 安全（依頼 3）
+
+| 項目 | 内容 |
+|---|---|
+| **ユーザーの確認** | **既定は 1 ステップごとに Enter**（表示を見て、`Enter` で送る・`n` で終了）。**確認の待ちは 30 秒**（無入力なら送らずに終了。トピックの最初の待ち 5 秒とは別）。**開始の確認は常に 1 回求める**（`--yes` は作らない）。**Enter のあと、送る直前に `q_desired`・`q_meas` を読み直し、古さの検査と `verify_command` をやり直す**（7.14.2 の 4b）。**まとめて**: `--auto N`（N ≤ `max_steps`）で、**最初の確認（開始と、最初のステップ）のあとの N ステップを Enter なしで送る**。**`--auto` 中に `AT_LIMIT`（境界で縮めた）か `HOLD`（送らない）が出たら、そのステップは Enter の確認に戻す**（残りの `--auto` の回数は続く）。**1 ステップごとの確認で V3 が合格した後の段（V4 以降）だけで使う**（手順書の約束）。`--auto` でも `DiffMode` の検査・送る直前の再検査・止まる確認・排他・Ctrl-C は同じ。モックでは Claude が Enter を標準入力から渡す（`--yes` なし）。**実機の道具は Claude が実行しない** |
+| **タイムアウト（[推測]。V で調整）** | トピックの最初の待ち 5 秒（**[旧コード]** `send_joint_delta.py`）、**Enter の確認の待ち 30 秒**、入力の古さ 0.3 秒、ゴールの受理 5 秒、`moveit` の計画 5 秒（**[旧コード]** `allowed_planning_time` 5）、ゴールの結果 軌道の長さ + 3 秒、整定 8 秒、**1 回の実行の全体 120 秒（2.5）**。どれも**キャンセルせず、以後送らずに終了**する（状態を表示） |
+| **Ctrl-C のときの止め方** | **何も送らない・何もキャンセルしない**。`KeyboardInterrupt` で、**以後のステップを送らず**、最後の `q_cmd`・進行中のゴールの有無・`desired` を表示して終了（コード 130）。**進行中のゴールは、`q_cmd`（`max_dq` 以内の先）まで進んで保持される**（`open_loop_control: true`。**[推測]** クライアントを破棄しても JTC のゴールはキャンセルされない。**モックで確かめる**。`moveit` も同様）。**急いで止めたいとき**は、手順書の止め方 S1〜S6。**2 回目の Ctrl-C で保持のゴールを送る案は採らない**（シグナルの中で書き込む経路は増やさない）。確認の入力待ちの Ctrl-C も同じ扱い（`try/finally`） |
+| **JTC の目標の取り消し** | **しない**（キャンセルは測った位置で保持して垂れる）。**止める = 「以後送らない」= `q_cmd` を保持**（`DiffMode` の規則 7.12.2.1） |
+| **L1（ドライバの 1 周期の上限）との関係** | **[事実。inventory]** L1 は残してある: `max_joint_speed` 0.75 rad/s × `limit_window_s` 0.08 s = **0.06 rad/周期（39 tick）**。**[計算]** `direct`: `max_dq` 0.03 rad を 2 秒で動かすと 0.015 rad/s。JTC の周期 25 Hz で **1 周期 0.0006 rad = L1 の 1/100**。`moveit`（下の行）: 0.5 rad/s でも 1 周期 0.02 rad = L1 の 1/3。**L1 は効かない（保険）**。L1 が**削ったとき**（ドライバの WARN）は、`desired` と `q_meas` の差が `max_windup` を超えるので、`DiffMode` の検査・`NOT_SETTLED` で止まる |
+| **速度の検査（0.1 rad/s）は `moveit` でも効くか** | **`direct`: 効く。送る前に、`dq の最大 ÷ time_from_start` が 0.1 rad/s を超えるなら拒否**（`send_joint_delta.py` の `MAX_SPEED` と同じ **[旧ツール]**。`--move-seconds` で時間は変えられるが上限は固定）。**`moveit`: 同じ 0.1 rad/s では効かせない（効かせると、ほぼ必ず拒否される見込み）**。**[事実]** `joint_limits.yaml` の `max_velocity` は 5 関節とも 5.0 rad/s。**そこで `moveit` は、実行する前に、計画の軌道（`plan_only` の結果）を確かめる**: ① **最大の速さ ≤ 0.5 rad/s**（隣り合う点の `positions` の差 ÷ `time_from_start` の差、および `velocities` の、どちらの最大も）。② **最初の点を `q_desired`（JTC の `reference`。測った位置ではない）と比べ、5 関節とも 0.005 rad 以内**。超えたら**実行しない**（MoveIt の計画が測った位置から始まると、実行した瞬間に JTC の目標が `q_desired` から測った位置へ飛び、重力に支えられていた分が抜けて垂れる恐れがある **[推測。2.2 の懸念]**。手前止まりの 17〜27 tick（0.026〜0.041 rad）が溜まっていれば、この検査に落ちる）。**許容 0.005 rad の出どころ: [実測。inventory] 閉じる向きの不感帯が約 3 tick（約 0.0046 rad）で、これ以下の飛びは摩擦の中に収まる見込み [推測]。決めてもらう項目（7.14.7 の 19）**。**加えて 最初の点が `q_meas` と 0.01 rad 以内**（**[事実]** MoveIt の `allowed_start_tolerance`。W6 の手順。超えると MoveIt が実行を拒否する）。③ **最後の点が `q_cmd` と `moveit-tolerance` 以内**、④ 点の値が有限で、5 関節の名前が `q_cmd` と同じ並び、⑤ 軌道の長さが 0 でない。**1 つでも外れたら実行しない**（何も動かない。`DiffMode` の状態は進んでいるので、実行を終える）。**実行するのは、検査した軌道そのもの**（`ExecuteTrajectory`。計画をやり直さない）。 |
+| **`open_loop_control: true` で手前止まりでも `SUCCEEDED` が返ること** | **[事実。ユーザーの指摘と `controllers.yaml`]** JTC は自分の目標（`desired`）を基準に判定するので、腕が止まっていても `SUCCEEDED` になる。**道具は `SUCCEEDED` を到達の根拠にしない**: ① ゴールの status は「受理され、終わった」ことだけに使う（`ABORTED`・`CANCELED`・`REJECTED` は停止）、② **到達の判定は、止まってから測った `q_meas`**（`Outcome` の `residual`・`track_gap`）、③ **各ステップで先端の動きと δ の比を記録**（0 に近い = 摩擦で止まった。止めない。積み上げは `DiffMode` のワインドアップと `STUCK` が守る）、④ `moveit` は `ExecuteTrajectory` の `error_code == 1`（`SUCCESS`）も確かめる。**試験: `SUCCEEDED` で `q_meas` が動かない偽の腕で、`Outcome` が `track_gap` を出し、`CONVERGED` と言わないこと** |
+| **MoveIt と JTC 直接の排他** | 7.14.1 の 3 重（**送る直前に毎回**）。**人の約束**（手順書に書く）: 実行中は RViz から実行しない・別の端末から JTC へ送らない |
+| **書き込みの経路。`/move_action` のゴールが必ず `plan_only = True` であること** | **`send_goal_async` の呼び出しは、道具のソースで 3 か所（型で区別）**: ① `MoveGroup`（**計画するだけ。動かさない。1 か所**）、② `FollowJointTrajectory`（`direct`。**動かす**）、③ `ExecuteTrajectory`（`moveit`。**動かす**）。**動かす経路は ② と ③ の 2 か所だけ**。**`plan_only = True` の保証は 2 重**: (a) **純粋関数 `build_plan_goal_spec(q_cmd, joint_names, tolerance)`**（`step_runner.py`）が `/move_action` のゴールを組み立てる。**戻り値の `plan_only` は常に真で、引数に無く、変えられない**（Scaling 0.1 固定・`is_diff = True`・5 関節の `JointConstraint` もここで決まる）。**試験（`test_step_runner.py`）**: 戻り値の `plan_only` が真、関数のシグネチャに `plan_only` が無い、Scaling が 0.1、関節の名前・許容が引数どおり、許容が 0 以下・NaN・関節の数が違うなら `ValueError`。(b) **静的な試験（`test_diff_mode_run_static.py`）**: 道具のソースで、`MoveGroup` の型のクライアントの `send_goal_async` に渡すゴールが `build_plan_goal_spec` の戻り値から作られていること、`planning_options.plan_only` への代入が **`spec.plan_only` の 1 か所だけ**（リテラルの `False`・別の式・変数の再代入が無い）であること、`MoveGroup` のクライアントの `send_goal_async` が 1 か所であること。**3 か所の内訳（計画 1・動かす 2）も同じ静的な試験で確かめる**（クライアントを作る行 `ActionClient(node, <型>, …)` の型と、`send_goal_async` を呼ぶ変数の対応を AST で追う）。そのほか `cancel_goal`・`create_publisher`・`pkill`・`subprocess` が無いこと |
+| **`step` の後に送れなかったとき** | 状態が進んだままなので**その実行を終える**（巻き戻さない。7.14.2 の 5）。**試験**: 送る処理が失敗する偽の `io` で、2 回目の `step` を呼ばないこと |
+
+  - **0.5 rad/s の出どころ（事実と理屈を分ける。ユーザーが承認）**: **[計算。理屈の上の上限]** `joint_limits.yaml` の `max_velocity` 5.0 rad/s × Scaling 0.1 = 0.5 rad/s。MoveIt の時間付けがこの上限まで使うかは **[推測]**（モックの計画の軌道で測る。7.14.6）。**[事実の限界]** **W1・W6（Scaling 0.1。実機で合格）の記録には、軌道の実際の速さの数値が無い**（記録は「滑らかに動いた・終点で止まった・`step limit` の WARN が arm で出なかった（L1 が削らなかった）・`FAULT` なし」。`servo_real_check.md` の W1・W6、inventory で確認）。したがって **「W1・W6 の実績」は『この上限以下の理屈の軌道を実行して L1 が削らなかった』ことの裏づけであって、0.5 rad/s そのものを実測した値ではない**（前回の「W1・W6 の実績」という書き方を訂正）。**[事実。inventory 2218]** **L1 は 0.75 rad/s（0.75 rad/s × 0.08 s = 0.06 rad/周期）で、0.5 rad/s はそれより低い**（1 周期の上限に対して 2/3。JTC の周期 25 Hz の 1 周期 0.02 rad は L1 の 1/3）。
+  - **各ステップで、計画の軌道の実際の最大の速さを CSV に記録する**（7.14.2 の 8。実行しなかったステップも）。V5・V6 のあとの整理（V7）で、0.5 rad/s の見直しの材料にする。**0.5 rad/s は承認済み（7.14.7 の 13）**
+
+### 7.14.4 P5 で決めること（依頼 4）
+
+| 項目 | 推奨 | 理由・値の出どころ |
+|---|---|---|
+| **距離の起点の固定（アンカー）の要否**（7.12.2.3 の記録） | **`DiffMode` は変えない。道具の中で扱う**。**自動の再開始（`LIMITED_DONE` のあとの `start`）は作らない**（1 回の実行 = 1 回の `start`。`LIMITED_DONE` で終了）。**`--origin X Y Z` は任意。省略したときは、その実行の最初の `start` の位置（`FK(q_desired)`。`DiffMode` の `target0` と同じ座標）を起点とする**。**`--origin-radius` の既定と上限は 0.05 m**（`DiffMode` の距離の硬い上限 `HARD_MAX_DISTANCE`）。`--origin` を指定したときだけ、開始のとき `FK(q_desired)` が起点から `origin-radius` を超えていたら開始しない（純粋関数 `check_origin`）。**指定した座標は指令側（`FK(q_desired)`）と比べる**（実測側ではない）。**手順書の V4 では `--origin` を省略する**（指令と実測のどちらの座標か曖昧になるため） | **[事実]** 範囲と床は絶対値の検査で `start` をやり直しても残る（7.12.2.3）。**[事実]** 0.05 m は `HARD_MAX_DISTANCE`（0.06 m は根拠のない値だったので取り下げた）。**[注意]** `--origin` を省略すると、**別々の実行をくり返して遠くへ行くことは道具では防げない**（各実行が自分の起点を持つ）。防ぎは手順書の約束（各段は T の付近から始める。V4 は各方向を T から）と、床・範囲の絶対検査。`DiffMode` に `anchor` を足す案は、P4 のコードと試験の変更になるので採らない（足すなら P6） |
+| **最初の `max_dq`** | **0.03 rad**（`--max-dq`。上限は硬い上限の 0.05）。V4 の記録で 0.05 に上げるか決める | **[計算 7.12.7 の 1]** T で 3 mm の補正が 0.022〜0.036 rad。**[計算 7.12.2.2]** 0.03 のとき 1 ステップは 0.027 rad 以内（0.9 倍）で、T の +x 8 mm は 4 ステップ。**[実測]** 手前止まり 17〜27 tick = 0.026〜0.041 rad なので、1 ステップで摩擦を破れない可能性があり、積み上げ（ワインドアップ 0.06）で動く（**[推測]**。V3・V4 の `track_gap` で確かめる） |
+| **`max_steps`** | **10 のまま**（硬い上限 12） | **[旧コード]** 10。V4 の記録で決める |
+| **abs(D) 0.99 の見直しの方法** | **P5 では 0.99 のまま**。各ステップの `abs_d_of_q(q_cmd)` を CSV に記録し、`SINGULAR` が `limits` に出た回数・abs(D) の最大をまとめる。**見直す条件（案）**: abs(D) が 0.9 を超えた、または `SINGULAR` が 1 回でも出たとき、その姿勢の `max_dq`・δ・`HOLD` の割合を見て 0.98 に戻すか決める（`--max-abs-d` で 0.98 を渡して試せる。上限 0.99） | **[計算 7.12.4]** T の abs(D) は 0.239。T の付近では効かない見込み。実測の根拠がまだ無い |
+| **`desired` の一致の許容** | `direct` 1e-4 rad、`moveit` は `moveit-tolerance` の 2 倍（既定 0.002 rad） | **[推測]**。モックで最終点のずれを測って決める。V3・V5 の基準と同じ値 |
+| **`moveit` の `JointConstraint` の許容** | **0.001 rad**（`--moveit-tolerance`）。**Scaling は 0.1 固定で引数なし** | **[旧コード]** 許容 0.01 rad。**[計算]** 0.01 rad は先端で約 2 mm 相当になるため小さくする。**[推測]** OMPL がこの許容で解けるか（モックで確認）。Scaling 0.1 は既に決めた方針（W1・W6 の実績） |
+
+### 7.14.5 実機の確認の順（依頼 5。7.3 の V0〜V5 の見直し）
+
+> **【変更の注記 2026-11-15】** 実機で行うのは **V1、V2a〜V2c、V3、V3b、V8** だけ（**V3b を追加**: +x 8 mm を `--max-steps 4`・1 ステップごとに Enter、続けて −x 8 mm。2 歩目以降の積み上げを確かめる。7.15 の 14）。**V3 の offset は +x 5 mm、続けて −x 5 mm**（下の表の 2 mm は不感帯 3 mm の内側で何も送られないため。7.15 の 8）。**V3 は `--max-steps 1` なので、`Outcome` は `LIMITED`（`MAX_STEPS`）か、残りの誤差が 3 mm 以内なら `CONVERGED` で終わる（どちらも正常。7.15 の 8 の訂正）**。V4〜V6 は取りやめ、V7 は V3・V3b の記録の整理だけ。表の V4〜V6 の行は、計画の記録として残す。
+
+**見直した点**: ① **最初は読み取り専用**（V1。`tools/ik_model_check.py` を実機に使う。**腕は手で支えず、置いたままの出発点で行う**）。② **`read_only:=false` の起動はトルク ON で書き込みの起動なので、V2 を 3 つに分けた**（V2a 起動のみ・V2b T へ移動・V2c T で動かさない確認）。**V3（最初の指令の送信）の前に、ユーザーの「進む」**。③ 7.3 の「小さな絶対目標を `send_joint_delta.py` で送る」は、**P5 の道具の 1 ステップ（V3）に置き換える**。④ 7.3 の V5（整理）は V7。**最後に出発点へ戻す段（V8）を足した**。**手順書は `docs/diff_mode_real_check.md`（承認後に書く）。起動・停止・止め方・コマンド A は `servo_real_check.md` と同じ**。出発点・T の座標は **`start (W1)` `[-0.0951, -1.4952, 1.6901, 0.4219, -0.0453]`、`T (W1)` `[0.0031, -0.3813, 0.5501, 1.4454, -0.0069]`**（`test_fk_chain.py`。**[実測]** 2026-11-13）。
+
+| 段 | 内容 | 起動・書き込み | 合格の基準 |
+|---|---|---|---|
+| V0 | 共通の約束（止め方 S1〜S6、12 V を切る条件、床 先端 z ≥ 0.045 m、後始末）。`ros2 bag record /joint_states /arm_controller/controller_state` と道具の CSV のパス | — | 約束の確認 |
+| V1 | **読み取り専用・置いたままの出発点**: `bringup.launch.py mock:=false read_only:=true`（トルク OFF。腕は出発点（折りたたみ）に置いたまま。支えない）。`python3 tools/ik_model_check.py`（既定: 今の姿勢・±10 mm の 6 方向・roll の掃引）。続けて `python3 tools/diff_mode_run.py --route direct --dry-run --assume-desired-is-measured --offset 0.002 0 0` | **書き込みなし** | **(a) 解析 FK と MoveIt の FK の差（今の姿勢）≤ 0.1 mm**（モック 0.0008 mm・fixture 最大 0.0044 mm。0.1 mm は 7.2 の「FK の許容」）、roll の掃引の差が連続。**FK の一致は、どの姿勢でも確かめられる**。(b) IK の往復の行は、成功したものは差 ≤ 0.5 mm（ツールの既定）。**失敗した行は理由が表に出ていること**（出発点は elbow が上限を 0.0001 rad 超え、先端 z 0.033 m が床の下なので、IK の範囲外・床の理由で失敗する行がありうる **[推測]**。失敗は不合格にしない）。(c) **`--dry-run` の `start` が拒否される**（出発点は範囲外・床の下。7.13 の 5 の 3 つの理由 `JOINT_LIMIT`・`FLOOR`・`FLOOR_MEASURED` が出る **[推測]**）。**拒否されることが合格**（入口の検査が実機の値でも働く確認）。どれも何も送らない |
+| V2a | **書き込みの起動（トルク ON）。出発点のまま、何も送らない**: `read_only:=false torque_limit:=500` で起動（**ここからトルク ON・書き込みモード**。腕は折りたたみ姿勢で、落ちる向きの下に物が無いこと）。`ros2 control list_controllers`（`arm_controller` active）、コマンド A。`--dry-run`（実際の `controller_state` の `reference` を使う。`--assume-desired-is-measured` は付けない） | トルク ON。**指令は送らない** | `controller_state` が来る（古さ 0.3 秒以内）、`reference` と `q_meas` の差が 5 関節とも 0.06 rad 以内、コマンド A が `STOPPED`、`--dry-run` の `start` が**出発点の理由で拒否される**（V1 と同じ）、**ドライバの WARN なし**、bag が取れている |
+| V2b | **T へ移動（W1 の手順。ユーザーが実行）**: `servo_real_check.md` の W1（MoveIt OMPL Scaling 0.1 で出発点から T へ。出発点の実測を控える） | トルク ON。**指令は W1 の手順だけ**（P5 の道具は使わない） | W1 の合格の基準どおり（T に着いた。止まった。WARN なし） |
+| V2c | **T で動かさない確認**: コマンド A、`ik_model_check.py`、`--dry-run`（実際の `reference`）、FK の先端が T の付近（**[実測]** `T (W1)` の先端 (0.172, 0.000, 0.055) m） | トルク ON。**指令は送らない** | コマンド A が `STOPPED`、`reference` と `q_meas` の差が 0.06 rad 以内、`start` が通る、先端 z ≥ 0.045 m、FK の差 ≤ 0.1 mm、WARN なし、bag が取れている。**ユーザーが「V3 に進む」とチャットで答える（これが最初の送信の許可）** |
+| V3 | **JTC 直接・1 ステップ**: `--route direct --max-dq 0.03 --max-steps 1`、**1 ステップごとの確認**、`--offset 0.002 0 0`（+x 2 mm）。続けて −x 2 mm | 書き込みあり（**ここが最初の送信**） | 道具の表示どおりの `q_cmd` が送られた、ゴール `SUCCEEDED`、**止まったあとの `q_desired` が `q_cmd` と 1e-4 rad 以内**、`q_meas` が `q_cmd` へ向かった（先端の動き ÷ δ を記録。0 でも失敗ではない: 摩擦で止まる **[推測]**）、**送る前後 1 秒の `desired − measured` に垂れの兆候なし**（elbow が閉じる向きに数 tick 動かない）、先端 z ≥ 0.045 m、異音なし |
+| V4 | **JTC 直接・複数ステップ**: 同じ設定で `--max-steps 10`、**`--origin` は省略（自動。実行の最初の `start` の位置）**、**まず 1 ステップごとの確認で** +x 8 mm、−x 8 mm、+y 5 mm、−y 5 mm、−z 5 mm（床の規則: 累計 10 mm 以内）、+z 5 mm。**各方向は T から始める**（実行のあとに T へ戻す。戻す操作は次の実行の `DiffMode` を使わず、V2b と同じ手順か、`--offset` で逆向きの実行）。**問題なければ `--auto 4`**。最後に `--max-dq 0.05` を 1 回 | 書き込みあり | **各方向で `Outcome.kind == CONVERGED`（`residual_norm` ≤ 3 mm。FK(q_meas) でのモデル上の先端 ±3 mm）**、`REFUSED` なし、`steps` ≤ 10、`limit_gap` ≤ 0.5 mm（境界に当たっていない。当たったときは `limit_reason` を記録して、目標の側の問題とする）、`track_gap` が終わりで 3 mm 以内、各ステップの `q_cmd − q_meas` ≤ 0.06 rad、反転 0〜1 回、`HOLD`・`SPIN` なし、**ドライバの WARN なし**。`--auto` 中の `AT_LIMIT`・`HOLD` で Enter に戻ること（出たとき） |
+| V5 | **MoveIt 経由**: 同じ目標・同じ順で `--route moveit`（Scaling は 0.1 固定。RViz から実行しない）。1 ステップごとの確認から | 書き込みあり | V4 と同じ基準に加えて、**`ExecuteTrajectory` の `error_code == 1`**、**計画の軌道の検査に通った（最大の速さ ≤ 0.5 rad/s、最初の点が `q_desired` と 0.005 rad 以内・`q_meas` と 0.01 rad 以内、最後の点 ≤ moveit-tolerance）**、**止まったあとの `q_desired` が `q_cmd` と `moveit-tolerance` の 2 倍（既定 0.002 rad）以内**、**軌道の最初の区間で `desired` が測った位置へ戻らないか・垂れないか**（送る前後 1 秒の `desired − measured` と elbow の tick。2.2 の **[推測]**）。**最初の点の検査で実行されなかったステップは、不合格ではなく結果として記録する**（手前止まりが 0.005 rad を超えると MoveIt 経由は動かせない、という事実。`direct` との比較の材料。V7） |
+| V6 | **交互のくり返し**: 同じ目標（例: +x 8 mm）を、`direct`・`moveit` の順に各 3 回（1 回ごとにコマンド A で止まっていることを確認） | 書き込みあり | 垂れの量（tick）、最終の `residual_norm`・`track_gap`、`steps`、成功・失敗（7.3 の V4） |
+| V7 | **整理（Claude が bag と CSV から。実機を使わない）**: 既定の送り先の材料（垂れが小さければ `moveit` を既定にできる。大きければ `direct`）、`max_dq` 0.05・`max_steps`・abs(D)・moveit の速度の上限の見直しの材料 | なし | 表（7.3 の V5）。**既定は、ユーザーが決める** |
+| V8 | **出発点へ戻す（W6 の手順。ユーザーが実行）**: `servo_real_check.md` の W6（動きが止まっているのを確認 → 実測を読む → 戻し先は W1 で控えた出発点の実測 → OMPL Scaling 0.1 で戻す。**elbow_flex は +1.69009 を超える値には戻さない**。実行の開始位置と実測の差が 0.01 rad 以内）。戻したら S5（腕を折りたたみ姿勢で支えて Ctrl-C 1 回）、bag を止める | 書き込みあり（W6 の手順だけ。P5 の道具は使わない） | 出発点の実測との差が小さい（W6 の基準）、停止後の確認の 2 行（`torque OFF and Lock=1 confirmed`・`deactivated`）、`ps` と `ros2 node list --no-daemon` が空 |
+
+- **任意の記録（V1〜V8 の各段）**: **TCP（指先の間）の床からの高さを定規で測って記録する欄**（mm。**任意。合否には使わない**）。同じ時点の道具の `FK(q_meas).z`（`gripper_frame_link` の z。**[事実 2.5]** 指先の下端はフレームの z より約 6.5 mm 下）と並べて書く（外部の測定の最初の手がかり。TCP と把持の中心のずれはユーザーが別に対処している）。V1 は出発点、V2a・V2c・V3〜V6・V8 は動きの前後で 1 回ずつ。
+- **「先端 ±3 mm」の意味**: P5 の合格は **`FK(q_meas)`（更新した定数のモデルの先端）で ±3 mm**。**実際の先端と合っているか**は、モデルが URDF（校正の座標）に一致していることに依存する（P1〜P3 で、MoveIt と解析 FK は 0.0044 mm 以内で一致。校正のずれは別の話）。V1 も、実機の関節角を 2 つの FK に通すモデルどうしの比較。
+- **`Outcome` の見方**: `residual = limit_gap + track_gap`（試験で確認済み）。**`limit_gap` が大きい** = 境界（床・範囲・距離・abs(D)）に当たった（`limit_reason` を見る。目標を変える）。**`track_gap` が大きい** = 摩擦・手前止まり（ステップを重ねる・`max_dq`・`gain` を見る。ワインドアップ 0.06 に近いなら `STUCK` に近い）。**`CONVERGED` でも `limit_reason` が `None` でないか**を見る。
+- **中止の基準**（どの段でも）: `REFUSED`（V1・V2a の `start` の拒否は期待どおりで除く）・タイムアウト・ドライバの WARN・異音・先端 z < 0.045 m・`desired` の不一致・`SPIN` が出たら、そこで止めて報告（再試行しない）。
+
+### 7.14.6 作成・変更するファイル、依存、試験の件数（依頼 6）
+
+| ファイル | 内容 |
+|---|---|
+| `src/so_arm101_ik/so_arm101_ik/step_runner.py`（新規） | 7.14.1 の純粋な補助（`validate_run_options`・`build_plan_goal_spec`・計画の軌道の検査を含む）と `StepLoop` |
+| `src/so_arm101_ik/test/test_step_runner.py`（新規） | **純粋な補助の試験**: 止まっている判定、名前から並びへの変換、古さ、軌道の点、速度の検査、計画の軌道の検査（速度・最初の点・最後の点）、**`build_plan_goal_spec`（`plan_only` が常に真）**、経路ごとの `desired` の許容、起点の球、結果の分類、CSV の行、**`validate_run_options` の組み合わせの表** |
+| `src/so_arm101_ik/test/test_step_loop.py`（新規） | **`StepLoop` の試験**（偽の入出力・偽の腕）。`test_step_runner.py` から分けた（1 ファイルが大きくなりすぎるため。件数は変わらない） |
+| `src/so_arm101_ik/test/test_diff_mode_run_static.py`（新規） | **道具のソース `tools/diff_mode_run.py` の静的な試験**（AST。ROS を import しない。既存の `test_ik_model_check_static.py` と同じ形で、`Path(__file__).resolve().parents[3] / 'tools'` から読む）。**`send_goal_async` が 3 か所（計画するだけ 1・動かす 2。型で区別）、`MoveGroup` のゴールが `build_plan_goal_spec` から作られ `plan_only` が `spec.plan_only` だけで決まること、`cancel_goal`・`create_publisher`・`pkill`・`subprocess` が無い**、`--route` 必須・既定なし、`--yes`・Scaling の引数が無い、クライアントを 1 つだけ作る、`validate_run_options` が最初のクライアントより前に呼ばれる、`assume_desired_is_measured` の使い方、`step_runner.py` が ROS を import しない |
+| `tools/diff_mode_run.py`（新規） | ROS の入出力と引数だけ |
+| `src/so_arm101_ik/CMakeLists.txt`（変更） | 試験名 3 つの追加だけ（`test_step_runner test_step_loop test_diff_mode_run_static`） |
+| `docs/diff_mode_real_check.md`（新規）・`docs/analytic_diff_plan.md`・`docs/inventory.md` | 手順書と結果の記録 |
+
+- **新しく作るファイルの全部（6 つ）**: ① パッケージ内の `.py`: `step_runner.py`（1）。② 試験ファイル: `test_step_runner.py`・`test_step_loop.py`・`test_diff_mode_run_static.py`（3）。③ `tools/diff_mode_run.py`（1）。④ 手順書 `docs/diff_mode_real_check.md`（1）。⑤ 実装のあとに書く記録: `docs/analytic_diff_plan.md`・`docs/inventory.md` は**既存のファイルの追記**（新規ではない）。**変更する既存のファイルは `CMakeLists.txt`（試験名 3 つ）だけ**（記録の docs を除く）。**パッケージ内の新しい `.py` は 4 つ（①と②）で、lint は 4 × 2 = +8、CTest の要約は試験ファイル 3 つで +3**。
+- **`tools/diff_mode_run.py` は lint（copyright・pep257・flake8）の対象外**
+- **変更しない**: `diff_mode.py`・`analytic_ik.py`・`model_check.py`・`urdf_kinematics.py`・`package.xml`・`controllers.yaml`・URDF・MoveIt の設定・既存の試験・`tools/` の既存のファイル。
+- **新しい依存: `package.xml` には無し**（`step_runner.py` は numpy と標準ライブラリだけ）。`tools/diff_mode_run.py` は `rclpy`・`sensor_msgs`・`control_msgs`・`trajectory_msgs`・`moveit_msgs` を import する（**[事実]** `send_joint_delta.py` と `ik_model_check.py` が既に使う。`ExecuteTrajectory` と `MoveGroup` は `moveit_msgs`）。`tools/` は `source install/setup.bash` が前提。
+- **試験の件数の見込み [推測。実装後に実数を記録]**（**前回の「+46・約 480」から、試験ファイルを 3 つに分け（`test_step_loop.py` を追加）、計画の軌道の最初の点の検査・`build_plan_goal_spec`・`plan_only` と `send_goal_async` の内訳の静的な試験を足して +56 に見直した**）
+
+| 区分 | 現在 | 見込み | 内訳 |
+|---|---|---|---|
+| pytest（`so_arm101_ik`） | 151 | **+56（48〜64）= 約 207** | **`test_step_runner.py` 約 25**: 止まっている判定・名前から並び・古さ・軌道の点・`direct` の速度の検査・経路ごとの `desired` の許容・起点の球（省略時・上限 0.05 m）・結果の分類・CSV の行で約 12、計画の軌道の検査（速度・**最初の点を `q_desired` と 0.005 rad・`q_meas` と 0.01 rad**・最後の点・名前・有限・長さ。境界の値を含む）約 6、**`build_plan_goal_spec`（`plan_only` が常に真・シグネチャに無い・Scaling 0.1・不正な入力）約 3**、`validate_run_options` の組み合わせの表 約 2、速度の記録の関数 約 2。**`test_step_loop.py` 約 22**: 偽の腕で収束・摩擦の積み上げ・`HOLD`・`LIMITED_DONE`・`REFUSED`、`desired` が取れない・古い、送る処理の失敗で 2 回目の `step` を呼ばない、確認の拒否・30 秒の無入力、Ctrl-C 相当、`SUCCEEDED` でも動かない腕で `CONVERGED` と言わない、毎回 3 つの確認・再読み込み・`verify_command`、確認を待つ間に腕が動かされたら送らない、他のアクションのアクティブなゴールで送らない（direct・moveit）、`--auto` の `AT_LIMIT`・`HOLD` は Enter に戻る、計画の軌道が速すぎる・最初の点が `q_desired` から遠いときは実行しない（動かさず、実行を終える）、計画の軌道の最大の速さが CSV に記録される。**`test_diff_mode_run_static.py` 約 9**: `--route` 必須・既定なし、クライアントと送り先は 1 つだけ、`cancel_goal`・`create_publisher`・`pkill`・`subprocess` が無い、**`send_goal_async` が 3 か所（計画 1・動かす 2）**、**`MoveGroup` のゴールが `build_plan_goal_spec` から作られ `plan_only` は `spec.plan_only` だけ**、`--yes`・Scaling の引数が無い、`validate_run_options` が最初のクライアントより前、`assume_desired_is_measured` の使い方、`step_runner.py` が ROS を import しない |
+| lint（`so_arm101_ik`） | 33 | **+8 = 41** | 新しい `.py` 4 つ（`step_runner.py`・`test_step_runner.py`・`test_step_loop.py`・`test_diff_mode_run_static.py`）× （copyright、pep257）。flake8・xmllint・lint_cmake は 1 件のまま。**`tools/diff_mode_run.py` は含まれない** |
+| CTest の要約（`so_arm101_ik`） | 15 | **+3 = 18** | `ament_add_pytest_test` が 3 つ増える（試験ファイル 3 つ。pytest の件数とは別の要約） |
+| `so_arm101_ik` の合計 | 199 | **約 266（258〜274）** | 199 + 56（pytest）+ 8（lint）+ 3（CTest）= 266 |
+| `colcon test` 全体 | 426 | **約 493（485〜501）** | 426 + 67。bringup 47、calibration 73、description 2、hardware 105、moveit_config 0 は変わらない |
+
+- **実機なし・ROS なしで試験できる部分（`colcon test`）**: `step_runner.py` の全部（純粋な補助、引数の検査、`StepLoop`。偽の入出力と、摩擦・手前止まり・`SUCCEEDED` なのに動かない・古い入力・送る処理の失敗・腕が動かされる・計画の軌道が速すぎるなどを再現する偽の腕）、道具のソースの静的な試験。**`DiffMode` の検査が実際に守りになっていること**は、偽の腕でランダムな目標を回して、送った `q_cmd` が常に範囲・床の内側であることを `urdf_kinematics` の鎖で独立に確かめる（P4 と同じ形）。
+- **モック（`mock:=true use_rviz:=false`、ROS_DOMAIN_ID=87、RMW_IMPLEMENTATION=rmw_cyclonedds_cpp）が要る部分（`colcon test` ではなく、実装の後、実機を使っていないとユーザーが答えてから、許可を得て Claude が実行し、結果を記録）**:
+  1. `controller_state` の `reference` と `desired` が一致し、`joint_names` の並び・50 Hz で来ること。
+  2. **3 つの `_action/status` のトピック名と、あとから購読しても最後の状態が来るか**（`/arm_controller/follow_joint_trajectory/_action/status`、`/move_action/_action/status`、`/execute_trajectory/_action/status`）。
+  3. `direct`: ゴールの受理・結果・**止まったあとの `desired` と `q_cmd` の一致（1e-4 rad）**。`moveit`: **`plan_only` の結果の軌道**（**最大の速さ**: `positions` の差分と `velocities` の両方。0.5 rad/s に対して実際にいくつか。`max_velocity` 5.0 の Scaling 0.1 の計画が 0.1 rad/s を超えるか＝0.1 rad/s を `moveit` に使えない理由の確認）、**最初の点がどちらから始まるか（下の 3a）**、最後の点のずれ、`ExecuteTrajectory` の `error_code`、**止まったあとの `desired` と `q_cmd` の差（許容 0.002 rad）**、**OMPL が許容 0.001 rad で解けるか**。
+  - **3a. 計画の軌道の最初の点が、`q_desired`（JTC の `reference`）と測った位置（`/joint_states`）のどちらから始まるか（ユーザーの項目）**: モックでは指令がほぼそのまま測定になり、止まっていると 2 つが一致して区別できない。**方法（一回限りの確認用の手順。`DiffMode` の道具とは別。モックだけ）**: JTC に速い目標（例: 0.2 rad/s 程度。道具の上限 0.1 rad/s の外なので、道具は使わず、確認用の送信で）を送り、**動いている途中**で `plan_only` の計画を呼ぶ。そのとき `reference` が測定より先行している（モックの 1 周期の遅れ分。0.2 rad/s × 0.04 s = 約 0.008 rad）ので、**最初の点が `/joint_states` と `reference` のどちらに近いか**で判定する。**[推測]** `/joint_states` 側（MoveIt の `CurrentStateMonitor`）。実機では、V5 の CSV の「最初の点と `q_desired` の差・`q_meas` の差」で確かめる。
+  4. **Ctrl-C（`kill -INT` を、控えた PID に）**: 進行中のゴールがキャンセルされず `q_cmd` まで進むか（`direct`・`moveit`）。
+  5. 排他: もう一方のアクションにアクティブなゴールがあるとき（別の端末から軌道を送って）、道具が送らずに止まること（direct・moveit それぞれ）。`desired` の不一致で止まること。
+  6. 整定・結果の待ちの実際の秒数（モックは摩擦も遅れもほぼ無いので、**秒数の目安にならない**）。
+  7. `--dry-run`・`--assume-desired-is-measured` の拒否（`--dry-run` なし）・開始の拒否の表示・CSV の形式・終了コード。
+  - **モックで分からないこと（実機の V3〜V6 で）**: 摩擦・手前止まり、重力による垂れ、MoveIt 経由の最初の区間の戻り、L1 の効き、整定の時間、サーボの量子化。**モックは、指令がそのまま測定になる**ので、`track_gap` の議論はできない。
+- **ビルド・進め方**: ビルドは `colcon build --symlink-install --packages-select so_arm101_ik` だけ（許可は実装の前に別に求める）。numpy 1.21.5（`python3 -s`）と 1.26.4 の両方で pytest を確認。コミットの前に `colcon test`（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source）、失敗は先に報告。コミットは 2 つ（(a) コード・試験・CMake、(b) 記録・手順書）。**モックの実行（上の 1〜7）は (a) のあと、ユーザーの許可を得てから**。
+
+### 7.14.7 決めてほしいこと（P5。項目・推奨・理由）
+
+**ユーザーの決定（2026-11-15）: 1・2・4・6・7・9・10・11・15・17 は推奨どおり承認。3・5・8・12・13・16・18 は修正して反映（7.14.9 の 1 回目）。2 回目のレビュー: 13 の 0.5 rad/s（検査あり）を承認。計画の軌道の最初の点の検査（19）を追加し、3 回目のレビューで 0.005 rad を承認。P5 の実装を承認（7.14.9 の 3 回目）。**
+
+| # | 項目 | 推奨・決定 | 理由 |
+|---|---|---|---|
+| 1 | 置き場所と名前 | **承認。** `step_runner.py`（パッケージ）と `tools/diff_mode_run.py`（ROS の入出力）。代案 `diff_step.py` | P3 と同じ流儀。ノード化（P6）は `step_runner` を使い回す |
+| 2 | 送り先の既定 | **承認。** 既定なし。`--route` 必須 | 垂れの違いは **[推測]**。V5・V6 で測る |
+| 3 | 排他の仕組み | **修正。** 3 重の確認（クライアントは 1 つだけ作る、他のアクションのアクティブなゴール、`desired` と `q_cmd` の一致）を、**開始時だけでなく送る直前に毎回**行う。`direct` は `/move_action` と `/execute_trajectory` を、`moveit` は `/arm_controller/follow_joint_trajectory` を「もう一方」として見る（自分の送り先も前のゴールの終了を確かめる）。一致の許容は `direct` 1e-4 rad、`moveit` は `moveit-tolerance` の 2 倍（V3・V5 と同じ） | 外部の割り込み（RViz・別の端末）は、開始のあとにも起きる |
+| 4 | `controller_state` の取り方 | **承認。** `reference.positions`（`desired` は非推奨。元の記述は残して注記）。来ない・古い（0.3 秒超）なら開始しない | **[事実]** Humble の型の定義 |
+| 5 | 確認の仕方 | **修正。** 既定は 1 ステップごとに Enter。**確認の待ちは 30 秒**。Enter の後、送る直前に `q_desired`・`q_meas` を読み直し、古さの検査と `verify_command` をやり直す。開始の確認は常に求める。`--yes` なし。`--auto N` は V3 の合格の後の段で使い、**`--auto` 中に `AT_LIMIT`・`HOLD` が出たらそのステップは Enter に戻す** | 確認を待つ間に腕・入力が変わりうる。想定外が起きたら 1 ステップで止める |
+| 6 | Ctrl-C | **承認。** 何も送らず、何もキャンセルしない。以後送らず終了（130）。急ぎは S1〜S6 | キャンセルは測った位置で保持して垂れる |
+| 7 | `SUCCEEDED` の扱い | **承認。** 到達の根拠にしない。止まってから測った `q_meas` と `Outcome`。先端の動き ÷ δ を記録 | `open_loop_control: true` |
+| 8 | 起点の固定（アンカー） | **修正。** `DiffMode` は変えない。自動の再開始なし。**`--origin` を省略したときは、その実行の最初の `start` の位置を起点**。**`--origin-radius` の既定と上限は 0.05 m**。V4 は `--origin` を省略 | 0.06 m は根拠のない値だった。0.05 m は距離の硬い上限。省略で、指令・実測の座標の曖昧さがなくなる。別々の実行の積み重ねは道具では防げない（手順書の約束） |
+| 9 | 最初の `max_dq` | **承認。** 0.03 rad。V4 の記録で 0.05 に上げるか決める | T で 3 mm の補正が 0.022〜0.036 rad **[計算]** |
+| 10 | `max_steps` | **承認。** 10 のまま（硬い上限 12） | **[旧コード]** 10 |
+| 11 | abs(D) の 0.99 | **承認。** 0.99。abs(D)・`SINGULAR` を記録し、0.9 超か `SINGULAR` が出たら 0.98 を試す | T の abs(D) は 0.239 **[計算]** |
+| 12 | `moveit` の許容・Scaling | **修正。** **Scaling は 0.1 に固定し、引数を作らない**。`--moveit-tolerance` は既定 0.001 rad のまま | Scaling 0.1 は既に決めた方針（W1・W6 の実績）。許容 0.01 rad は先端で約 2 mm **[計算]** |
+| 13 | 速度の上限 | **0.5 rad/s（検査あり）を承認。** `direct` は 0.1 rad/s（超えたら拒否）。`moveit` は 0.1 rad/s を効かせず、`plan_only` の計画の軌道で実行の前に確かめる（最大の速さ ≤ 0.5 rad/s、最初の点が `q_desired` と 0.005 rad 以内・`q_meas` と 0.01 rad 以内、最後の点が `q_cmd` と `moveit-tolerance` 以内）。**0.5 rad/s は、`max_velocity` 5.0 × Scaling 0.1 の理屈の上の上限 [計算]**。**W1・W6 には軌道の速さの記録が無い**（L1 が削らなかったことだけ **[事実]**）。**L1（0.75 rad/s）より低い [事実]**。**各ステップの計画の軌道の実際の最大の速さを CSV に記録** | 実行する軌道そのものを検査できる。0.1 rad/s を `moveit` に使うとほぼ必ず拒否される **[計算]**。V7 で、記録した実際の速さから上限を見直せる |
+| 14 | タイムアウト | トピックの最初の待ち 5 秒、**Enter の確認の待ち 30 秒**、古さ 0.3 秒、受理 5 秒、計画 5 秒、結果 軌道の長さ + 3 秒、整定 8 秒、全体 120 秒。すべて「キャンセルせず、以後送らず終了」 | **[推測]**（旧ツールの 5 秒・旧コードの計画 5 秒・2.5 の 120 秒を除く） |
+| 15 | `/check_state_validity` | **承認。** P5 に入れない | 自己衝突の余裕は T の付近で約 97 mm **[実測。inventory]**。P6 で足す |
+| 16 | 実機の確認の順 | **修正。** V0〜V8（7.14.5）。**V1 は腕を支えず置いたままの出発点（読み取り専用）**。**V2 を V2a（トルク ON の起動。出発点のまま何も送らない）・V2b（W1 の手順で T へ）・V2c（T で動かさない確認）に分け、ユーザーの「進む」の後に V3**。**最後に V8（W6 の手順で出発点へ戻す）**。**`--assume-desired-is-measured` は `--dry-run` のときしか受け付けない**（`validate_run_options` と、試験の組み合わせの表・静的な試験で保証） | `read_only:=false` はトルク ON の書き込みの起動。FK の一致はどの姿勢でも確かめられ、出発点の `start` が拒否されることも確認になる |
+| 17 | 合格の基準 | **承認。** `FK(q_meas)` の先端 ±3 mm（`residual_norm`）、`limit_gap` ≤ 0.5 mm、`track_gap` が終わりで ≤ 3 mm、`REFUSED`・WARN なし。外部測定は P5 の基準に入れない（定規の高さは任意の記録） | 外部測定の手段が未整備 |
+| 18 | 試験・ファイル・進め方 | **修正（2 回目）。** 新しく作るのは、コード・試験・道具・手順書の 6 つ（`step_runner.py`、試験 3（`test_step_runner.py`・`test_step_loop.py`・`test_diff_mode_run_static.py`）、`tools/diff_mode_run.py`、手順書）。`tools/diff_mode_run.py` は lint の対象外。件数は 7.14.6 の表（pytest +56、**lint +8、CTest の要約 +3**、`so_arm101_ik` 約 266、全体 約 493）。ビルドは `--packages-select so_arm101_ik` だけ。モックの実行は (a) のあと、許可を得てから | 7.12.6 と同じ進め方。試験ファイルが 3 つなので lint 4 × 2 |
+| 19 | `moveit` の計画の軌道の最初の点の検査 | **0.005 rad で承認（2026-11-15）。** 最初の点を `q_desired`（`reference`。測った位置ではない）と比べ、5 関節とも 0.005 rad 以内でなければ実行しない**（許容は決めてもらう）。加えて `q_meas` と 0.01 rad 以内（MoveIt の `allowed_start_tolerance`）。どちらから始まるかはモックで確かめる（3a）。**結果: 手前止まりが 0.005 rad を超えていると、`moveit` 経路は動かせない（実行しないことが結果として記録される）** | **[推測 2.2]** 計画は測った位置から始まり、実行の瞬間に JTC の目標が飛んで垂れる恐れ（ユーザーの提案）。許容 0.005 rad の出どころは、閉じる向きの不感帯約 3 tick（約 0.0046 rad）**[実測。inventory]** で、値そのものは **[推測]**。代案: 0.01 rad（`allowed_start_tolerance` と同じ。垂れの恐れが残る）、0.003 rad（より厳しい。ほぼ毎回拒否される見込み） |
+
+### 7.14.8 P6 以降の検討事項（記録。P5 には入れない）
+
+- **境界では pitch を少し緩めて位置を優先する案**: 今の `DiffMode` は `pitch_ref`・`roll_ref` を開始のときに固定し、先端の位置は固定した姿勢で解く。**T から +z に動くと、abs(D) より先に wrist_flex の関節の範囲に当たる**（**[計算 7.12.4]** 28.2 mm。margin 0.02 rad で 25.6 mm）。境界に当たったとき（`AT_LIMIT` の `JOINT_RANGE`）に、**pitch を少し（例: 数度）ずらして位置の目標を満たす**案。位置の精度（±3 mm）を優先し、接近軸の向きの精度を緩める（ユーザーの方針「拒否して動かなくなるより、精度を緩めて安定して動く」と同じ向き）。**要る検討**: ずらす量の上限と、床（先端が下を向く姿勢の指先の位置）・abs(D) への影響、`pitch_ref` を動かすか一時的か、`Outcome` に姿勢の残りの誤差を出す、`DiffMode` の変更と試験。**P5 の `AT_LIMIT` の記録（`limits` に `JOINT_RANGE` が出た割合）を、検討の材料にする**。
+- **ほかの P6 の項目（記録済み）**: VR の連続の指令での `max_steps`・`max_reversals` の扱い（7.12.2.3）、`/check_state_validity`（7.14.7 の 15）、`DiffMode` への `anchor`（7.14.7 の 8）、ノード化・ブリッジ（localhost）。
+
+### 7.14.9 レビューの反映の記録（2026-11-15）
+
+| # | 変えた点 | 場所 |
+|---|---|---|
+| 1 | 決定 3: 3 つの確認を、開始時だけでなく送る直前に毎回行うと明記。`desired` の許容を経路ごとに書いた（direct 1e-4、moveit は `moveit-tolerance` の 2 倍 = 既定 0.002。V3・V5 と同じ値）。もう一方として見るアクションを具体的に書いた（direct: `/move_action`・`/execute_trajectory`、moveit: `/arm_controller/follow_joint_trajectory`。自分の送り先も前のゴールの終了を確かめる） | 7.14.1、7.14.2 の「一致の検査」、7.14.7 の 3 |
+| 2 | 決定 5: 確認の待ちを 30 秒に。Enter の後に `q_desired`・`q_meas` を読み直し、古さの検査・`desired` の一致・排他・`verify_command` を送る直前にやり直す（流れの 4b）。`--auto` 中の `AT_LIMIT`・`HOLD` は Enter に戻す | 7.14.2 の表、7.14.3、7.14.7 の 5・14 |
+| 3 | 決定 8: `--origin` 省略時は、その実行の最初の `start` の位置。`--origin-radius` の既定・上限を 0.05 m に（0.06 m は取り下げ）。V4 は `--origin` を省略。指定した座標は指令側と比べる。省略時は別々の実行の積み重ねを道具では防げないことを明記 | 7.14.4、7.14.5 の V4、7.14.7 の 8 |
+| 4 | 決定 12: Scaling を 0.1 固定にし、`--moveit-scaling` を削除 | 7.14.1、7.14.4、7.14.7 の 12 |
+| 5 | 決定 13: 0.1 rad/s の速度の検査は `moveit` では効かせないと明記（`max_velocity` 5.0 × 0.1 = 0.5 rad/s）。代わりに、`plan_only` の計画の軌道で実行の前に（最大の速さ ≤ 0.5 rad/s、最初・最後の点）確かめ、検査した軌道を `ExecuteTrajectory` で実行する。**これにより `moveit` の送り先は 2 段になり、`send_goal_async` は 3 か所（動かす経路は 2 か所）になった**（前回の「2 か所」から変更）。0.5 rad/s は決めてもらう項目 | 7.14.1、7.14.3、7.14.7 の 13 |
+| 6 | 決定 16: V1 を、腕を支えず置いたままの出発点の読み取り専用に。V2 を V2a・V2b・V2c に分け、「進む」の後に V3。V8（W6 の手順で出発点へ戻す）を追加。`--assume-desired-is-measured` は `--dry-run` のときだけ。`validate_run_options`（純粋関数）で拒否し、試験の組み合わせの表と静的な試験で保証 | 7.14.2、7.14.5、7.14.7 の 16 |
+| 7 | 決定 18: `tools/diff_mode_run.py` は lint の対象外（根拠は lint 33 件の内訳）。静的な試験は `test_diff_mode_run_static.py`。件数を pytest +46（約 197）、lint +6（39）、CTest +2（17）、`so_arm101_ik` 約 253、全体 約 480 に直した（前回 +36・約 470） | 7.14.6、7.14.7 の 18 |
+| 8 | `desired` → `reference` の訂正: 2.2 と 7.12.2 の元の記述は残し、注記を付けた | 2.2、7.12.2 の「起点」、7.14.2 |
+| 9 | P6 以降の検討事項: 境界では pitch を緩めて位置を優先する案（T から +z で wrist_flex の範囲に先に当たる。25.6 mm） | 7.14.8 |
+| 10 | 各段に、TCP（指先の間）基準の床からの高さを定規で記録する任意の欄（合否に使わない） | 7.14.5 |
+| 11 | 前回との食い違いの訂正: 7.14.1 の「`7.1 の 1.3`」は「1.3 節」、前回の `moveit` の「Scaling 既定 0.1（上限 0.3）・`--moveit-scaling`」は取り下げ | 7.14.1 |
+
+**2 回目の反映（再レビュー。決定 13 の 0.5 rad/s（検査あり）は承認）**
+
+| # | 変えた点 | 場所 |
+|---|---|---|
+| 12 | 0.5 rad/s の出どころを、事実と理屈に分けた: **理屈の上の上限**（`max_velocity` 5.0 × Scaling 0.1）。**W1・W6 の記録には軌道の速さの数値が無い**（記録は WARN なし・滑らかに動いた・`FAULT` なし）ので、前回の「W1・W6 の実績」を訂正。**L1（0.75 rad/s）より低い**ことを記載。**各ステップで計画の軌道の実際の最大の速さ（`positions` の差分と `velocities`）を CSV に記録**（実行しなかったステップも） | 7.14.3（表の直後の 2 つの箇条）、7.14.2 の 8、7.14.7 の 13 |
+| 13 | `moveit` の計画の軌道の最初の点: **`q_desired`（`reference`）と比べ、0.005 rad 以内でなければ実行しない**（許容の出どころは閉じる向きの不感帯約 3 tick **[実測]**。値は **[推測]**。決めてもらう）。加えて `q_meas` と 0.01 rad 以内（MoveIt の `allowed_start_tolerance`）。**手前止まりが 0.005 rad を超えると `moveit` 経路は動かせない**ことも明記。**どちらから始まるかをモックで確かめる項目（3a。動いている途中に `plan_only` を呼び、最初の点が `/joint_states` と `reference` のどちらに近いか）を追加**。CSV に最初の点と `q_desired`・`q_meas` の差を記録 | 7.14.1 の表、7.14.3、7.14.5 の V5、7.14.6 のモックの 3・3a、7.14.7 の 19（追加） |
+| 14 | `/move_action` のゴールが必ず `plan_only = True` であることの保証: **純粋関数 `build_plan_goal_spec`**（`plan_only` は常に真で、引数に無い）の試験と、**静的な試験**（`MoveGroup` のゴールが `build_plan_goal_spec` から作られ、`plan_only` への代入が `spec.plan_only` の 1 か所だけ）。**`send_goal_async` の 3 か所の内訳（計画するだけ 1、動かす 2）も静的な試験で確かめる** | 7.14.3 の「書き込みの経路」、7.14.6 |
+| 15 | 新しく作るファイルを全部並べた（6 つ: `step_runner.py`、試験 3（`test_step_runner.py`・`test_step_loop.py`・`test_diff_mode_run_static.py`）、`tools/diff_mode_run.py`、手順書。変更する既存のファイルは `CMakeLists.txt` だけ）。**試験ファイルを 2 つから 3 つに分け（`StepLoop` の試験を `test_step_loop.py` に）、件数を pytest +56（約 207）、lint +8（41）、CTest の要約 +3（18）、`so_arm101_ik` 約 266、全体 約 493 に直した**（前回: +46・+6・+2・約 253・約 480） | 7.14.6、7.14.7 の 18 |
+
+**3 回目の反映（承認。決定 19 は 0.005 rad。記録の追加と、実装の承認）**
+
+| # | 記録 | 場所 |
+|---|---|---|
+| 16 | **W1 の T では elbow が約 0.0265 rad（17 tick）手前で止まっていた [実測。inventory の W3 調査の訂正。T の elbow の手前止まり]**。**MoveIt の計画が測った位置から始まるなら、最初の点は `q_desired` から、許容の候補（0.003・0.005・0.01 rad）のどれより大きくずれ、`moveit` 経路は T では拒否される見込み [推測]**。モックの 3a（どちらから始まるか）と V5 で確かめる。拒否されたステップは、不合格ではなく結果として CSV に記録する | 7.14.3、7.14.6 の 3a、7.14.5 の V5 |
+| 17 | **最初の点が「`q_desired` から 0.005 rad 以内」と「`q_meas` から 0.01 rad 以内」を同時に満たすのは、`desired` と `q_meas` の差が 0.015 rad 以内のとき（関節ごと）だけ** [計算。三角不等式: 差 ≤ 0.005 + 0.01]。手前止まりが 0.015 rad を超える関節があれば、どの最初の点でも少なくとも一方の検査に落ちる | 7.14.3 |
+| 18 | **案 B（計画の始まりを `q_desired` にし、MoveIt の `allowed_start_tolerance` を上げる）は、V5 の結果を見てから別の計画にする。P5 では MoveIt の設定（`allowed_start_tolerance` を含む）を変えない** | 7.14.3、7.14.8 |
+| 19 | **実装の承認**（ユーザー、2026-11-15）。作成・変更してよいファイル: `src/so_arm101_ik/so_arm101_ik/step_runner.py`、`test/test_step_runner.py`、`test/test_step_loop.py`、`test/test_diff_mode_run_static.py`、`tools/diff_mode_run.py`、`src/so_arm101_ik/CMakeLists.txt`（試験名 3 つ）、`docs/diff_mode_real_check.md`、`docs/analytic_diff_plan.md`、`docs/inventory.md`。**これ以外の変更が必要になったら止めて報告。`diff_mode.py`（P4）は変えない**。3a の一回限りの送信は**リポジトリの外のスクラッチ**で行い、コミットしない。ビルド・モックの起動は、ユーザーが「実機を使っていない」と答えた後だけ（許可を求めるときに【実機の状態】を聞く）。コミットの前に `colcon test`（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source）を実行し、件数を見込みと突き合わせる（他のパッケージの件数が変わったら止める）。numpy の 2 版（`python3 -s` と `python3`）で pytest。**新しい守り（排他・古さ・一致・`plan_only`・最初の点・速さ・`--assume-desired-is-measured` の拒否）は、リポジトリの外の写しで 1 つずつ外し、対応する試験が落ちることを確かめる（P4 の M1〜M10 と同じ方法）**。コミットはコード → docs の順の 2 つ。コミット前に承認を求め、コミット後に `git show --stat` を報告 | — |
+
+**次**: 実装（コードと試験を書き、リポジトリの外の写しで守りを外す確認まで。ビルド・モックは【実機の状態】を聞いてから）。**この節は計画の記録。**
+
+
+## 7.15 P5 の実装の結果（2026-11-15。コード: コミット `10e3a6f`。docs は次のコミット。実機は使われていない。モックの確認 1〜7 は実施済み（12））
+
+**1. 作ったもの（承認された範囲だけ。`diff_mode.py` ほか既存のコードは変更なし）**: `so_arm101_ik/step_runner.py`、`test/test_step_runner.py`（17 件）、`test/test_step_loop.py`（27 件）、`test/test_diff_mode_run_static.py`（9 件）、`tools/diff_mode_run.py`、`CMakeLists.txt`（試験名 3 つの追加だけ）、`docs/diff_mode_real_check.md`（手順書。V0〜V8）。ビルドは `colcon build --symlink-install --packages-select so_arm101_ik` だけ（1.4 秒）。
+
+**2. 計画から変えた点（ユーザーの事後承認 1 件。ほかは記録）**
+
+| # | 変えた点 | 理由・値の出どころ |
+|---|---|---|
+| 1 | **`HOLD` のときは、`--auto` でなくても Enter を求める**（計画 7.14.3 は `--auto` 中だけ）。Enter で続けると `suggest_delta` をもう一度呼び（`hold_run` が数えられ、`SPIN` で `LIMITED_DONE`）、`n` で終了。**ユーザーの事後承認（2026-11-15）** | 目標が固定のとき、同じ測定からは同じ提案しか出ないので、黙って繰り返さない |
+| 2 | `step_runner.py` は `verify_command` を `from .diff_mode import verify_command` で取り込んで呼ぶ（`dm.verify_command` ではなく） | 試験が `step_runner` の側だけを差し替えて、`DiffMode.step` の内部の検査と区別するため |
+| 3 | 試験の件数は pytest +53（見込み +56、範囲 48〜64 の内）。**`parametrize` は使わず**、表を回す試験にまとめた | P4 と同じ方針（件数を抑える） |
+| 4 | 偽の時計に上限を付けた（`FakeIO.wait`。7.15 の 6） | 整定のタイムアウトを外した変更で、試験が止まらなくなったため |
+| 5 | `tools/diff_mode_run.py` の確認の入力を、自前の行バッファで読む（`os.read`）。1 回の確認で 1 行だけ使う（モックの確認 4 で、閉じていないパイプの 2 行目の Enter を `select` が見逃して待ち続けた） | 端末の対話では起きにくいが、まとめて入力された Enter でも 1 行ずつ使うため |
+| 6 | `StepLoop` に `in_flight` を足し、Ctrl-C の表示に「進行中のゴールがあり、取り消されず指令まで進む」を出す。試験 +1（`test_ctrl_c_while_a_goal_is_in_flight_is_reported_and_nothing_is_cancelled`） | 以前は「steps sent: 0」と出て、進行中のゴールが分からなかった |
+| 7 | 不感帯の内側で `sent = 0` のときの表示（`tools/diff_mode_run.py` のみ。決定 A） | 7.15 の 8 |
+| 8 | **確認の行バッファを `step_runner.py` の純粋な `LineReader`・`confirm_answer` に移した**（道具は `os.read` で届いた分を渡すだけ）。試験 +5（空行・`y`・`yes` だけが確認、`n` など・EOF・30 秒の無入力は送らない、まとめて届いた複数行は 1 回の確認で 1 行だけ使う。`StepLoop` で、'\\n\\n' なら 1 ステップだけ送って止まる）。静的な試験 +1（道具が標準入力を `confirm_answer` 経由でしか読まない） | 確認の処理は要（ユーザーの指示） |
+| 9 | CSV に `windup_after`（止まったあとの `q_cmd` と `q_meas` の差の最大 [rad]）を足した。試験 +1 | V3b で「ワインドアップの量を記録する」ため（ユーザーの指示） |
+
+**3. `colcon test`（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source。全パッケージ）: 490 件、失敗 0・エラー 0・スキップ 0。他のパッケージの件数は変わっていない。【モックの確認 4 の後に試験を足して、最終は 498 件（ik 271 = pytest 212 + lint 41 + CTest 18）。失敗 0。他のパッケージは変わらない（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0）。7.15 の 8・9 の 14〜16 を参照】**
+
+| パッケージ | 前 | 後 |
+|---|---|---|
+| bringup | 47 | 47 |
+| calibration | 73 | 73 |
+| description | 2 | 2 |
+| hardware | 105 | 105 |
+| moveit_config | 0 | 0 |
+| ik | 199 | 263 |
+| 合計 | 426 | **490** |
+
+| 区分（ik） | 前 | 後 | 増分 | 見込み | 判定 |
+|---|---|---|---|---|---|
+| pytest | 151 | 204 | +53（`test_step_runner` 17、`test_step_loop` 27、`test_diff_mode_run_static` 9） | +56（48〜64） | 範囲の内 |
+| lint | 33 | 41 | +8（copyright 15 → 19、pep257 15 → 19。flake8・xmllint・lint_cmake は各 1） | +8 | 一致 |
+| CTest の要約 | 15 | 18 | +3 | +3 | 一致 |
+| ik の合計 | 199 | 263 | +64 | 約 +67（258〜274） | 範囲の内 |
+| 全体 | 426 | 490 | +64 | 約 493（485〜501） | 範囲の内 |
+
+- 見込みより 3 件少ないのは、pytest が +53（見込み +56）だったため。
+- numpy 1.21.5（`python3 -s`）と 1.26.4（`python3`）の両方で、新しい 3 ファイルの pytest 53 件が通過。lint（`ament_flake8`・`ament_pep257`・`ament_copyright`）はパッケージ内 19 ファイルで問題なし。`tools/diff_mode_run.py` は lint の対象外（手で `flake8` を当てると E501 が 2 件。日本語の説明の長い行。道具のスタイルは試験に入れていない）。
+
+**4. 守りを外す確認（リポジトリの外の写し。`__file__` で写しが読まれていることを確認。リポジトリのファイルは書き換えていない）**: 25 個すべてで、対応する試験が落ちた。
+
+| 外した守り | 落ちた試験（要点） |
+|---|---|
+| 排他（他のアクションのアクティブなゴールを無視） | `test_an_active_goal_of_another_action_stops_before_the_second_send` |
+| 古さの判定を常に真 | `test_freshness_of_an_input`、`test_missing_or_old_inputs_do_not_start`、`test_inputs_that_become_old_while_waiting_are_not_sent` |
+| `desired` の一致を常に真／moveit の許容を direct と同じに | `test_the_tolerance_of_desired_depends_on_the_route`（純粋関数・`StepLoop`） |
+| `plan_only` が偽（`step_runner` の spec）／偽（道具のソース） | `test_the_goal_for_move_action_only_plans`／`test_the_goal_for_move_action_is_built_from_the_spec_and_only_plans` |
+| 最初の点を `q_desired` と比べない／`q_meas` と比べない | `test_each_check_of_a_plan_can_forbid_the_execution` ほか 2 件 |
+| 計画の速さを見ない／direct の速さを見ない | `test_each_check_of_a_plan_can_forbid_the_execution`／`test_the_speed_check_of_a_direct_move` |
+| `--assume-desired-is-measured` を `--dry-run` なしで受ける／道具が条件に使う | `test_the_combinations_of_the_options`・`test_the_assumption_is_not_accepted_for_a_real_run`／`test_assume_desired_is_measured_is_only_handed_to_the_check_and_the_loop` |
+| 送る直前の `verify_command` をやめる | `test_verify_command_is_run_again_with_the_new_measurement`、`test_step_runner_imports_no_ros_and_rechecks_everything_before_a_send` |
+| Enter の待ちの間に腕が動いたことを見ない／送る直前の再読み込みをやめる | `test_the_arm_moved_while_waiting_for_the_enter_is_not_sent`／同じ試験ほか 3 件 |
+| `--auto` が `AT_LIMIT` で Enter に戻らない | `test_auto_goes_back_to_the_confirmation_at_a_limit_and_at_a_hold` |
+| ゴールをキャンセルする（道具）／両方の送り先を作る（道具）／`--route` に既定（道具） | `test_nothing_is_cancelled_…`／`test_only_one_sender_is_made_…`／`test_the_route_is_required_and_has_no_default` |
+| 送れなかったのに続ける／検査に落ちた計画を実行する | `test_a_failed_send_ends_the_run_…`／`test_a_plan_that_failed_its_check_is_not_executed_…` |
+| Enter の待ち 30 秒を 300 秒／Scaling 0.5／起点の半径の上限 0.06／起点を見ない | `test_the_first_point_tolerances_are_the_decided_ones` ほか |
+| 軌道の最大の速さを CSV に記録しない | `test_the_peak_speed_of_the_plan_is_recorded_for_every_step` |
+| 整定のタイムアウトを外す | `test_an_arm_that_does_not_stop_ends_the_run`（**最初は試験が止まらず（`timeout` で打ち切り）、落ちたとは言えなかった。偽の時計の上限を足して、落ちる形にした**） |
+
+**5. 設計の記録: 守りの試験を消さない**: `StepLoop._recheck`（送る直前の 3 つの確認と `verify_command`）の試験と、静的な試験（`send_goal_async` が 3 か所・`plan_only` が `spec.plan_only` の 1 か所・`cancel_goal` なし）は、整理のときに残す。
+
+**6. 上限つきの偽の時計**: `test_step_loop.py` の `FakeIO.wait` が、偽の時刻が 1100 秒（`RUN_TIMEOUT` 120 秒の約 9 倍）を超えたら `AssertionError` を出す。`StepLoop` の待ちはすべて `io.wait` を通る（入力待ち・整定・コマンド A）ので、将来の変更でループが終わらなくなると、止まらずに**落ちる**（上の整定のタイムアウトの確認で確かめた）。
+
+**7. `--offset` の起点の検討（ユーザーが決める。決まるまで、起点のコードは変えない。モックの確認 1〜7 も、決まってから行う）**
+
+T の値で計算した（`q_desired` = T の目標 (0, −0.3840, 0.5236, 1.4486, 0)、`q_meas` = W1 の実測 (0.0031, −0.3813, 0.5501, 1.4454, −0.0069)。`max_dq` 0.03、`gain` 1.0。スクラッチ `origin_calc.py`、リポジトリの外）。**[計算]**
+
+- `FK(q_desired)` = (176.66, −0.01, 58.77) mm、`FK(q_meas)` = (172.39, −0.37, 55.23) mm。**差（測った位置 − 指令）= (−4.28, −0.36, −3.54) mm、大きさ 5.56 mm**（elbow の手前止まり 0.0265 rad が主）。
+- **(a)** 起点が `FK(q_meas)` のとき、**不感帯 3 mm より小さい `--offset 0.002`（2 mm）は、開始の時点で誤差 2.00 mm ≤ 3 mm なので `IN_BAND`（`CONVERGED`）になり、何も送られない**（`StepLoop` でも、終了コード 0・`sent = 0`）。**V3 の 2 mm は、この起点では送信の確認にならない**。3 mm の offset は誤差が不感帯の境界上（浮動小数のため送られる）で、`REVERSAL_GROWTH` の停止になった（偽の腕が指令どおりに動いて誤差の向きが反転する、という偽の腕の性質による。実機では起きない見込み **[推測]**）。5 mm は 2 ステップで `CONVERGED`。
+
+| 起点 | offset | 目標の座標 [mm] | 開始時の誤差 [mm]（目標 − `FK(q_meas)`） | 最初のステップの δ [mm]（向きと大きさ） | 備考 |
+|---|---|---|---|---|---|
+| `FK(q_meas)` | +x 2 mm | (174.39, −0.37, 55.23) | (2.00, 0, 0)。大きさ 2.00 | **送られない（`IN_BAND`）** | 不感帯の内側 |
+| `FK(q_meas)` | +x 5 mm | (177.39, −0.37, 55.23) | (5.00, 0, 0)。大きさ 5.00 | (2.28, 0, 0)。大きさ 2.28（+x だけ） | `max_dq` 0.03 で縮めた（`shrunk`）。dq の最大 0.0201 rad |
+| `FK(q_desired)` | +x 2 mm | (178.66, −0.01, 58.77) | (6.28, 0.36, 3.54)。大きさ 7.21 | (1.85, 0.11, 1.04)。大きさ 2.12（**+x と +z。向きは +x だけでない**） | 手前止まりの分（z 3.54 mm・x 4.28 mm）も同時に詰めようとする。dq の最大 0.0214 rad |
+| `FK(q_desired)` | +x 5 mm | (181.66, −0.01, 58.77) | (9.28, 0.36, 3.54)。大きさ 9.94 | (2.00, 0.08, 0.76)。大きさ 2.14 | dq の最大 0.0207 rad |
+
+- **(c) 起点の推奨と、V3 の offset の見直し案**:
+
+| 項目 | 推奨 | 理由 |
+|---|---|---|
+| 起点 | **`FK(q_meas)`（今のまま）** | 不感帯の判定・`Outcome` の誤差・合格の基準（先端 ±3 mm）がすべて `FK(q_meas)` で測られるので、「今の先端から x mm」が人の見方と合う。最初のステップの δ が +x だけで、V3 の結果（先端の動き ÷ δ）が読みやすい。`FK(q_desired)` を起点にすると、offset が小さいとき、手前止まりの 5.56 mm の補正が混ざる（z 方向にも動く）。別々の実行をくり返すと起点が測った位置に取り直されるが、各実行は T から始める手順書の約束と、床・範囲の検査で歯止めがある |
+| V3 の offset | **2 mm を 5 mm に変える（+x 5 mm と −x 5 mm）。`--max-steps 1`** | 不感帯 3 mm を超えないと送られない。5 mm なら 1 ステップ目の δ は 2.28 mm（`max_dq` 0.03 で縮めた）で、`max_delta` 5 mm の内。V4 の 8 mm・5 mm はそのまま（3 mm 超） |
+| 代案 | `--offset` の起点を `FK(q_desired)` にする（`StepLoop` の 1 行の変更） | 2 mm の offset でも送られるが、δ に手前止まりの補正（約 1 mm の +z）が混ざり、V3 の「+x だけの動き」の確認にならない。起点の座標が指令側になるので `--origin`（指令側）と座標が揃う利点はある |
+
+**8. 決定 A（ユーザー、2026-11-15）: `--offset` の起点は `FK(q_meas)`（今のまま）**
+- **V3 の offset を +x 5 mm、続けて −x 5 mm に変えた**（`diff_mode_real_check.md` と 7.14.5 の注記。7.14 の元の「2 mm」の記述は残した）。**V3 は `--max-steps 1` なので、`Outcome` が `LIMITED_DONE`（`limit_reason` は `MAX_STEPS`）で終わるのが正常**と、合格の基準に明記した（`StepLoop` の `Outcome.kind` は `LIMITED`。T の値の偽の腕（測定が指令へ飛ぶ）で ±5 mm とも、`sent = 1`・`MAX_STEPS`・終了コード 0 を確認 **[計算]**）。**【訂正（モックの確認 3 の後）】モック（摩擦なしで測定が指令と一致する）では、5 mm の offset の 1 ステップ（δ 2.28 mm）のあと残りが 2.72 mm（−x は 2.71 mm）で、不感帯 3 mm の内側なので `CONVERGED` で終わった（`sent = 1`、終了コード 0）。実機で 1 ステップが十分に動けば同じ `CONVERGED`、摩擦で動きが足りなければ `LIMITED`（`MAX_STEPS`）になる [推測]。合格の基準は「`LIMITED`（`MAX_STEPS`）または `CONVERGED`」に直した**（手順書）。**必ず `MAX_STEPS` で終わらせたいときは、offset を 8 mm にする**（δ 2.28 mm のあと残り 5.7 mm で `LIMITED`。決めてもらう）。
+- **目標が開始の時点で不感帯の内側（`sent = 0`）のとき、道具が「目標は不感帯の内側（誤差 X mm < 3 mm）。送りません。」と表示する**（`tools/diff_mode_run.py` の表示だけ。`step_runner.py` は変更していない。`--dry-run` で `IN_BAND` のときも表示。誤差の値は出さず「3 未満」）。**試験は足していない（件数は変わらない）**。
+
+**9. 範囲の変更（ユーザーの方針、2026-11-15）**
+- **方針**: 大きな移動は **MoveIt の姿勢の目標（経路計画）が基本**。障害物がないときは絶対目標も使うことがある。**一回で送ったときの誤差は 1 cm 程度まで許容する**。**カメラも含めた誤差は 5 cm 以下に収まる見込み（ユーザーの見立て。[推測]）**。**細かい補正は、俯瞰カメラの画像との差分で `DiffMode` を回す**（ハンドカメラは別途検討）。**画像なしで、実機で ±3 mm に追い込む確認はしない**。
+- **実機の確認は V1、V2a〜V2c、V3、V3b、V8 だけ**（V3b は 7.15 の 14 で追加）。**V4〜V6 は取りやめ。V7 は V3・V3b の記録の整理だけ**。目的は「**積み上げでサーボが実際に動くか**」を、カメラの誤差と混ぜずに確かめること。7.14 の記述は残し、7.14 の冒頭と 7.14.5 に変更の注記を付けた。手順書 `diff_mode_real_check.md` は V4〜V6 を取りやめの節に置き換えた。
+- **送り先は実機では `direct` を使う**。`moveit` 経路（`MoveItSender`・計画の軌道の検査・`build_plan_goal_spec`・関連の試験）は**残してコミットする**。モックの確認 1〜7 は、`moveit` の部分も予定どおり行う（コードを残す以上、動くことを確かめておく）。
+
+**10. カメラの段の検討事項（記録。P5 では実装しない）**
+1. **`DiffMode` の誤差の出どころを、`FK(q_meas)` からカメラで測った先端の位置へ差し替えられる形にする**（今は `suggest_delta` が `e = goal − FK(q_meas)` を内部で作る。カメラの段では、測った先端の位置を外から渡せる形にする。`DiffMode` の変更になるので、別の計画で）。
+2. **距離の上限（0.03 m、硬い上限 0.05 m）と、カメラも含めた誤差の見込み（最大 5 cm）の関係を見直す**（`DISTANCE` の球が見込みの誤差より小さいと、カメラの差分で動けなくなりうる）。
+3. **大きな移動の IK は MoveIt の IK を使わない**。**解析 IK（`so_arm101_ik`）で関節の目標を出し、MoveIt には関節の目標だけを渡して経路計画させる**（**ユーザーの決定**。MoveIt の IK は姿勢の計算が破綻しやすいため。この方式が有効なことは、ユーザーが確認済み）。`so_arm101_ik` を使った道具としての実装は、**カメラの段より前の別の計画**で行う。
+4. **`DiffMode`（`direct`）から MoveIt の移動へ切り替えるとき、積み上げた分（最大 0.06 rad = ワインドアップ）が解けて、弱い垂れが出うる [推測]**（`direct` の `desired` は積み上げた指令で、MoveIt の計画は測った位置から始まる見込み。7.14.3 の最初の点の検査と同じ原因）。切り替えの前に、積み上げた分をどうするかを、その計画で決める。
+
+**11. リリース時の整理の対象（inventory にも記録）**: `moveit` 経路は、実機では使わないが、P5 の道具に残してコミットする。**リリース時の整理の対象**: `tools/diff_mode_run.py` の `MoveItSender`・`--route moveit`・`--moveit-tolerance`、`step_runner.py` の `build_plan_goal_spec`・`PlanGoalSpec`・`check_planned_trajectory`・`TrajPoint`・`PlanCheck`・`trajectory_speeds`・関連の定数、関連の試験（`test_step_runner.py`・`test_step_loop.py`・`test_diff_mode_run_static.py` の `moveit`・`plan_only` の部分）。**使うか残すか削除するかは、そのとき決める**（削除は `git rm` で、承認を得て、戻すためのコミットを inventory に書く）。
+
+**12. モックの確認 1〜7 の結果（2026-11-15。`mock:=true use_rviz:=false`、ROS_DOMAIN_ID=87、RMW_IMPLEMENTATION=rmw_cyclonedds_cpp。前景で `exec`、PID 31910、SigIgn に SIGINT なし、`kill -INT` だけで停止。停止後の `ps` と `ros2 node list --no-daemon`（domain 87）は空。`move_group` の exit −11 は既知。実機は使われていない。3a の一回限りの送信と、T への移動・補助の確認は、すべてリポジトリの外のスクラッチ。コミットしない）**
+
+| # | 確認 | 結果 |
+|---|---|---|
+| 1 | `controller_state` | **`reference` と `desired` は一致**（差 0）。`joint_names` は pan・lift・elbow・wrist_flex・wrist_roll の順。**レートは 25 Hz（`state_publish_rate: 50` ではなく、`arm_controller` の `update_rate: 25` に揃う）**。7.14.2 の「50 Hz」は 25 Hz に読み替える（0.3 秒の古さの判定には十分）。`/joint_states` は 50 Hz |
+| 2 | status トピック | 3 つとも存在（`/arm_controller/follow_joint_trajectory/_action/status`・`/move_action/_action/status`・`/execute_trajectory/_action/status`）。**あとから購読しても最後の状態が来る**（JTC は `[4]`）。MoveIt の 2 つは、ゴールが無いうちはメッセージが無い（アイドルとして扱う）。`QoS`: reliable・transient_local・深さ 1 で受信できた |
+| 3 direct | 5 mm の目標を実際に送信（モックの腕） | 1 ステップ（δ 2.28 mm。`cmd_speed` 0.0101 rad/s）、ゴールは `SUCCEEDED`、**止まったあとの `desired` と `q_cmd` の差は 0**、整定 2.10 秒、実行全体 4.9 秒。`Outcome` は `CONVERGED`（残り 2.72 mm） |
+| 3 moveit | 10 mm の目標（3 ステップ） | `plan_only` の計画は全部通り、`ExecuteTrajectory` が実行（`error_code` 成功）。計画の軌道: 最大の速さ 0.042〜0.043 rad/s、長さ 0.89〜0.92 秒、点 10〜11、**最初の点は `q_desired`・`q_meas` と一致（差 0）**、**最後の点と `q_cmd` の差 0.00076〜0.00095 rad（`moveit-tolerance` 0.001 の内側。OMPL は許容 0.001 rad で解けた）**。止まったあとの `desired` と `q_cmd` の差 0.00076〜0.00096 rad（一致の許容 0.002 rad の内側）。実行全体 10.2 秒（3 ステップ） |
+| 3（速さ） | 計画の最大の速さ（moveit、Scaling 0.1。elbow +0.02〜+0.6 rad の計画だけ） | 0.043（0.02 rad）・0.067（0.05）・0.095（0.1）・0.17（0.3）・0.24（0.6 rad）rad/s。**7.14.3 の「0.1 rad/s を `moveit` に使うと、ほぼ必ず拒否される」は正しくなかった**（1 ステップ 0.03 rad 以下の計画では 0.1 rad/s の内側。大きな移動で超える）。0.5 rad/s（承認済み）は、どの計画にも当たらない上限（保険）として働く。**実際の最大は `joint_limits.yaml` の 5.0 × 0.1 = 0.5 rad/s より、この範囲ではずっと低い** |
+| 3a | 計画は `reference` と測定のどちらから始まるか | **測定（`/joint_states`）から始まる**。モックでは測定が指令と一致して区別できなかったので、スクラッチで `/joint_states` に T と同じ 0.0265 rad の手前止まり（elbow）を重ねて測った: 最初の点は測定との差 0、`reference` との差 0.0265 rad。**4 回中 4 回、`FIRST_DESIRED` で実行されなかった**（許容 0.005 rad。候補 0.003・0.01 のどれより大きい）。7.15 の 16・17（T で `moveit` 経路が拒否される見込み）を、モック（偽の測定）で確認。実機の確認は取りやめ（V5） |
+| 4 | Ctrl-C | **進行中の 8 秒のゴールの途中（elbow 0.513）で `kill -INT`: 道具は 130 で即座に終了し、ゴールは取り消されず、`reference` が最後の `q_cmd`（0.50573）まで進み、JTC の status は `SUCCEEDED`（4）のまま**（direct。クライアントが消えてもゴールはキャンセルされない）。確認の入力待ち中の Ctrl-C も 130 で何も送らない。**道具の不具合を 2 つ見つけて直した**: (a) 入力がパイプで閉じていないとき、2 行目の Enter を `select` が見逃して待ち続ける（標準入力のバッファ。自前の行バッファに変更）、(b) Ctrl-C の表示が「steps sent: 0」で、進行中のゴールを示さない（`in_flight` を持ち、「a goal was in flight; it is not cancelled…」と表示。試験 +1）。`moveit` の Ctrl-C は確かめていない（モックの `ExecuteTrajectory` の実行中に切る確認は未実施） |
+| 5 | 排他 | JTC に「同じ位置を保持する 12 秒のゴール」を出しておくと、**direct・moveit とも `OTHER_GOAL`（`/arm_controller/follow_joint_trajectory/_action/status: 1 active goal`）で送らずに止まる**（`steps sent: 0`、終了コード 2）。Enter を待つ間に腕が動かされると `ARM_MOVED` で止まる（モックでは測定が `reference` に一致するので、`desired` の不一致だけを分けた確認はできない。試験で確認済み）。`MoveGroup`・`ExecuteTrajectory` の status にアクティブなゴールがある場合は未確認 |
+| 6 | 待ちの秒数 | 整定は 2.10 秒（最小 1.5 秒 + コマンド A の 0.6 秒）。direct の 1 ステップの実行全体 4.9 秒（`move-seconds` 2 秒を含む）、moveit の 3 ステップ 10.2 秒。**モックは摩擦も遅れも無いので、実機の整定の目安にならない** |
+| 7 | 道具の表示・終了コード | `--dry-run`（クライアントなし、CSV なし）。`--assume-desired-is-measured` は `--dry-run` なしで拒否（終了コード 2）。**出発点での `--dry-run` は `START_REFUSED`: `JOINT_LIMIT`・`FLOOR`・`FLOOR_MEASURED`（終了コード 3）。V1 の見込みどおり**。不感帯の内側の目標は「目標は不感帯の内側（誤差 2.00 mm < 3 mm）。送りません。」と表示（`--dry-run` では「3 mm 未満」）。CSV は 1 ステップ 1 行（列は `CSV_FIELDS`） |
+
+**14. V3b（ユーザーの決定、2026-11-15）**: V3 は +x 5 mm・`--max-steps 1` のまま（`CONVERGED` と `LIMITED`（`MAX_STEPS`）のどちらも正常）。V3 では 2 歩目の積み上げを確かめられないので、**V3b を足した**: +x 8 mm を `--max-steps 4`・1 ステップごとに Enter、続けて −x 8 mm。合格の基準: `REFUSED`・ドライバの WARN・異音がない／2 歩目以降の `q_cmd` が前回の `q_desired` に積み上がっている（CSV: `q_desired_before`（k+1）= `q_cmd`（k）、1e-4 rad 以内）／各ステップで「先端の動き ÷ δ」（`tip_move_over_delta`）とワインドアップの量（`windup_after`）を記録／**`CONVERGED` まで行かなくても失敗にしない**。**実機の段の一覧: V1、V2a、V2b、V2c、V3、V3b、V8**（V7 は V3・V3b の記録の整理）。手順書に反映済み。
+
+**15. 未確認（確認を足さずに記録。ユーザーの指示）と、リリース時の整理の対象への追加**
+- **`moveit` の Ctrl-C**（`ExecuteTrajectory` の実行中に `kill -INT` したとき、進行中の実行が取り消されずに進むか）は**未確認**。direct は確認済み（12 の 4）。
+- **`MoveGroup`・`ExecuteTrajectory` の status にアクティブなゴールがあるとき**（排他の確認）は**未確認**。JTC の status にアクティブなゴールがある場合は direct・moveit とも確認済み（12 の 5）。コードは 3 つの status を同じ形で見る（`STATUS_TOPICS`）ので、同じ動きをする [推測]。
+- どちらも `moveit` 経路（実機では使わない）の確認なので、**リリース時の整理（`moveit` 経路。11）の対象に加える**。残すなら、そのときに確かめる。
+
+**16. `controller_state` が 25 Hz だったことと、古さの検査 0.3 秒の関係**
+- **[事実。モック]** `controller_state` は 25 Hz（周期 40 ms）。`state_publish_rate: 50`（`controllers.yaml`）は、`arm_controller` の `update_rate: 25` を超えて出ない。7.14.2 の「50 Hz」の記述は残し、25 Hz に読み替える。**`/joint_states` は 50 Hz（20 ms）**。
+- **古さの検査 0.3 秒（`MAX_AGE`）は、`controller_state` の周期の 7.5 倍、`/joint_states` の 15 倍**。25 Hz でも、メッセージを 7 つ続けて失うまで「新しい」と判定される。**検査は受信してからの経過時間**（道具の単調時計）なので、レートが 25 Hz か 50 Hz かには依らず動く。レートが下がると「新しい」の幅が狭まるだけで、**0.3 秒を変える必要はない**（値は [推測]。実機で WARN や `STALE_INPUT` が出るなら見直す）。
+- **この値の注意**: Enter を待つ間は、道具が `spin_once` で入力を受け続ける（待つ間も受信時刻が更新される）ので、30 秒待っても古くならない。受信が止まれば（コントローラの停止）、0.3 秒後に `STALE_INPUT` になる。
+
+**13. 次**: **ユーザーの判断**（V3 の合格の基準の訂正と offset を 5 mm のままにするか 8 mm にするか。`moveit` の Ctrl-C と、`MoveGroup`・`ExecuteTrajectory` の status の確認を足すか）→ **コミット前の承認**（コードを先、docs を後の 2 つ。`colcon test` は 491 件、失敗 0）。**この節は途中の記録。コミットはしていない。**

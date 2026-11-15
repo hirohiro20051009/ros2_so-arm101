@@ -2402,3 +2402,33 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **計画の訂正**: 7.12.4 の「T で q3 の差を折り返すと 3.625 rad」は折り返す前の値（折り返した後は 2.659 rad = 2·acos(0.239)。5 関節の 2-ノルムは折り返した後 3.703、折り返す前 4.447）。元の記述は残し、訂正を付けた。
 - **P5 に残したこと**: 起点を固定（アンカー）にするか（`LIMITED_DONE` の後の `start` のやり直しで、0.03 m の球をつないで遠くへ行ける）、最初の実機の `max_dq`（0.03 rad）、abs(D) の上限（0.99）の見直し。P6: VR の連続の指令での `max_steps`・`max_reversals`。
 - 次: P5（送り先。実機の確認 7.3）。
+
+## `so_arm101_ik` の P5（2026-11-15。コミット前。`docs/analytic_diff_plan.md` 7.14・7.15。実機は使われていない。モックは未実施）
+
+- **作ったもの**: `so_arm101_ik/step_runner.py`（純粋な補助と `StepLoop`。ROS・時計・I/O なし）、`tools/diff_mode_run.py`（ROS の入出力だけ。**実機を動かす。ユーザーだけが実行**）、試験 3 つ（`test_step_runner.py` 17、`test_step_loop.py` 27、`test_diff_mode_run_static.py` 9）、`CMakeLists.txt` の試験名 3 つの追加、手順書 `docs/diff_mode_real_check.md`（V0〜V8）。`diff_mode.py` ほか既存のコードは変更なし。新しい依存なし。
+- **`colcon test`（全パッケージ）: 498 件、失敗 0**（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、**ik 271** = pytest 212 + lint 41 + CTest の要約 18。前は 426・ik 199。モックの確認の後に、確認の行バッファ・ワインドアップの記録・Ctrl-C の表示の試験を足して 490 → 498）。numpy 1.21.5・1.26.4 の両方で新しい pytest 53 件が通過。守りを 1 つずつ外した 25 個の変更（リポジトリの外の写し）で、対応する試験が落ちた。
+- **計画から変えた点**: `HOLD` は `--auto` でなくても Enter を求める（ユーザーの事後承認）。ほか 7.15 の表。
+- **`--offset` の起点（未決定。ユーザーが決める）**: T で `FK(q_meas)` と `FK(q_desired)` が 5.56 mm 離れているため、起点が `FK(q_meas)` のとき V3 の 2 mm は不感帯（3 mm）の内側で何も送られない（推奨: V3 を 5 mm に変える）。詳細は 7.15 の 7。決まるまで、起点のコードとモックの確認は保留。
+- 次: 起点の決定 → モックの確認 1〜7（3a を含む）→ コミット（コード → docs）。
+
+### P5 の範囲の変更と記録（2026-11-15。ユーザーの方針。`docs/analytic_diff_plan.md` 7.15 の 8〜11）
+
+- **`--offset` の起点は `FK(q_meas)`（ユーザーの決定）**。V3 の offset は +x 5 mm、続けて −x 5 mm（不感帯 3 mm の内側では何も送られないため）。V3 は `--max-steps 1` なので、`Outcome` が `LIMITED`（`MAX_STEPS`）で終わるのが正常。目標が不感帯の内側のときの表示を `tools/diff_mode_run.py` に足した（件数は変わらない）。
+- **方針**: 大きな移動は MoveIt の姿勢の目標（経路計画）が基本（障害物がないときは絶対目標も使う）。一回で送ったときの誤差は 1 cm 程度まで許容。カメラも含めた誤差は 5 cm 以下の見込み（ユーザーの見立て。[推測]）。細かい補正は俯瞰カメラの画像との差分で `DiffMode` を回す（ハンドカメラは別途検討）。**画像なしで、実機で ±3 mm に追い込む確認はしない**。
+- **実機の確認は V1、V2a〜V2c、V3、V8 だけ**。V4〜V6（追い込み・MoveIt 経由との比較）は取りやめ、V7 は V3 の記録の整理だけ。目的は「積み上げでサーボが実際に動くか」をカメラの誤差と混ぜずに確かめること。手順書 `docs/diff_mode_real_check.md` に反映済み。
+- **リリース時の整理の対象**: `moveit` 経路は、実機では使わない（送り先は `direct`）が、道具に残してコミットする。対象は `tools/diff_mode_run.py` の `MoveItSender`・`--route moveit`・`--moveit-tolerance`、`step_runner.py` の `build_plan_goal_spec`・`PlanGoalSpec`・`check_planned_trajectory`・`TrajPoint`・`PlanCheck`・`trajectory_speeds`・関連の定数、関連の試験。削除するときは `git rm`（承認を得て、戻すためのコミットをここに書く）。
+- **カメラの段の検討事項（P5 では実装しない）**: (1) `DiffMode` の誤差の出どころを `FK(q_meas)` からカメラで測った先端の位置へ差し替えられる形にする。(2) 距離の上限（0.03 m、硬い上限 0.05 m）とカメラも含めた誤差の見込み（最大 5 cm）の関係を見直す。(3) 大きな移動の IK は MoveIt の IK を使わず、解析 IK（`so_arm101_ik`）で関節の目標を出し、MoveIt には関節の目標だけを渡して経路計画させる（ユーザーの決定。MoveIt の IK は姿勢の計算が破綻しやすい。この方式が有効なことはユーザーが確認済み）。道具としての実装は、カメラの段より前の別の計画で行う。(4) `DiffMode`（`direct`）から MoveIt の移動へ切り替えるとき、積み上げた分（最大 0.06 rad）が解けて弱い垂れが出うる（[推測]）。
+
+### P5 のモックの確認 1〜7（2026-11-15。`docs/analytic_diff_plan.md` 7.15 の 12。実機は使われていない）
+
+- `mock:=true use_rviz:=false`、ROS_DOMAIN_ID=87。前景で `exec`、PID 31910、`kill -INT` だけで停止。停止後の `ps` と `ros2 node list --no-daemon`（domain 87）は空。`move_group` の exit −11 は既知。3a の一回限りの送信・T への移動・補助の確認は、リポジトリの外のスクラッチ（コミットしない）。
+- **分かったこと**: `controller_state` は 25 Hz（`reference` と `desired` は一致）。MoveIt の計画は `/joint_states`（測定）から始まる（0.0265 rad の手前止まりを重ねると、4 回中 4 回 `FIRST_DESIRED` で実行されない）。direct・moveit とも送信できる。計画の軌道の最大の速さは 0.04〜0.24 rad/s（elbow +0.02〜+0.6 rad）で、0.1 rad/s は小さな移動では内側（7.14.3 の「ほぼ必ず拒否」は正しくなかった）。排他（JTC のアクティブなゴール）と Ctrl-C（進行中のゴールは取り消されず指令まで進む）は想定どおり。出発点では `START_REFUSED`（`JOINT_LIMIT`・`FLOOR`・`FLOOR_MEASURED`）。
+- **道具の不具合 2 件を直した**: 確認の入力のバッファ（閉じていないパイプで 2 行目の Enter を見逃す）、Ctrl-C の表示（進行中のゴールを出す）。
+- **V3 の合格の基準を訂正**: モックでは 5 mm の offset の 1 ステップのあと残り 2.7 mm（不感帯 3 mm の内側）で `CONVERGED`。`LIMITED`（`MAX_STEPS`）か `CONVERGED` のどちらも正常。必ず `MAX_STEPS` にするなら offset 8 mm（ユーザーの判断）。
+
+### P5 の追加（2026-11-15。ユーザーの指示。`docs/analytic_diff_plan.md` 7.15 の 14〜16）
+
+- **V3b を追加**: 実機の段は V1、V2a〜V2c、V3、V3b、V8。V3b は +x 8 mm を `--max-steps 4`・1 ステップごとに Enter、続けて −x 8 mm。合格は `REFUSED`・WARN・異音なし、2 歩目以降の `q_cmd` が前回の `q_desired` に積み上がっていること、「先端の動き ÷ δ」とワインドアップ（CSV の `windup_after`）の記録。`CONVERGED` まで行かなくても失敗にしない。V7 は V3・V3b の記録の整理。
+- **確認の行バッファ**を `step_runner.py` の `LineReader`・`confirm_answer` に移し、試験を足した（`n` など・EOF・30 秒の無入力で送らない、まとめて届いた複数行は 1 回の確認で 1 行だけ使う）。守りを外す確認（リポジトリの外の写し）7 個で、対応する試験が落ちた。
+- **未確認（確認を足さず記録）**: `moveit` の Ctrl-C、`MoveGroup`・`ExecuteTrajectory` の status にアクティブなゴールがあるとき。**リリース時の整理（`moveit` 経路）の対象に加える**。
+- **`controller_state` は 25 Hz**（`state_publish_rate: 50` ではなく `update_rate: 25` に揃う）。古さの検査 0.3 秒は周期の 7.5 倍で、変更しない。
