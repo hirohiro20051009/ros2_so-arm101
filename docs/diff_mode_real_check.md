@@ -1,6 +1,6 @@
 # 実機確認手順: 解析 IK の差分モード（P5。`tools/diff_mode_run.py`）
 
-> **【範囲の変更（2026-11-15。ユーザーの方針）】** 実機の確認は **V1、V2a〜V2c、V3、V3b、V8** だけ。V4〜V6 は取りやめ。V7 は V3・V3b の記録の整理だけ。`docs/analytic_diff_plan.md` 7.15 の 9。
+> **【範囲の変更（2026-11-15。ユーザーの方針）】** 実機の確認は **V1、V2a〜V2c、V3、V3b、V8** だけ。V4〜V6 は取りやめ。V7 は V3・V3b の記録の整理だけ（**2026-11-15 に済み。結果は `docs/analytic_diff_plan.md` 7.16**）。`docs/analytic_diff_plan.md` 7.15 の 9。
 
 計画と根拠: `docs/analytic_diff_plan.md` の 7.14（決定は 7.14.7、反映の記録は 7.14.9）。この手順書の V0〜V8 は 7.14.5 の表と同じ。
 止め方 S1〜S6、12 V を切る条件、止まっていることの確認（**コマンド A**）、停止したあとの確認は **`docs/servo_real_check.md` と同じ**（このファイルでは繰り返さない）。出発点・T の関節角と実測は下のとおり。
@@ -37,7 +37,7 @@
 
 ## V0. 共通の約束の確認
 
-約束 1〜8 を確認する。bag と CSV の保存先を決める（例: `~/so_arm101_check/diff_<日付>_V<段>/`）。
+約束 1〜8 を確認する。bag と CSV の保存先を決める（`~/so_arm101_check/diff_<日付>_V<段>/`。2026-11-15 の実績は `diff_20261115_V1/`（V1）と `diff_20261115_V2/`（V2a〜V8。bag は 1 本）。以下のコマンドの `diff_<日付>_V2` は、その日付のディレクトリに読み替える）。
 
 ## V1. 読み取り専用・置いたままの出発点（腕を支えない）
 
@@ -58,7 +58,7 @@ python3 tools/diff_mode_run.py --route direct --dry-run --assume-desired-is-meas
 
 - (a) 解析 FK と MoveIt の FK の差（今の姿勢）が 0.1 mm 以内。roll の掃引の差が連続。
 - (b) IK の往復の行は、成功したものは差 0.5 mm 以内。失敗した行は理由が表に出ている（出発点は elbow が上限を 0.0001 rad 超え、先端 z が床の下なので、範囲・床の理由で失敗する行がありうる。失敗は不合格にしない）。
-- (c) `--dry-run` の `start` が**拒否される**（`JOINT_LIMIT`・`FLOOR`・`FLOOR_MEASURED` の理由が出る見込み）。**拒否されることが合格**。何も送られていない（CSV も作られない）。
+- (c) `--dry-run` の `start` が**拒否される**（`FLOOR`・`FLOOR_MEASURED` の理由が出る。`JOINT_LIMIT` は、出発点の elbow が URDF の上限（+1.6901）を超えているときだけ出る。2026-11-15 は出発点の elbow が +1.684（上限の内側）で、`FLOOR`・`FLOOR_MEASURED` だけだった。W1 の出発点（+1.6901）を前提にした以前の見込みは、これで直した）。**拒否されることが合格**。何も送られていない（CSV も作られない）。
 
 ## V2a. 書き込みの起動（トルク ON）。出発点のまま、何も送らない
 
@@ -66,10 +66,10 @@ python3 tools/diff_mode_run.py --route direct --dry-run --assume-desired-is-meas
 
 ```bash
 ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false torque_limit:=500 2>&1 \
-  | tee -i ~/so_arm101_check/diff_V2a.log; echo "exit=${PIPESTATUS[0]}"
+  | tee -i ~/so_arm101_check/diff_<日付>_V2/V2_launch.log; echo "exit=${PIPESTATUS[0]}"
 ```
 
-操作用の端末で: `ros2 control list_controllers --no-daemon`、コマンド A、`python3 tools/diff_mode_run.py --route direct --dry-run --offset 0.002 0 0`（`--assume-desired-is-measured` は付けない）。
+操作用の端末で: `ros2 control list_controllers`（**`--no-daemon` は使えない**。`unrecognized arguments` になる。2026-11-15 は `--no-daemon` なしで実行した。ros2 daemon には触らない）、コマンド A、`python3 tools/diff_mode_run.py --route direct --dry-run --offset 0.002 0 0`（`--assume-desired-is-measured` は付けない）。
 
 合格: `arm_controller` が active／`controller_state` が来る／`reference` と `q_meas` の差が 5 関節とも 0.06 rad 以内／コマンド A が `STOPPED`／`--dry-run` の `start` が出発点の理由で拒否される／ドライバの WARN（`step limit` など）なし／bag が取れている。**指令は送らない。**
 
@@ -87,14 +87,18 @@ ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false tor
 
 ## V3. JTC 直接・1 ステップ（最初の送信）
 
+道具の確認は **2 段**: ① 開始の確認（`START ... Start from this state? [Enter = yes, n = no]`。**30 秒で無入力ならタイムアウトして終了する**（`NOT_CONFIRMED`、送信 0。CSV は見出しだけ））、② 各ステップの確認（`Send this command? [Enter = yes, n = end]`）。2026-11-15 は ① でタイムアウトした（`V3_px.csv`）。**タイムアウトしたら、別名の CSV（例: `V3_px2.csv`）で同じコマンドを再実行する**（同じ名前だと上書きされる）。
+
 ```bash
-python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset 0.005 0 0 --csv ~/so_arm101_check/diff_V3_px.csv
-python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset -0.005 0 0 --csv ~/so_arm101_check/diff_V3_mx.csv
+python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset 0.005 0 0 --csv ~/so_arm101_check/diff_<日付>_V2/V3_px.csv
+python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset -0.005 0 0 --csv ~/so_arm101_check/diff_<日付>_V2/V3_mx.csv
 ```
+
+**`python3 -u` は不要**（確認の表示とステップの表示は `flush=True` で出る。`tee` につないでもため込まれない。`tools/diff_mode_run.py:128,133`）。2026-11-15 の実機では念のため `-u` を付けて実行した。
 
 **offset は 5 mm**（+x 5 mm、続けて −x 5 mm）。起点は `FK(q_meas)`（今の先端）。不感帯は 3 mm なので、2 mm では誤差が不感帯の内側になり、何も送られない（道具は「目標は不感帯の内側（誤差 X mm < 3 mm）。送りません。」と表示して終わる。その場合は offset を 3 mm より大きくする）。T の 5 mm の最初のステップの δ は +x だけの約 2.3 mm（`--max-dq 0.03` で縮める。[計算]）。
 
-1 ステップごとに表示を見て Enter（`n` で終了）。**`--max-steps 1` なので、1 ステップ送ったあとで終わる。`Outcome` は `LIMITED`（`limit_reason` は `MAX_STEPS`）か、1 ステップで残りの誤差が 3 mm 以内になれば `CONVERGED` のどちらも正常**（終了コード 0。残りの誤差が 3 mm を超えて `LIMITED`（`MAX_STEPS`）になるのが、摩擦で十分に動かなかったときの形。**モック（摩擦なし）では 5 mm の offset で、1 ステップの δ 2.28 mm のあと残り 2.7 mm になり、`CONVERGED` で終わる**。この段の目的は、最初の送信と、積み上げでサーボが実際に動くかを見ること）。
+1 ステップごとに表示を見て Enter（`n` で終了）。**`--max-steps 1` なので、1 ステップ送ったあとで終わる。`Outcome` は `LIMITED`（`limit_reason` は `MAX_STEPS`）か、1 ステップで残りの誤差が 3 mm 以内になれば `CONVERGED` のどちらも正常**（`CONVERGED` は、整定後の `q_meas` の FK が目標（出発点の測定の FK + オフセット）の 3 mm 以内、という意味。関節角の測定にだけ基づき、外部の測定ではなく、IK の残差でもない。終了コード 0。残りの誤差が 3 mm を超えて `LIMITED`（`MAX_STEPS`）になるのが、摩擦で十分に動かなかったときの形。**モック（摩擦なし）では 5 mm の offset で、1 ステップの δ 2.28 mm のあと残り 2.7 mm になり、`CONVERGED` で終わる**。この段の目的は、最初の送信と、積み上げでサーボが実際に動くかを見ること）。
 
 合格:
 
@@ -108,11 +112,11 @@ python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset -0.005 0 0 
 
 ## V3b. JTC 直接・積み上げの確認（2 歩目以降）
 
-V3 は 1 ステップなので、2 歩目の積み上げ（前回の `desired` に積み上がるか）を確かめられない。V3 が合格してから行う。**`--auto` は使わない**（1 ステップごとに Enter）。各実行は T から始める（実行のあと、V2b と同じ手順で T へ戻す）。
+V3 は 1 ステップなので、2 歩目の積み上げ（前回の `desired` に積み上がるか）を確かめられない。V3 が合格してから行う。**`--auto` は使わない**（1 ステップごとに Enter）。**本来は、各実行を T から始める（実行のあと、V2b と同じ手順で T へ戻す）。2026-11-15 は、T に入れ直さず V3 の続きから実行した**（ユーザーの判断）。V3 の +x・−x のあと、desired は V2c と同じ値に戻っていたが、測定は +x に動いたままだった（lift +0.0199、elbow −0.0199）。V3b +x の 1 歩目の `q_cmd` は V3 +x と同じ値で、動きは 0 だった（lift は既にそこにあり、elbow は送る前の `q_cmd − q_meas` が −0.0317 rad）。入れ直さなかったことは結果の解釈に関わるので、記録に書く（`docs/analytic_diff_plan.md` 7.16.5 の f）。
 
 ```bash
-python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset 0.008 0 0 --csv ~/so_arm101_check/diff_V3b_px.csv
-python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset -0.008 0 0 --csv ~/so_arm101_check/diff_V3b_mx.csv
+python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset 0.008 0 0 --csv ~/so_arm101_check/diff_<日付>_V2/V3b_px.csv
+python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset -0.008 0 0 --csv ~/so_arm101_check/diff_<日付>_V2/V3b_mx.csv
 ```
 
 +x 8 mm、続けて −x 8 mm。**`CONVERGED` まで行かなくても失敗にしない**（`LIMITED`（`MAX_STEPS`・`SPIN`・`REVERSAL` など）で終わってもよい。8 mm は 1 ステップ約 2.3 mm なので、4 ステップで足りるかは摩擦しだい）。
@@ -127,13 +131,17 @@ python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset -0.008 0 0 
 
 ±3 mm への追い込み（V4）、MoveIt 経由（V5）、交互の比較（V6）は、実機では行わない。大きな移動は MoveIt の姿勢の目標（経路計画）が基本で、細かい補正は俯瞰カメラの画像との差分で `DiffMode` を回す。**画像なしで、実機で ±3 mm に追い込む確認はしない**。この手順書の目的は、「積み上げでサーボが実際に動くか」を、カメラの誤差と混ぜずに確かめること（V3）。`--route moveit` と `--auto` は道具に残っているが、実機の手順では使わない（`docs/analytic_diff_plan.md` 7.15 の 9・11）。
 
-## V7. V3・V3b の記録の整理（Claude が bag と CSV から。実機を使わない）
+## V7. V3・V3b の記録の整理（Claude が bag と CSV から。実機を使わない。2026-11-15 に済み）
 
-V3・V3b の CSV（`tip_move_over_delta`・`track_gap`・`q_desired_before`・`q_desired_after`・`wait_settle` など）と bag（`/joint_states`・`controller_state`）から、次を表にする: 先端の動き ÷ δ、送る前後の `desired − measured`（垂れ）、整定の秒数、止まったあとの `q_desired` と `q_cmd` の差。**積み上げでサーボが動いたか**（`q_meas` が `q_cmd` に向かったか。V3b の 2 歩目以降で `windup_after` が増え、先端の動き ÷ δ が戻るか）の材料にする。`max_dq`・abs(D) の見直しの材料は、V3・V3b では足りないので、カメラの段で決める。
+結果は **`docs/analytic_diff_plan.md` 7.16**（表 T1〜T6、読み取り、手順書との食い違い）と、`docs/inventory.md` の「実機の確認 V1〜V8」の節（材料のパス・sha256・スクリプト）。ここには結果を重ねない。
+
+次回以降にやり直すときの手順: V3・V3b の CSV と bag（`/joint_states`・`/arm_controller/controller_state`）から、①ステップごとの先端の動き ÷ δ（`tip_move_over_delta`）、②送る前後 1 秒の `desired − measured`、③整定の秒数、④止まったあとの `q_desired` と `q_cmd` の差、⑤`windup_after`、⑥関節ごとの `q_cmd − q_meas_before` と実際の動き（自重に逆らう向きかどうかを分ける）を表にする。CSV に時刻の列がないので、bag の reference の動きを `q_cmd` の終点で CSV の行に結びつける。数字は、リポジトリの外のスクリプトで計算する。`max_dq`・abs(D) の見直しの材料は、V3・V3b では足りないので、カメラの段で決める。
 
 ## V8. 出発点へ戻す（W6 の手順。ユーザーが実行）
 
 `docs/servo_real_check.md` の W6: 動きが止まっているのを確認 → 実測を読む → 戻し先は V2b で控えた出発点の実測 → OMPL（Scaling 0.1）で戻す（**elbow_flex は +1.69009 を超える値には戻さない**。実行の開始位置と実測の差が 0.01 rad 以内）。戻したら S5（腕を折りたたみ姿勢で支えて Ctrl-C 1 回）、bag を止める。
+
+2026-11-15 の実績: RViz の Joints タブで目標（pan −4、lift −85、elbow +96、wrist_flex +25、roll −3 度）を入れて戻した（`send_joint_delta.py` は使っていない）。出発点（`V2a_start_pose.txt`）との差は最大 0.0184 rad（pan）。MoveIt の終点は、RViz の目標から最大 0.0082 rad ずれた（V2b でも同じ。原因は未確認。7.16.4 の 3）。
 
 合格: 出発点の実測との差が小さい（W6 の基準）／停止後の確認の 2 行（`torque OFF and Lock=1 confirmed`・`deactivated`）／`ps` と `ros2 node list --no-daemon` が空。
 
