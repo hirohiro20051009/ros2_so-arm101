@@ -2432,3 +2432,65 @@ gen 6_feetech_rw_probe  use_fake_hardware:=false hardware:=feetech serial_port:=
 - **確認の行バッファ**を `step_runner.py` の `LineReader`・`confirm_answer` に移し、試験を足した（`n` など・EOF・30 秒の無入力で送らない、まとめて届いた複数行は 1 回の確認で 1 行だけ使う）。守りを外す確認（リポジトリの外の写し）7 個で、対応する試験が落ちた。
 - **未確認（確認を足さず記録）**: `moveit` の Ctrl-C、`MoveGroup`・`ExecuteTrajectory` の status にアクティブなゴールがあるとき。**リリース時の整理（`moveit` 経路）の対象に加える**。
 - **`controller_state` は 25 Hz**（`state_publish_rate: 50` ではなく `update_rate: 25` に揃う）。古さの検査 0.3 秒は周期の 7.5 倍で、変更しない。
+
+## `so_arm101_ik` の実機の確認 V1〜V8（2026-11-15。V7 の整理。結果は `docs/analytic_diff_plan.md` 7.16、手順書は `docs/diff_mode_real_check.md`。コードは変更していない）
+
+実機はユーザーが動かした。Claude は CSV・ログ・bag を読み取りだけで整理した（実機・launch・ros2 コマンド・daemon は使っていない）。**以下の材料は git 管理外**（`~/so_arm101_check/`）で、タグやコミットからは戻せない。CSV と .log の全文はここに写さない（今回は削除・書き換えをしないため）。代わりに、パス・大きさ・sha256 を控える。
+
+### 材料（パスは `~/so_arm101_check/` からの相対。大きさはバイト）
+
+`diff_20261115_V2/`:
+
+| ファイル | 大きさ | sha256 |
+|---|---|---|
+| `V3_px.csv`（開始の確認のタイムアウト。見出しだけ） | 349 | `95c17b808a25a81ee9293b74e3dc95420dd2a62e3b4de186c7f90348e59e11fc` |
+| `V3_px.log` | 332 | `aeb5cb4d7519cfc1c1bc4f5cc7c3acbe7659c8a971642244f8da86df52d3977b` |
+| `V3_px2.csv` | 833 | `f6a439cff93512d78ed60b748f2269f007d6da778bcdcf978431fe501d9bab5a` |
+| `V3_px2.log` | 756 | `ffe3af9f517bcec1cbbbe66ca3881154abc1ebac636373bcdc1952077ff9f663` |
+| `V3_mx.csv` | 821 | `a53f3e960672c3d3079573635fd43f3a15b327a6af66fb3cea1740495cb4c483` |
+| `V3_mx.log` | 755 | `a996f6dea10559529c27fe4db1d282ded9ad734ef6149d09efdb5384996be4f6` |
+| `V3b_px.csv` | 2276 | `851b7df9f83c76cc8adf58f9d30e1b45b14d7e9575a400e06326b2eedab28343` |
+| `V3b_px.log` | 1800 | `e650cc5fb09825d1e09a98179d7289bb683e68b409c0f3101dba73c6835f5845` |
+| `V3b_mx.csv` | 2289 | `c2d2328720ec779bf3cb5c793c6922e05aca9a3345036aeac94882fc80e4cf76` |
+| `V3b_mx.log` | 1795 | `e33d2a59058f0494a3dce238044fcff0aad4346a613193c72b696da952810533` |
+| `V2a_dry_run.log` | 291 | `580ee59d5d1d3023d0f9c8809637cb61412560d39aa39d2e894533d0f0af592c` |
+| `V2a_start_pose.txt` | 143 | `0041e51574e959d0c617810f078756661dd31c235ee474a4f9859086716b82ae` |
+| `V2c_dry_run.log` | 265 | `583a236090002ff0000c8f3d46a101ba33558a124eeb1be6bd5d2174deb6fb89` |
+| `V2c_ik_model_check.log` | 5155 | `1f98dcad6e986e223b20eb9edbc64fbcbe0e3dfd5e6e43ab163fb8e05802259a` |
+| `V2_launch.log` | 50329 | `b14308f77848f6e749c22cdea5e4ffac1a950ae2bbc49cdc4713ee326e513fcd` |
+| `V8_readonly.log`（V8 のあとの別の read-only の起動。bag の外） | 34377 | `67a60858948dd866a6e0d3bf079d3932fcaaa49a5fe81e1a5377ed9c04f5e784` |
+| `bag_V2/bag_V2_0.db3` | 361172992 | `818079bd9a0b33ce339c05b96781d18db76acfc10022bc232ef92f57c9b49b85` |
+| `bag_V2/metadata.yaml` | 1522 | `853c23ee92a6821950886daebf0f11e15324139dcf561590951483add1866e5d` |
+
+`diff_20261115_V1/`:
+
+| ファイル | 大きさ | sha256 |
+|---|---|---|
+| `V1_dry_run.log`（`V2a_dry_run.log` と同じ内容） | 291 | `580ee59d5d1d3023d0f9c8809637cb61412560d39aa39d2e894533d0f0af592c` |
+| `V1_ik_model_check.log` | 5108 | `b4813b954d1dd7d66cf1a7ce669b455768b2e17a2f2460808aabbf8bb645f3d8` |
+| `V1_launch.log` | 34373 | `f5a6e1286eca5c3f6ecbab3aa48bde50592e3e55b0bddbfbeae48c5da5380723` |
+| `bag_V1/bag_V1_0.db3` | 2854912 | `800d3f75c59b6b99415c057c8ba74bfc09e35176cf4f6163ecd60679fd060a0e` |
+| `bag_V1/metadata.yaml` | 1510 | `cf4837f247d10a2c4e24e8a7df54ab39eb5c8e17d44d3d103f77dccac6631ca3` |
+
+### bag の metadata の要点
+
+- `bag_V2`: sqlite3、期間 7039.76 秒、開始 1794722500.508 s（エポック秒）、総数 527,983 件。`/joint_states`（`sensor_msgs/msg/JointState`）351,989 件（約 50 Hz）、`/arm_controller/controller_state`（`control_msgs/msg/JointTrajectoryControllerState`）175,994 件（約 25 Hz）。V2a の起動から V8 の停止まで 1 本。reference の動きは 12 回（MoveIt 2 回、道具 10 回）。
+- `bag_V1`: sqlite3、期間 54.5 秒、総数 4,089 件（`/joint_states` 2,726 件、`/arm_controller/controller_state` 1,363 件）。read-only の起動。
+
+### スクリプトと出力（リポジトリの外。消さずに残す）
+
+`/tmp/claude-1000/-home-hirok-ros2-so-arm101/d4f1922d-c370-4c18-8a21-0314cf881cf6/scratchpad/v7/` の `extract.py`・`analyze.py`・`resid.py`・`events.py`（読み取りだけ）、出力 `tables.txt`、bag の中間ファイル `bag.pkl`（`bag_prev.pkl` は同一の複製）。**`/tmp` の下なので再起動で消えうる**。数字を作り直すときは、`extract.py` を（ROS の環境を source して）`python3 extract.py <bag のディレクトリ> bag.pkl` で実行し、`analyze.py` を実行する。
+
+### 結果の要点（詳細は 7.16）
+
+- 道具の 10 回の送信は、すべて `OK`。`REFUSED`・`NOT_SETTLED`・`OTHER_GOAL`・`DESIRED_MISMATCH` はなし。`windup_after` は 0.0179〜0.0349 rad。
+- **`CONVERGED` は、整定後の `q_meas` の FK が目標の 3 mm 以内**（関節角の測定にだけ基づく）。計画の段階の「IK の残差」という記述は誤りだった。
+- 自重に逆らう向きの関節は、送る前の `q_cmd − q_meas` が 0.0317 rad 以下の 5 例では動かず、0.0401〜0.0532 rad の 7 例では動いた（観察した範囲。0.0317〜0.0401 は未観察）。
+- T の elbow の手前止まりは、desired との差 0.0337 rad、T の目標との差 0.0387 rad（W1 は 0.0265 rad）。`FK(desired)` と `FK(q_meas)` の差は 7.39 mm。
+- MoveIt の終点は、V2b・V8 の両方で RViz の目標から最大 0.0082 rad ずれた（原因は未確認。Goal State は Joints タブのスライダー）。
+- V8 の戻りは、出発点との差が最大 0.0184 rad（pan）。
+
+### リリース前の整理の項目に追加
+
+- `tools/diff_mode_run.py` の `record:`・`exit:`・不感帯の表示・`interrupted:` の `print` に `flush=True` を付けるか検討する（確認の表示とステップの表示は既に flush している。`tee` につないでも確認はため込まれない。実機では `python3 -u` で実行した）。今回はコードを変更していない。
+- 手順書（`docs/diff_mode_real_check.md`）の `moveit` 経路・`--auto` の記述は、`moveit` 経路の整理と合わせて見直す（既存の項目）。
