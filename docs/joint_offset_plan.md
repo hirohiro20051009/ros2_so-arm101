@@ -58,6 +58,8 @@ elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, zero_offset_deg: 
 
 ### 2.4 [diag] と eeprom 欄への影響
 
+（J2 で実装済み: 起動の INFO は δ ≠ 0 の関節ごとに 1 行にまとめ、実効の許容も同じ行に入れた。式と文面は inventory.md の J2 の節。）
+
 - 事実: [diag] は EEPROM の Homing_Offset・Min・Max と yaml の eeprom 欄を比べる（`sts3215_system.cpp:183-198`）。書き込みモードは違うと起動を拒否する。換算には使わない。
 - 補正値は EEPROM と無関係なので、**MATCH／MISMATCH の判定に入れない**。
 - 追加（案）: 起動時に、補正値が 0 でない関節について INFO を 1 行出す: 例 `zero_offset_deg: elbow_flex -6.31 deg (the reported position is the measured position plus this)`。[diag] の行そのものは変えない（既存の試験・ログの形を保つ）。

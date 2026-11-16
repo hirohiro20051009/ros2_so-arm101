@@ -3045,3 +3045,22 @@ elbow の関節角に δ を足して fk_tag を計算し直し、道具と同�
 
 - 確認のコマンドに、禁止されている Python を 1 回混ぜた（`python -` を誤って書いた。権限の分類器が拒否し、実行されていない）。以後は混ぜない。
 - 実機・シリアルポート・カメラ・launch・モックは使っていない。全体の `colcon build` と、hardware・calibration の `colcon test` は、ユーザーが「実機も launch も動かしていない」と記入したうえで実行した。
+
+## J2: 異常判定の許容（案 B）・クランプの WARN・起動の INFO（2026-11-16。コード: コミット `9adbb50`。計画は `docs/joint_offset_plan.md` の 4 章と 9.1。yaml は変えていない。実機・launch・モックは使っていない）
+
+- 戻し方: J2 の直前のコミット `93c4fd8` から取り出せる（`git revert` は承認を得てから）。yaml は変えていない（全関節の δ は 0）ので、J2 の時点では実機の挙動は今までと同じ（許容は全関節・両側で 50 のまま、ログの行も増えない）。
+- 変えたもの（hardware のみ）: `calibration.hpp/.cpp`（`clamp_tolerance_ticks`）、`sts3215_system.hpp/.cpp`（許容 `tol_lo_`・`tol_hi_`、WARN、起動の INFO、試験用の `clamp_warned_total()`）、試験（`test_conversion.cpp` に 7、`test_sts3215_system.cpp` に 11）。
+- **許容の式（s の式）**: s = −direction × zero_offset_deg × angle_ticks / 360（補正で `rad_to_raw` の出力が動く tick 数）。s > 0 なら `tol_hi = 50 + ceil(s)`、s < 0 なら `tol_lo = 50 + ceil(−s)`、s = 0 なら両側 50。gripper は常に 50。広がるのは縮んだ側だけ。ceil は広げる向きの丸め。
+  - elbow（direction +1）、δ = −6.3°: s = 6.3 × 4095 / 360 = 71.66 → ceil で 72 → **tol_hi = 50 + 72 = 122**、tol_lo = 50。δ = −10°（上限）なら 113.75 → 114 → 164。
+  - direction −1 の関節では raw の向きが逆なので、δ が負でも広がるのは下側（計画 4.2 の「δ が負なら上側」は真の角度の座標の言い方で、raw の側は direction で決まる）。
+- クランプの場所は raw の側（`sts3215_system.cpp` の `write_goal_positions`。`rad_to_raw` の後、`raw_min`・`raw_max` で切る）。許容は異常（fault）の判定だけに使う。WARN は、許容が基準（50）より広い側で、`want` がその端を 1 tick でも超えたときに出す（許容を超えて fault になるときも出す。fault は従来どおり別に働く）。関節ごとに 5 秒に 1 回まで（時刻は `write()` に渡された時刻。activate のたびに数え直す）。補正の無い関節・縮まない側のクランプは今までどおり黙る。
+- **起動の INFO（確認の印）**: on_init で、δ ≠ 0 の関節ごとに 1 行: `zero_offset_deg: elbow_flex -6.30 deg (reported position = measured position + this); clamp tolerance low=50 high=122 ticks (default 50)`。全関節が 0 のときは出さない。**この行が出ることが、新しいバイナリで yaml の δ が読まれた印**（古いバイナリは `zero_offset_deg` を黙って無視するので、この行が出ない）。**J5 の実機の手順書で、この行を確認する。**
+- `[diag]` の行と判定は変えていない（試験: δ ≠ 0 でも `[diag] EEPROM vs yaml: 6/6 joints match`）。raw の step limit・起動の保持・monitor・Goal_Position の読み戻しは δ に影響されないので変えていない。
+- 試験: hardware 119 → **137**（+18: conversion 7、system 11。範囲の目安 12〜22 の内側）、calibration 73（不変）、失敗 0。ik・camera・bringup・description・moveit_config は `git diff --stat` に出ない。全体は 890 → 908。lint の追加は無い（hardware に lint の指定が無い）。ログは `rcutils_logging_set_output_handler` で試験の中で取る（RAII の `LogCapture`。デストラクタで必ず元に戻す。`RestoresTheHandlerWhenTheScopeEnds` が確かめる）。
+- 守りを外す確認（スクラッチのコピー。別の build・install。リポジトリの build・install は使わない）: 7 許容を 50 のまま → ClampTolerance 5 件と system の許容・WARN・INFO の計 9 件が落ちた。8 全関節を広げる → 補正の無い関節・反対側・補正なし・WARN の無音・INFO の計 5 件。9 INFO を外す → INFO の試験。11a WARN を INFO にする → WARN の試験。11b 5 秒の間引きを外す → WARN の試験。12 direction を無視 → SideFollowsTheSign…。13 両側を広げる → 反対側が 50 の試験など 5 件。14 ceil を floor → 端数・114・122 の試験など 7 件。15 δ = 0 で 1 tick 広げる → 全関節 50 の試験など 9 件。計画 8.2 の 7・8・9・11 と、J2 で足した 12〜15。いずれも期待どおり落ちた。
+- 次の段: J3（calibration の apply の持ち越し・`pose_margin.py`）。
+
+### 進め方の記録（J2）
+
+- 実機・シリアルポート・カメラ・launch・モックは使っていない（ユーザーが「実機も launch も動かしていない」と記入したうえで、全体の `colcon build` と hardware・calibration の `colcon test` を実行した）。Python は実行していない。
+- 守りを外す確認の材料は `/tmp/claude-1000/.../scratchpad/mut/`（スクラッチ。リポジトリの外）。
