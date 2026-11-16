@@ -2846,3 +2846,66 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - **T で見えない**: T（先端が真下）では、手でも移動でも detections が 0 だった。見える・見えないの境の姿勢は未調査。C3 以降で T が必要になったら、境の姿勢を調べる。
 - **SRAM が電源投入時の値に戻っていた原因**: 不明。次回の起動でも S2 のような値かを `[diag]` で見る。
 - **`Unable to transform` の WARN（102 件）**: カメラの TF が `base_link` につながっていないために出る。C3・C4 でつないだ後に、この WARN が消えるかを確かめる。
+
+## C3-a の道具（2026-11-16。コード: コミット `14ce22d`。計画は `docs/camera_stage_plan.md` の 9.1 と 11 章（注記を追加）。実機・カメラ・launch・モックは使っていない。c2_points.csv での実行はまだしていない）
+
+「事実」は実行して確かめたこと、「推測」は値や見立て。
+
+### 要点
+
+- 追加したファイル（5 つ）: `src/so_arm101_camera/so_arm101_camera/extrinsics.py`（純粋。Kabsch、Umeyama のスケール、LOO、s_min、換算、四元数、合否、yaml と sidecar の文字列、`write_outputs`）、`tools/camera_extrinsics_run.py`、試験 2 本（`test_extrinsics.py`、`test_camera_extrinsics_tool.py`）、`CMakeLists.txt`（試験の登録 2 行）。
+- 引数: `CSV`、`--meta`、`--output`（既定は src の `config/camera_extrinsics.yaml`）、`--exclude LABEL`、`--write`、`--force`。終了コード: 0 は合格、2 は不合格または拒否（何も書かない）。
+- 換算（P は光学フレームの `cam_tag`、Q は base_link の `fk_tag`）: Kabsch は Q ≈ R·P + t。meta の `camera_link_to_optical_frame`（camera_link から光学フレーム）の R_lo、t_lo を使い、R_bl = R·R_loᵀ、t_bl = t − R_bl·t_lo。出力は base_link から見た camera_link（`camera_config.py:179-189` と同じ向き）。四元数は w ≥ 0。
+- 行の選択（すべて満たす行を使う）: tag_seen・still・stable が 1、cam_n が 10 以上（推測）、incidence_deg が 60 以下、cam_std が各軸 1 mm 以下、数値が有限。LOO は fk_tag が 10 mm 以内（推測）の行を 1 組として組ごとに外す。
+- 合否（すべて推測）: 使った行 6 以上、RMS 5 mm 以下、LOO の最大 8 mm 以下、スケール 1 ± 0.01、s_min 25 mm 以上、反射の補正が不要。点ごとの最大の残差は独立のゲートにしない。不合格でも、残差・LOO・スケールと含意するタグの一辺・s_min と特異値をすべて表示してから終了コード 2。
+- 書き込み: 本体は `translation_m` と `quaternion_xyzw` の 2 キーだけ（`camera_config.py:162-165` の検査に合わせる）。記録は sidecar `camera_extrinsics.yaml.meta.yaml`。一時ファイルに作って `load_extrinsics` で読み戻してから、新規は `os.link`、`--force` は `os.replace`。本体を最後に書く。既存の本体か sidecar があれば `--force` が無いと拒否。不合格なら `--write --force` でも書かない。
+- install にはビルドで反映する（install 側の `config/` はコピーで、symlink ではない）。
+
+### 件数（事実。camera の `colcon test`）
+
+| 区分 | 見込み | 実数 |
+|---|---|---|
+| pytest | 約 55（承認の目安 50〜60） | 244（既存 185 + 59。extrinsics 45、道具 14） |
+| lint | +6 | 29（既存 23 + 6） |
+| CTest | +2 | 12（既存 10 + 2） |
+| camera の合計 | 約 281（270〜295） | 285、失敗 0 |
+
+- 全体は 809 → 876 件（ほかのパッケージは変更していないので、記録済みの値のまま。再実行はしていない）。
+- 見込みとの差: 試験を 1 件足した（下の m17）。
+- tools の flake8（`python3 -m flake8 --max-line-length 99 tools/camera_extrinsics_run.py`）は 0 件。
+
+### 守りを外す確認（スクラッチのコピー。19 通り。すべて落ちた）
+
+スクリプト `mutate_c3.sh`（sha256 d65310654380e99207c9e1d4d61c8ca2a21253b326cee1b1a8e7b4557ae349e2）と結果 `mutate_c3_result.txt`（sha256 e80ecb15ee5c1aae42f7a9202ea2b1ab588f63f323767fb26d0c1fdb9bb41186）は、スクラッチ（git 管理外）。ベースラインは 59 件が通る。
+
+| 番号 | 外した守り | 結果 |
+|---|---|---|
+| m01〜m05 | RMS、LOO、スケール、s_min、行数のゲートをそれぞれ外す | すべて落ちた |
+| m06 | RMS の境界を `>` から `>=` に変える | 落ちた |
+| m07 | cam_n のゲートを外す | 落ちた |
+| m08 | stable をゲートから外す | 落ちた |
+| m09 | 不合格でも `--write` で書く | 落ちた |
+| m10 | `--force` なしの上書きを許す | 落ちた |
+| m11 | R_lo の転置を忘れる | 落ちた |
+| m12 | t_lo の符号を逆にする | 落ちた |
+| m13 | P と Q を取り違える | 落ちた |
+| m14 | 反射の補正を外す | 落ちた |
+| m15 | 本体に余分なキーを足す | 落ちた |
+| m16 | 既定の書き先を install にする | 落ちた |
+| m17 | LOO を組ごとでなく 1 行ずつにする | 1 回目は生き残り（`solve` の組を検査する試験が無かった）。試験を 1 件足して落ちた |
+| m18 | 禁止の import（subprocess）を足す | 落ちた |
+| m19 | 書き込みの関数の外で `write_text` する | 落ちた |
+
+### SRAM の件の結論（2026-11-16。読み取りのみ。ポートは開いていない）
+
+- inventory.md の 876 行（「acceleration=50 だけが残り、torque_limit は 1000（gripper 500）」）と、チャットの引き継ぎ（「pan・roll・gripper の torque_limit=500 も残る」）は、どちらも**その実行の条件では正しい**。違いは直前の書き込みモードの `torque_limit` の起動引数。
+- 876 行は 1 回目の W0（既定の 1000）の停止後の読み取り。出どころは `~/so_arm101_check/write_W0_after.log:45-50` の `[diag]` で、全関節が `acceleration=50`、pan・lift・elbow・wrist_flex・roll が `torque_limit=1000`、gripper が 500。
+- 引き継ぎは `torque_limit:=500` で動かした後の状態。出どころは `write_W2.log` の起動直後の `[diag]`（書き込みの前の値）と `servo_W6_after.log` で、pan・roll・gripper が 500、lift・elbow・wrist_flex が 1000、全関節が `acceleration=50`。
+- 理由: `shutdown_servos`（`sts3215_system.cpp:851` 付近）が書くのは Torque_Enable=0 と Lock=1 だけ。Torque_Limit は元に戻さない。この件は 1873-1881 行にも同じ結論がある。
+- 今の腕（推測。読み戻しは無い）: C2 の最後の書き込みモード（`W0_arm_launch.log:59`）は `torque_limit=500` だったので、停止後は pan・roll・gripper が 500、lift・elbow・wrist_flex が 1000、`acceleration=50` のはず。C2 の S2 と W0 の起動直後は `acceleration=0 torque_limit=1000`（gripper 500）で、電源投入時の値に戻っていた（原因は不明。上の C2 の節の記載のとおり）。
+- 引き継ぎの正しい書き方: 「直前の書き込みモードの `torque_limit` が pan・roll に残る。gripper は常に最大 500」。
+
+### 次
+
+- `c2_points.csv` での道具の実行（`--write` なし。ログは新しいディレクトリ `~/so_arm101_check/camera_20261116_C3/`）は、ユーザーの承認を得てから。実行の仕方（`python3` の `-I` か `-s`）は、そのとき決める。
+- 合格したら C3-b（`--write` で src に書き、ビルドして install にコピーし、試験を足してコミット）。不合格なら何も書かずに報告。
