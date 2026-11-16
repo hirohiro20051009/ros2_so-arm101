@@ -2553,13 +2553,13 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 
 - 新しいパッケージ `src/so_arm101_camera/`（ament_cmake と ament_cmake_python。MIT）。`launch/camera.launch.py`、`config/realsense.yaml`（読む相手は rs_launch.py。3 値）、`config/apriltag.yaml`（読む相手は apriltag_node。旧の値）、`so_arm101_camera/camera_config.py`、`test/test_camera_config.py`。`docs/third_party.md` に「実行時に使う apt パッケージ（配布しない）」の節を足した。bringup・ik・ほかの既存パッケージ・MoveIt の設定は変えていない。
 - 検査と換算（未宣言の引数の検査、extrinsics の検査と TF の引数の作成、yaml の変換）は camera_config.py だけに書き、camera.launch.py はそれを呼ぶだけ（試験したコードと実際に動くコードが同じ）。未宣言の引数の検査は bringup.launch.py:59-86 の複製で、出どころは camera_config.py のコメントに書いた。
-- extrinsics_file の扱い: 既定のパスでファイルが無いときは TF を出さずログを 1 行。既定以外のパスを指定してファイルが無いとき、およびファイルはあるが中身が不正なとき（キーの欠け・余分、要素数、数値でない・NaN・inf、クォータニオンのノルムが 1 から 1e-3 を超えて離れている）は、どのノードも起動する前にエラーで止まる。ノルムの許容値 1e-3 は**推測の値**（打ち間違いや壊れた値を見つけるため）。TF の引数に渡す前の正規化はしていない（yaml の値をそのまま渡す。tf2 側で正規化されるかは未確認）。yaml の形は C1 で決めた `translation_m`（3 要素）と `quaternion_xyzw`（4 要素）で、C3 がこの形で書く。
+- extrinsics_file の扱い: 既定のパスでファイルが無いときは TF を出さずログを 1 行。既定以外のパスを指定してファイルが無いとき、およびファイルはあるが中身が不正なとき（キーの欠け・余分、要素数、数値でない・NaN・inf、クォータニオンのノルムが 1 から 1e-3 を超えて離れている）は、どのノードも起動する前にエラーで止まる。ノルムの許容値 1e-3 は**推測の値**（打ち間違いや壊れた値を見つけるため）。検査の後に正規化してから TF の引数に渡す（コミット `d2b497b`）。yaml の形は C1 で決めた `translation_m`（3 要素）と `quaternion_xyzw`（4 要素）で、C3 がこの形で書く。
 - `ros2 launch so_arm101_camera camera.launch.py --show-args` の表示は 2 個だけ（use_apriltag、extrinsics_file）。rs_launch の引数は出ない。
 
 ### 試験の件数（so_arm101_camera）
 
-- 48 件（pytest 31、lint 11、CTest 6）。失敗 0、skip 0。見込み（計画の 33、承認した 36）との差は pytest が +12。extrinsics の不正な内容の網羅（12 通り）、既定以外のパスの不在、ノルムの境界、壊れた yaml を足したため。
-- 既存の 591 件は変わらない（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 364）。累計は 591 + 48 = 639 件。失敗 0。
+- 49 件（pytest 32、lint 11、CTest 6）。失敗 0、skip 0。見込み（計画の 33、承認した 36）との差は pytest が +13。extrinsics の不正な内容の網羅（12 通り）、既定以外のパスの不在、ノルムの境界、壊れた yaml、正規化（ノルムが少しずれた値を入れると渡す値のノルムが 1 になる）を足したため。
+- 既存の 591 件は変わらない（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 364）。累計は 591 + 49 = 640 件。失敗 0。
 - bringup の `--show-args` は 21 個で、前後の diff は空。
 
 ### gen_rd6.sh の件
