@@ -37,7 +37,9 @@ constexpr int kDefaultTorqueLimit = 1000;
 constexpr int kGripperTorqueLimit = 500;
 constexpr double kDefaultMonitorPeriod = 1.0;  // s
 constexpr int kDefaultAnomalyCycles = 50;      // 異常な指令が続いたらフォルトにする周期数（50 Hz で 1 秒）
-constexpr int kClampToleranceTicks = 50;       // 限界外の指令がこの tick 数以内なら黙ってクランプし、異常と数えない
+// 限界外の指令がこの tick 数以内なら黙ってクランプし、異常と数えない（基準値）。zero_offset_deg で範囲が縮む側だけ、
+// 縮んだ分を広げる（clamp_tolerance_ticks）。補正の無い関節は常にこの値。
+constexpr int kClampToleranceTicks = 50;
 
 class Sts3215System : public hardware_interface::SystemInterface
 {
@@ -66,6 +68,7 @@ public:
   std::string fault_reason() const;
   unsigned long port_contention() const {return port_.contention_count();}
   unsigned long limited_total() const;
+  unsigned long clamp_warned_total() const;  // 補正で縮んだ側のクランプ WARN を出した回数（間引き後）
   unsigned long retried_total() const;        // 周期の読み取りを再試行した回数（試験・測定用）
   unsigned long failed_cycles_total() const;  // 再試行しても失敗した周期の数（同上）
 
@@ -150,6 +153,9 @@ private:
   unsigned long monitors_{0}, goal_writes_{0};
   std::vector<unsigned long> limited_count_;
   std::vector<double> last_limit_warn_s_;
+  std::vector<int> tol_lo_, tol_hi_;  ///< 関節ごとの異常判定の許容（on_init で計算）
+  std::vector<double> last_clamp_warn_s_;
+  std::vector<unsigned long> clamp_warn_count_;
 };
 
 }  // namespace so_arm101_hardware

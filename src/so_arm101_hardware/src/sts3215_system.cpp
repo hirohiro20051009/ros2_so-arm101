@@ -100,6 +100,9 @@ hardware_interface::CallbackReturn Sts3215System::on_init(const hardware_interfa
     }
     cal_.push_back(c);
     ids_.push_back(c->id);
+    const ClampTolerance tol = clamp_tolerance_ticks(*c, calibration_.angle_ticks, kClampToleranceTicks);
+    tol_lo_.push_back(tol.low);
+    tol_hi_.push_back(tol.high);
   }
   const size_t n = info_.joints.size();
   const double nan = std::numeric_limits<double>::quiet_NaN();
@@ -110,6 +113,14 @@ hardware_interface::CallbackReturn Sts3215System::on_init(const hardware_interfa
     logger(), "initialized: port=%s calibration=%s [%s] timeout=%dms max_consecutive_failures=%d",
     serial_port_.c_str(), calibration_file_.c_str(), calibration_.source.c_str(), timeout_ms_,
     max_consecutive_failures_);
+  // 補正値が 0 でない関節だけ 1 行ずつ（全部 0 なら何も出さない）。この行が出ることが、yaml の補正値が読まれた印
+  for (size_t i = 0; i < cal_.size(); ++i) {
+    if (cal_[i]->zero_offset_deg == 0.0) {continue;}
+    RCLCPP_INFO(
+      logger(), "zero_offset_deg: %s %.2f deg (reported position = measured position + this); "
+      "clamp tolerance low=%d high=%d ticks (default %d)", cal_[i]->name.c_str(), cal_[i]->zero_offset_deg,
+      tol_lo_[i], tol_hi_[i], kClampToleranceTicks);
+  }
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
@@ -440,6 +451,14 @@ unsigned long Sts3215System::limited_total() const
   std::lock_guard<std::mutex> lock(mu_);
   unsigned long n = 0;
   for (auto v : limited_count_) {n += v;}
+  return n;
+}
+
+unsigned long Sts3215System::clamp_warned_total() const
+{
+  std::lock_guard<std::mutex> lock(mu_);
+  unsigned long n = 0;
+  for (auto v : clamp_warn_count_) {n += v;}
   return n;
 }
 
@@ -836,6 +855,8 @@ bool Sts3215System::activate_write_mode()
   }
   limited_count_.assign(n, 0);
   last_limit_warn_s_.assign(n, -1e9);
+  last_clamp_warn_s_.assign(n, -1e9);
+  clamp_warn_count_.assign(n, 0);
   anomaly_run_ = 0;
   have_monitor_time_ = false;
   monitor_fail_run_ = 0;
@@ -967,8 +988,21 @@ hardware_interface::return_type Sts3215System::write_goal_positions(const rclcpp
       anomalous = true;  // NaN / inf は破棄して直前の目標を保持
     } else {
       want = rad_to_raw(c, calibration_.angle_ticks, cmd);
-      if (want < c.raw_min - kClampToleranceTicks || want > c.raw_max + kClampToleranceTicks) {anomalous = true;}
-      want = std::min(std::max(want, c.raw_min), c.raw_max);
+      if (want < c.raw_min - tol_lo_[i] || want > c.raw_max + tol_hi_[i]) {anomalous = true;}
+      // 補正で範囲が縮んだ側（許容が基準より広い側）でクランプされるときだけ WARN（関節ごとに 5 秒に 1 回）。
+      // 許容を超えて異常になる場合も出す（fault は上の判定が従来どおり行う）
+      const bool over_hi = tol_hi_[i] > kClampToleranceTicks && want > c.raw_max;
+      const bool over_lo = tol_lo_[i] > kClampToleranceTicks && want < c.raw_min;
+      if ((over_hi || over_lo) && t - last_clamp_warn_s_[i] >= 5.0) {
+        last_clamp_warn_s_[i] = t;
+        ++clamp_warn_count_[i];
+        RCLCPP_WARN(
+          logger(), "clamp: '%s' command maps to raw %d, beyond the %s end %d by %d ticks (zero_offset_deg %.2f "
+          "shrinks the reachable range on that side); clamped (warned %lu times so far)", c.name.c_str(), want,
+          over_hi ? "max" : "min", over_hi ? c.raw_max : c.raw_min, over_hi ? want - c.raw_max : c.raw_min - want,
+          c.zero_offset_deg, clamp_warn_count_[i]);
+      }
+      want =std::min(std::max(want, c.raw_min), c.raw_max);
       const int d = want - prev;
       if (std::abs(d) > max_step_raw_[i]) {
         const int limited = prev + (d > 0 ? 1 : -1) * max_step_raw_[i];

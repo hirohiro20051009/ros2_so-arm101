@@ -81,6 +81,18 @@ int rad_to_raw(const JointCalibration & j, int angle_ticks, double rad);
 /// rad_to_raw の途中値（丸める前の連続値）。基準の実装の切り捨てとの比較試験用。
 double rad_to_raw_continuous(const JointCalibration & j, int angle_ticks, double rad);
 
+/// 限界外の指令を「異常」と数えない許容（tick）。low は raw_min の下側、high は raw_max の上側。
+/// zero_offset_deg で到達できる範囲が縮む側だけ、縮んだ分を広げる:
+///   s = −direction·zero_offset_deg·angle_ticks/360（補正で rad_to_raw の出力が動く tick 数）
+///   s > 0 なら high = base + ceil(s)、s < 0 なら low = base + ceil(−s)、s = 0 なら両方 base。
+/// ceil は広げる向きの丸め。LinearPercent は常に base / base。docs/joint_offset_plan.md 4 章（案 B）
+struct ClampTolerance
+{
+  int low{0};
+  int high{0};
+};
+ClampTolerance clamp_tolerance_ticks(const JointCalibration & j, int angle_ticks, int base);
+
 /// 1 tick に相当する rad（診断・比較用）。Angle: 2π/angle_ticks、LinearPercent: radians(100/(max−min))。
 double tick_in_rad(const JointCalibration & j, int angle_ticks);
 

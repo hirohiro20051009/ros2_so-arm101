@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdarg>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -785,4 +787,206 @@ TEST(ZeroOffset, ActivationHoldsEveryJointAtTheCurrentRaw)
   for (int i = 0; i < 6; ++i) {EXPECT_EQ(r.servos.goal_position(i + 1), kPresent[i]) << kJoints[i];}
   EXPECT_FALSE(r.sys->fault_latched());
   EXPECT_EQ(r.sys->limited_total(), 0u);
+}
+
+// ---------------------------------------------------------------- 異常判定の許容と WARN（J2。案 B）
+#include <rcutils/logging.h>
+
+namespace
+{
+// rcutils のログの出力を一時的に横取りする。デストラクタで必ず元のハンドラに戻す（試験が失敗しても）
+class LogCapture
+{
+public:
+  LogCapture()
+  {
+    instance() = this;
+    prev_ = rcutils_logging_get_output_handler();
+    rcutils_logging_set_output_handler(&LogCapture::handler);
+  }
+  ~LogCapture()
+  {
+    rcutils_logging_set_output_handler(prev_);
+    instance() = nullptr;
+  }
+  LogCapture(const LogCapture &) = delete;
+  LogCapture & operator=(const LogCapture &) = delete;
+
+  struct Line
+  {
+    int severity;
+    std::string text;
+  };
+  std::vector<Line> lines;
+  int count(int severity, const std::string & needle) const
+  {
+    int n = 0;
+    for (const auto & l : lines) {
+      if (l.severity == severity && l.text.find(needle) != std::string::npos) {++n;}
+    }
+    return n;
+  }
+  bool has_text(const std::string & needle) const
+  {
+    for (const auto & l : lines) {if (l.text.find(needle) != std::string::npos) {return true;}}
+    return false;
+  }
+
+private:
+  static LogCapture *& instance() {static LogCapture * p = nullptr; return p;}
+  static void handler(
+    const rcutils_log_location_t *, int severity, const char *, rcutils_time_point_value_t, const char * format,
+    va_list * args)
+  {
+    char buf[2048];
+    va_list copy;
+    va_copy(copy, *args);
+    vsnprintf(buf, sizeof(buf), format, copy);
+    va_end(copy);
+    if (instance()) {instance()->lines.push_back({severity, buf});}
+  }
+  rcutils_logging_output_handler_t prev_{nullptr};
+};
+
+// elbow（direction 1）の補正後の許容は high = 122（δ = −6.3°）、low = 50
+const int kElbowHighTol = 122;
+}  // namespace
+
+TEST(ClampTolerance, ZeroOffsetWidensOnlyTheShrunkSideAndOnlyOfThatJoint)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  const int hi = r.cal.joints[2].raw_max;
+  // 広げた側: 許容いっぱい（hi + 122）は fault にならず、クランプされる
+  r.command_raw(2, hi + kElbowHighTol);
+  r.cycle(120);
+  EXPECT_FALSE(r.sys->fault_latched());
+  EXPECT_LE(r.servos.goal_position(3), hi);
+}
+
+TEST(ClampTolerance, BeyondTheWidenedSideIsStillAnAnomaly)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.command_raw(2, r.cal.joints[2].raw_max + kElbowHighTol + 1);
+  r.cycle(120);
+  EXPECT_TRUE(r.sys->fault_latched());
+}
+
+TEST(ClampTolerance, TheOtherSideOfTheSameJointKeepsTheBase)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.command_raw(2, r.cal.joints[2].raw_min - kClampToleranceTicks - 1);
+  r.cycle(120);
+  EXPECT_TRUE(r.sys->fault_latched());
+}
+
+TEST(ClampTolerance, JointsWithoutAnOffsetKeepTheBase)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  // shoulder_lift（補正なし）は上側 51 tick で異常
+  r.command_raw(1, r.cal.joints[1].raw_max + kClampToleranceTicks + 1);
+  r.cycle(120);
+  EXPECT_TRUE(r.sys->fault_latched());
+}
+
+TEST(ClampTolerance, WithoutAnOffsetTheBehaviourIsTheOldOne)
+{
+  Rig r;  // 補正なし
+  ASSERT_TRUE(r.start());
+  r.command_raw(2, r.cal.joints[2].raw_max + kClampToleranceTicks);  // ちょうど 50 は黙ってクランプ
+  r.cycle(120);
+  EXPECT_FALSE(r.sys->fault_latched());
+  Rig r2;
+  ASSERT_TRUE(r2.start());
+  r2.command_raw(2, r2.cal.joints[2].raw_max + kClampToleranceTicks + 1);
+  r2.cycle(120);
+  EXPECT_TRUE(r2.sys->fault_latched());
+}
+
+TEST(ClampWarn, IsWarnAndAtMostOnceEveryFiveSecondsPerJoint)
+{
+  LogCapture log;
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.command_raw(2, r.cal.joints[2].raw_max + 20);  // 縮んだ側で 20 tick 超（許容の内側）
+  r.cycle(300);                                    // 6 秒（周期 0.02 s）。1 周期目と 5 秒後の 2 回だけ
+  EXPECT_FALSE(r.sys->fault_latched());
+  EXPECT_EQ(r.sys->clamp_warned_total(), 2u);
+  EXPECT_EQ(log.count(RCUTILS_LOG_SEVERITY_WARN, "clamp: 'elbow_flex'"), 2);
+  EXPECT_EQ(log.count(RCUTILS_LOG_SEVERITY_INFO, "clamp: 'elbow_flex'"), 0);
+}
+
+TEST(ClampWarn, IsAlsoIssuedBeyondTheToleranceWhileTheFaultIsRaisedSeparately)
+{
+  LogCapture log;
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.command_raw(2, r.cal.joints[2].raw_max + kElbowHighTol + 30);
+  r.cycle(120);
+  EXPECT_TRUE(r.sys->fault_latched());
+  EXPECT_GE(r.sys->clamp_warned_total(), 1u);
+}
+
+TEST(ClampWarn, IsSilentInsideTheRangeAndOnTheUnshrunkSideAndWithoutAnOffset)
+{
+  {
+    Rig r(fixture_with_elbow_offset());
+    ASSERT_TRUE(r.start());
+    r.command_raw(2, r.cal.joints[2].raw_max - 5);  // 範囲内
+    r.cycle(300);
+    EXPECT_EQ(r.sys->clamp_warned_total(), 0u);
+  }
+  {
+    Rig r(fixture_with_elbow_offset());
+    ASSERT_TRUE(r.start());
+    r.command_raw(2, r.cal.joints[2].raw_min - 20);  // 縮まない側のクランプ（今までどおり黙る）
+    r.cycle(300);
+    EXPECT_EQ(r.sys->clamp_warned_total(), 0u);
+  }
+  {
+    Rig r;  // 補正なし。上側 20 tick 超は黙ってクランプ
+    ASSERT_TRUE(r.start());
+    r.command_raw(2, r.cal.joints[2].raw_max + 20);
+    r.cycle(300);
+    EXPECT_EQ(r.sys->clamp_warned_total(), 0u);
+  }
+}
+
+TEST(ZeroOffsetInfo, IsLoggedOnlyForJointsWithAnOffset)
+{
+  {
+    LogCapture log;
+    Rig r(fixture_with_elbow_offset());
+    ASSERT_TRUE(r.init());
+    EXPECT_EQ(log.count(RCUTILS_LOG_SEVERITY_INFO, "zero_offset_deg: "), 1);
+    EXPECT_TRUE(log.has_text("zero_offset_deg: elbow_flex -6.30 deg"));
+    EXPECT_TRUE(log.has_text("clamp tolerance low=50 high=122 ticks"));
+  }
+  {
+    LogCapture log;
+    Rig r;  // 全関節 0 のときは出さない
+    ASSERT_TRUE(r.init());
+    EXPECT_FALSE(log.has_text("zero_offset_deg:"));
+  }
+}
+
+TEST(ZeroOffsetInfo, DiagMatchCountDoesNotDependOnTheOffset)
+{
+  LogCapture log;
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  EXPECT_TRUE(log.has_text("[diag] EEPROM vs yaml: 6/6 joints match"));
+}
+
+TEST(LogCaptureGuard, RestoresTheHandlerWhenTheScopeEnds)
+{
+  const auto before = rcutils_logging_get_output_handler();
+  {
+    LogCapture log;
+    EXPECT_NE(rcutils_logging_get_output_handler(), before);
+  }
+  EXPECT_EQ(rcutils_logging_get_output_handler(), before);
 }

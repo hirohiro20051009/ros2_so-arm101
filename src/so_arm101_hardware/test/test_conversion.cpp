@@ -507,3 +507,83 @@ TEST(ZeroOffset, GripperFormulaIgnoresTheField)
     EXPECT_EQ(rad_to_raw_continuous(g1, 4095, rad), rad_to_raw_continuous(g0, 4095, rad)) << rad;
   }
 }
+
+// ---------------------------------------------------------------- 異常判定の許容（J2。案 B）
+namespace
+{
+JointCalibration angle_joint(int direction, double zero_offset_deg)
+{
+  JointCalibration j;
+  j.kind = JointKind::Angle;
+  j.direction = direction;
+  j.center = 1969.5;
+  j.zero_offset_deg = zero_offset_deg;
+  j.raw_min = 849;
+  j.raw_max = 3090;
+  return j;
+}
+}  // namespace
+
+TEST(ClampTolerance, IsExactlyTheBaseWhenTheOffsetIsZero)
+{
+  const std::string files[] = {CALIBRATION_YAML, PRODUCTION_YAML};
+  for (const auto & file : files) {
+    Calibration cal = load_calibration(file);
+    for (auto & j : cal.joints) {
+      j.zero_offset_deg = 0.0;  // 本番の補正値は 0 に戻して比べる
+      const ClampTolerance t = clamp_tolerance_ticks(j, cal.angle_ticks, 50);
+      EXPECT_EQ(t.low, 50) << file << " " << j.name;
+      EXPECT_EQ(t.high, 50) << file << " " << j.name;
+    }
+  }
+}
+
+TEST(ClampTolerance, NegativeOffsetWithDirectionPlusWidensOnlyTheHighSide)
+{
+  // 6.3 * 4095 / 360 = 71.66 → ceil 72。50 + 72 = 122（floor だと 121）
+  const ClampTolerance t = clamp_tolerance_ticks(angle_joint(+1, -6.3), 4095, 50);
+  EXPECT_EQ(t.high, 122);
+  EXPECT_EQ(t.low, 50);
+}
+
+TEST(ClampTolerance, SideFollowsTheSignOfDirectionTimesOffset)
+{
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, +6.3), 4095, 50).low, 122);
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, +6.3), 4095, 50).high, 50);
+  // direction −1: raw の向きが逆になるので、δ が負でも広がるのは下側
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(-1, -6.3), 4095, 50).low, 122);
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(-1, -6.3), 4095, 50).high, 50);
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(-1, +6.3), 4095, 50).high, 122);
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(-1, +6.3), 4095, 50).low, 50);
+}
+
+TEST(ClampTolerance, LargestOffsetGivesBasePlus114)
+{
+  // 10 * 4095 / 360 = 113.75 → 114。上限の幅は 164
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, -kMaxZeroOffsetDeg), 4095, 50).high, 164);
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, +kMaxZeroOffsetDeg), 4095, 50).low, 164);
+}
+
+TEST(ClampTolerance, TinyOffsetStillWidensByOneTickBecauseOfCeil)
+{
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, -0.001), 4095, 50).high, 51);
+}
+
+TEST(ClampTolerance, UsesAngleTicksNotTheLiteral4095)
+{
+  // angle_ticks = 360 なら 1 tick = 1 度。4.5° → ceil(4.5) = 5 → 55（4095 を直書きすると別の値になる）
+  EXPECT_EQ(clamp_tolerance_ticks(angle_joint(+1, -4.5), 360, 50).high, 55);
+}
+
+TEST(ClampTolerance, GripperIsAlwaysTheBase)
+{
+  JointCalibration g;
+  g.kind = JointKind::LinearPercent;
+  g.direction = 1;
+  g.raw_min = 1454;
+  g.raw_max = 2944;
+  g.zero_offset_deg = 5.0;  // 読み込みが止める値。手組みで入れても広がらない
+  const ClampTolerance t = clamp_tolerance_ticks(g, 4095, 50);
+  EXPECT_EQ(t.low, 50);
+  EXPECT_EQ(t.high, 50);
+}

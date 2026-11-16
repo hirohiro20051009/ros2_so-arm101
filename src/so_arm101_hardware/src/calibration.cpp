@@ -176,6 +176,19 @@ int rad_to_raw(const JointCalibration & j, int angle_ticks, double rad)
   return static_cast<int>(std::lround(rad_to_raw_continuous(j, angle_ticks, rad)));
 }
 
+ClampTolerance clamp_tolerance_ticks(const JointCalibration & j, int angle_ticks, int base)
+{
+  ClampTolerance t{base, base};
+  if (j.kind != JointKind::Angle) {return t;}
+  const double s = -static_cast<double>(j.direction) * j.zero_offset_deg * static_cast<double>(angle_ticks) / 360.0;
+  if (s > 0.0) {
+    t.high = base + static_cast<int>(std::ceil(s));
+  } else if (s < 0.0) {
+    t.low = base + static_cast<int>(std::ceil(-s));
+  }
+  return t;
+}
+
 double tick_in_rad(const JointCalibration & j, int angle_ticks)
 {
   if (j.kind == JointKind::Angle) {return 2.0 * kPi / static_cast<double>(angle_ticks);}
