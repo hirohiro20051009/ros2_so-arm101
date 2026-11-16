@@ -99,8 +99,28 @@ Calibration load_calibration(const std::string & path)
     if (kind == "angle") {
       j.kind = JointKind::Angle;
       j.center = require<double>(n, "center", jctx);
+      if (n["zero_offset_deg"]) {
+        try {
+          j.zero_offset_deg = n["zero_offset_deg"].as<double>();
+        } catch (const YAML::Exception & e) {
+          throw std::runtime_error(jctx + ": invalid value for 'zero_offset_deg': " + e.what());
+        }
+        if (!std::isfinite(j.zero_offset_deg) || std::fabs(j.zero_offset_deg) > kMaxZeroOffsetDeg) {
+          throw std::runtime_error(
+            jctx + ": zero_offset_deg must be finite and within +-" + std::to_string(kMaxZeroOffsetDeg) + " deg");
+        }
+      }
     } else if (kind == "linear_percent") {
       j.kind = JointKind::LinearPercent;
+      if (n["zero_offset_deg"]) {
+        double v = std::nan("");
+        try {
+          v = n["zero_offset_deg"].as<double>();
+        } catch (const YAML::Exception & e) {
+          throw std::runtime_error(jctx + ": invalid value for 'zero_offset_deg': " + e.what());
+        }
+        if (v != 0.0) {throw std::runtime_error(jctx + ": zero_offset_deg must be 0 for a linear_percent joint");}
+      }
     } else {
       throw std::runtime_error(jctx + ": unknown kind '" + kind + "'");
     }
@@ -126,6 +146,7 @@ double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw)
     // DEGREES: (val − mid) * 360 / max_res。clamp しない（motors_bus.py:790-793）
     value = (static_cast<double>(raw) - j.center) * 360.0 / static_cast<double>(angle_ticks);
     value = j.direction * value;
+    value = value + j.zero_offset_deg;  // 度のまま（rad に直す前）。direction を掛けた後に足す
   } else {
     // RANGE_0_100: bounded = clamp(raw, min, max); (bounded − min) / (max − min) * 100
     // （motors_bus.py:783,787-789）。drive_mode に相当する direction=-1 は 100 − norm
@@ -141,7 +162,8 @@ double rad_to_raw_continuous(const JointCalibration & j, int angle_ticks, double
   const double value = rad * (180.0 / kPi);  // math.degrees(rad)（bridge.py radians_to_normalized）
   if (j.kind == JointKind::Angle) {
     // DEGREES: val * max_res / 360 + mid（motors_bus.py _unnormalize）。direction は自己逆（±1）
-    return (j.direction * value) * static_cast<double>(angle_ticks) / 360.0 + j.center;
+    // raw_to_rad の逆: 度から zero_offset_deg を引いてから direction を掛ける
+    return (j.direction * (value - j.zero_offset_deg)) * static_cast<double>(angle_ticks) / 360.0 + j.center;
   }
   // RANGE_0_100: bounded = clamp(val, 0, 100); bounded / 100 * (max − min) + min
   const double v = (j.direction == -1) ? 100.0 - value : value;

@@ -16,6 +16,9 @@
 namespace so_arm101_hardware
 {
 
+/// zero_offset_deg の絶対値の上限（度）。打ち間違いを止めるための値（elbow で要るのは約 6.3°）。
+constexpr double kMaxZeroOffsetDeg = 10.0;
+
 enum class JointKind
 {
   Angle,          // 基準の実装（LeRobot 0.4.2）の DEGREES
@@ -37,6 +40,9 @@ struct JointCalibration
   JointKind kind{JointKind::Angle};
   int direction{1};      // +1 / -1
   double center{0.0};    // Angle のみ
+  // Angle のみ。角度の補正値（度）。真の角度 = 換算の出力 + zero_offset_deg（direction を掛けた後に足す）。
+  // yaml の任意キー zero_offset_deg（既定 0）。LinearPercent では 0 以外を許さない。docs/joint_offset_plan.md
+  double zero_offset_deg{0.0};
   int raw_min{0};
   int raw_max{0};
   EepromExpectation eeprom;
@@ -58,13 +64,15 @@ struct Calibration
 Calibration load_calibration(const std::string & path);
 
 /// raw（符号デコード済みの Present_Position）→ rad。
-/// Angle: ((raw − center)·360 / angle_ticks) 度 → rad（clamp なし）。
+/// Angle: (direction·(raw − center)·360 / angle_ticks + zero_offset_deg) 度 → rad（clamp なし）。
+/// zero_offset_deg は LeRobot の式にない項（本リポジトリの拡張）。既定 0 で LeRobot の式と同じ値。
 /// LinearPercent: clamp(raw, min, max) → 0..100% → rad = radians(%)。
 /// 演算の順序は基準の実装（LeRobot 0.4.2）の _normalize と math.radians に合わせている（浮動小数まで一致させるため）。
 double raw_to_rad(const JointCalibration & j, int angle_ticks, int raw);
 
-/// rad → raw（Goal_Position 用。段階2b-3a で追加。まだ書き込みには使っていない）。
-/// raw_to_rad の逆。基準の実装（LeRobot 0.4.2）の MotorsBus._unnormalize() と同じ式（angle: val·ticks/360 + center、
+/// rad → raw（Goal_Position 用）。
+/// raw_to_rad の逆（Angle は度から zero_offset_deg を引いてから direction を掛ける）。基準の実装（LeRobot 0.4.2）の
+/// MotorsBus._unnormalize() と同じ式（angle: val·ticks/360 + center、
 /// gripper: 0..100 に clamp して min..max へ）だが、**最後の丸めだけ四捨五入**にしている
 /// （基準の実装は int() で切り捨て。差は常に 0 か +1 tick。raw→rad→raw が恒等になり、
 /// 保持指令が 1 tick ずれるのを避けるため）。Angle は clamp しない（限界の clamp は呼び出し側）。

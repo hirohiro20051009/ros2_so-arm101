@@ -321,3 +321,189 @@ TEST(InverseConversion, HardwareLimitsAreInsideTheLimitsOfTheYaml)
     EXPECT_EQ(rad_to_raw(j, cal.angle_ticks, raw_to_rad(j, cal.angle_ticks, j.raw_max)), j.raw_max) << j.name;
   }
 }
+
+// ---- 角度の補正値 zero_offset_deg（J1。docs/joint_offset_plan.md）----
+namespace
+{
+constexpr double kDegToRad = kPi / 180.0;
+
+JointCalibration make_angle(int direction, double zero_offset_deg)
+{
+  JointCalibration j;
+  j.name = "t";
+  j.id = 1;
+  j.kind = JointKind::Angle;
+  j.direction = direction;
+  j.center = 1969.5;
+  j.zero_offset_deg = zero_offset_deg;
+  j.raw_min = 849;
+  j.raw_max = 3090;
+  return j;
+}
+
+// zero_offset_deg を足す前の式（旧式）を、試験の中に直書きしたもの
+double old_raw_to_rad(const JointCalibration & j, int ticks, int raw)
+{
+  double value = (static_cast<double>(raw) - j.center) * 360.0 / static_cast<double>(ticks);
+  value = j.direction * value;
+  return value * kDegToRad;
+}
+double old_rad_to_raw_continuous(const JointCalibration & j, int ticks, double rad)
+{
+  const double value = rad * (180.0 / kPi);
+  return (j.direction * value) * static_cast<double>(ticks) / 360.0 + j.center;
+}
+
+// 1 関節だけの yaml を書いて読む。joint_extra は center の後ろに入れる任意の記述（例 "zero_offset_deg: 5, "）
+Calibration load_one(const std::string & kind_part, const std::string & extra)
+{
+  const std::string path = ::testing::TempDir() + "zo_cal.yaml";
+  {
+    std::ofstream f(path);
+    f << "schema_version: 1\nbus: {baudrate: 1000000, protocol: 0}\nconversion: {angle_ticks: 4095}\njoints:\n"
+      << "  a: {id: 1, " << kind_part << extra << " min: 0, max: 2, eeprom: {homing_offset: 0, min_limit: 0, max_limit: 2}}\n";
+  }
+  Calibration c = load_calibration(path);
+  std::remove(path.c_str());
+  return c;
+}
+Calibration load_angle(const std::string & zo) {return load_one("kind: angle, direction: 1, center: 1, ", zo);}
+}  // namespace
+
+TEST(ZeroOffset, DefaultsToZeroWhenTheKeyIsAbsent)
+{
+  const Calibration cal = load_calibration(CALIBRATION_YAML);
+  for (const auto & j : cal.joints) {EXPECT_EQ(j.zero_offset_deg, 0.0) << j.name;}
+  EXPECT_EQ(load_angle("").joints[0].zero_offset_deg, 0.0);
+}
+
+TEST(ZeroOffset, IsReadFromTheYaml)
+{
+  EXPECT_DOUBLE_EQ(load_angle("zero_offset_deg: -6.3, ").joints[0].zero_offset_deg, -6.3);
+  EXPECT_DOUBLE_EQ(load_angle("zero_offset_deg: 0.1, ").joints[0].zero_offset_deg, 0.1);
+  EXPECT_DOUBLE_EQ(load_angle("zero_offset_deg: 0, ").joints[0].zero_offset_deg, 0.0);
+}
+
+TEST(ZeroOffset, RejectsNonFiniteAndNonNumbers)
+{
+  for (const char * v : {".nan", ".inf", "-.inf", "abc", "~", "[1, 2]", "{a: 1}", "\"\""}) {
+    SCOPED_TRACE(v);
+    EXPECT_THROW(load_angle(std::string("zero_offset_deg: ") + v + ", "), std::runtime_error);
+  }
+}
+
+TEST(ZeroOffset, AcceptsUpToTheLimitAndRejectsBeyondIt)
+{
+  EXPECT_EQ(kMaxZeroOffsetDeg, 10.0);
+  EXPECT_DOUBLE_EQ(load_angle("zero_offset_deg: 10.0, ").joints[0].zero_offset_deg, 10.0);
+  EXPECT_DOUBLE_EQ(load_angle("zero_offset_deg: -10.0, ").joints[0].zero_offset_deg, -10.0);
+  EXPECT_THROW(load_angle("zero_offset_deg: 10.0001, "), std::runtime_error);
+  EXPECT_THROW(load_angle("zero_offset_deg: -10.0001, "), std::runtime_error);
+  EXPECT_THROW(load_angle("zero_offset_deg: 1e9, "), std::runtime_error);
+}
+
+TEST(ZeroOffset, GripperMustBeZero)
+{
+  const std::string kind = "kind: linear_percent, direction: 1, ";
+  EXPECT_EQ(load_one(kind, "").joints[0].zero_offset_deg, 0.0);
+  EXPECT_EQ(load_one(kind, "zero_offset_deg: 0, ").joints[0].zero_offset_deg, 0.0);
+  EXPECT_THROW(load_one(kind, "zero_offset_deg: 1, "), std::runtime_error);
+  EXPECT_THROW(load_one(kind, "zero_offset_deg: -0.1, "), std::runtime_error);
+  EXPECT_THROW(load_one(kind, "zero_offset_deg: .nan, "), std::runtime_error);
+  EXPECT_THROW(load_one(kind, "zero_offset_deg: abc, "), std::runtime_error);
+}
+
+TEST(ZeroOffset, DefaultIsBitIdenticalToTheOldFormula)
+{
+  // 固定 yaml と本番 yaml の全 angle 関節（本番の補正値は 0 に戻して比べる）。raw は範囲外も含める
+  const std::string files[] = {CALIBRATION_YAML, PRODUCTION_YAML};
+  for (const auto & file : files) {
+    Calibration cal = load_calibration(file);
+    for (auto & j : cal.joints) {
+      if (j.kind != JointKind::Angle) {continue;}
+      j.zero_offset_deg = 0.0;
+      SCOPED_TRACE(file + " " + j.name);
+      for (int raw = -100; raw <= 5000; ++raw) {
+        ASSERT_EQ(raw_to_rad(j, cal.angle_ticks, raw), old_raw_to_rad(j, cal.angle_ticks, raw)) << raw;
+      }
+      for (double rad = -4.0; rad <= 4.0; rad += 0.000371) {
+        ASSERT_EQ(rad_to_raw_continuous(j, cal.angle_ticks, rad), old_rad_to_raw_continuous(j, cal.angle_ticks, rad))
+          << rad;
+        ASSERT_EQ(rad_to_raw(j, cal.angle_ticks, rad),
+          static_cast<int>(std::lround(old_rad_to_raw_continuous(j, cal.angle_ticks, rad)))) << rad;
+      }
+    }
+  }
+}
+
+TEST(ZeroOffset, ReadShiftsByPlusDeltaAndDirectionDoesNotFlipIt)
+{
+  for (int dir : {1, -1}) {
+    for (double d : {-10.0, -6.3, 0.1, 6.3, 10.0}) {
+      SCOPED_TRACE(std::to_string(dir) + " " + std::to_string(d));
+      const JointCalibration z = make_angle(dir, 0.0), o = make_angle(dir, d);
+      for (int raw : {0, 849, 1969, 1970, 3090, 4095}) {
+        EXPECT_NEAR(raw_to_rad(o, 4095, raw) - raw_to_rad(z, 4095, raw), d * kDegToRad, 1e-12) << raw;
+      }
+    }
+  }
+}
+
+TEST(ZeroOffset, WriteShiftsByMinusDeltaInTheSameCoordinate)
+{
+  for (int dir : {1, -1}) {
+    for (double d : {-10.0, -6.3, 0.1, 6.3, 10.0}) {
+      SCOPED_TRACE(std::to_string(dir) + " " + std::to_string(d));
+      const JointCalibration z = make_angle(dir, 0.0), o = make_angle(dir, d);
+      for (double rad : {-1.5, -0.3, 0.0, 0.7, 1.6}) {
+        // 真の角度 rad を出すには、補正なしより dir·(−δ)·ticks/360 だけ raw が動く
+        EXPECT_NEAR(
+          rad_to_raw_continuous(o, 4095, rad) - rad_to_raw_continuous(z, 4095, rad), -dir * d * 4095.0 / 360.0, 1e-9)
+          << rad;
+      }
+    }
+  }
+}
+
+TEST(ZeroOffset, RoundTripIsIdentityForEveryRaw)
+{
+  for (int dir : {1, -1}) {
+    for (double d : {-10.0, -6.3, 0.1, 6.3, 10.0}) {
+      SCOPED_TRACE(std::to_string(dir) + " " + std::to_string(d));
+      const JointCalibration j = make_angle(dir, d);
+      for (int raw = 0; raw <= 4095; ++raw) {
+        ASSERT_EQ(rad_to_raw(j, 4095, raw_to_rad(j, 4095, raw)), raw) << raw;
+      }
+    }
+  }
+}
+
+TEST(ZeroOffset, RoundTripFromRadStaysWithinHalfATick)
+{
+  for (int dir : {1, -1}) {
+    for (double d : {-10.0, -6.3, 0.1, 6.3, 10.0}) {
+      SCOPED_TRACE(std::to_string(dir) + " " + std::to_string(d));
+      const JointCalibration j = make_angle(dir, d);
+      const double half_tick = 0.5 * tick_in_rad(j, 4095);
+      for (double rad = -1.5; rad <= 1.5; rad += 0.0007) {
+        ASSERT_LE(std::fabs(raw_to_rad(j, 4095, rad_to_raw(j, 4095, rad)) - rad), half_tick + 1e-9) << rad;
+      }
+    }
+  }
+}
+
+TEST(ZeroOffset, GripperFormulaIgnoresTheField)
+{
+  // 手組みの gripper に補正値を入れても、換算は変わらない（読み込みが 0 以外を止める前提の二重の守り）
+  JointCalibration g0;
+  g0.kind = JointKind::LinearPercent;
+  g0.direction = 1;
+  g0.raw_min = 1454;
+  g0.raw_max = 2944;
+  JointCalibration g1 = g0;
+  g1.zero_offset_deg = 5.0;
+  for (int raw : {1000, 1454, 2000, 2944, 3500}) {EXPECT_EQ(raw_to_rad(g1, 4095, raw), raw_to_rad(g0, 4095, raw)) << raw;}
+  for (double rad : {-1.0, 0.0, 0.8, 1.7, 5.0}) {
+    EXPECT_EQ(rad_to_raw_continuous(g1, 4095, rad), rad_to_raw_continuous(g0, 4095, rad)) << rad;
+  }
+}

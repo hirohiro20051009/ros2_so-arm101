@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <chrono>
 #include <string>
 #include <thread>
@@ -30,13 +32,15 @@ const int kPresent[] = {2097, 2029, 1975, 2037, 2064, 2400};
 struct Rig
 {
   fake::FakeServos servos{{1, 2, 3, 4, 5, 6}, 6};
-  Calibration cal{load_calibration(CALIBRATION_YAML)};
+  std::string cal_file;  // cal より先に宣言する（初期化の順序）
+  Calibration cal;
   std::unique_ptr<Sts3215System> sys;
   std::vector<hardware_interface::CommandInterface> cmds;
   std::vector<hardware_interface::StateInterface> states;
   double t{0.0};
 
-  Rig()
+  explicit Rig(const std::string & yaml = CALIBRATION_YAML)
+  : cal_file(yaml), cal(load_calibration(yaml))
   {
     for (int i = 0; i < 6; ++i) {servos.set_present(i + 1, kPresent[i]);}
     // 実機の EEPROM は yaml のキャリブレーションと一致している（段階2c-1a: 不一致なら書き込みモードは拒否する）。
@@ -54,7 +58,7 @@ struct Rig
     info.name = "test";
     info.type = "system";
     info.hardware_parameters = {
-      {"serial_port", servos.path()}, {"calibration_file", CALIBRATION_YAML},
+      {"serial_port", servos.path()}, {"calibration_file", cal_file},
       {"read_only", read_only ? "true" : "false"}, {"timeout_ms", "30"}, {"monitor_period_s", "0.1"}};
     for (auto & kv : extra) {info.hardware_parameters[kv.first] = kv.second;}
     for (auto * j : kJoints) {
@@ -717,4 +721,68 @@ TEST(BusFixCycleImpact, FailureWaitDoesNotBreakTheCycleBudgetBeyondTheExistingTi
       EXPECT_EQ(on.over_20ms, off.over_20ms);
     }
   }
+}
+
+// ---------------------------------------------------------------- 角度の補正値 zero_offset_deg（J1）
+// 固定 yaml の elbow_flex（id 3。center 1975）に zero_offset_deg を足した一時 yaml を作る。期待値は式を使わず、
+// 度 → rad の定義から直接書く（試験が実装の式の写しにならないように）。
+namespace
+{
+constexpr double kZeroOffsetDeg = -6.3;
+
+std::string fixture_with_elbow_offset()
+{
+  std::ifstream in(CALIBRATION_YAML);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  std::string text = ss.str();
+  const std::string key = "elbow_flex: {id: 3, kind: angle, direction: 1, center: 1975,";
+  const size_t pos = text.find(key);
+  EXPECT_NE(pos, std::string::npos);
+  if (pos == std::string::npos) {return CALIBRATION_YAML;}
+  text.replace(pos, key.size(), key + " zero_offset_deg: -6.3,");
+  const std::string path = ::testing::TempDir() + "zero_offset_fixture.yaml";
+  std::ofstream(path) << text;
+  return path;
+}
+constexpr double kDeg = M_PI / 180.0;
+}  // namespace
+
+TEST(ZeroOffset, ReadAddsTheOffsetOnlyToTheJointThatHasIt)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.cycle(2);
+  // elbow は center ちょうどから 0 tick 離れている。補正は +δ だけ
+  EXPECT_NEAR(r.position(2), (kPresent[2] - 1975) * 360.0 / 4095.0 * kDeg + kZeroOffsetDeg * kDeg, 1e-9);
+  EXPECT_NEAR(r.position(2), kZeroOffsetDeg * kDeg, 1e-9);
+  // ほかの関節は補正なし（pan の center は 2097.5）
+  EXPECT_NEAR(r.position(0), (kPresent[0] - 2097.5) * 360.0 / 4095.0 * kDeg, 1e-9);
+  EXPECT_NEAR(r.position(1), (kPresent[1] - 2029.0) * 360.0 / 4095.0 * kDeg, 1e-9);
+}
+
+TEST(ZeroOffset, WriteSubtractsTheOffsetSoTheGoalIsTheRawThatReadsBackTheSameAngle)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.cycle(2);
+  const int target = kPresent[2] + 50;
+  // 「真の角度」で指令する: (target − center) tick の角度 + δ（読みが返す値と同じ座標）
+  const double cmd = ((target - 1975) * 360.0 / 4095.0 + kZeroOffsetDeg) * kDeg;
+  r.cmds[2].set_value(cmd);
+  r.cycle(1);
+  EXPECT_EQ(r.servos.goal_position(3), target);
+  // 補正が書きに入っていなければ、約 −72 tick（6.3° 分）ずれる
+  EXPECT_NE(r.servos.goal_position(3), target + static_cast<int>(std::lround(kZeroOffsetDeg * 4095.0 / 360.0)));
+}
+
+TEST(ZeroOffset, ActivationHoldsEveryJointAtTheCurrentRaw)
+{
+  Rig r(fixture_with_elbow_offset());
+  ASSERT_TRUE(r.start());
+  r.servos.clear_writes();
+  r.cycle(10);
+  for (int i = 0; i < 6; ++i) {EXPECT_EQ(r.servos.goal_position(i + 1), kPresent[i]) << kJoints[i];}
+  EXPECT_FALSE(r.sys->fault_latched());
+  EXPECT_EQ(r.sys->limited_total(), 0u);
 }
