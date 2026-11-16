@@ -2546,3 +2546,34 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 
 - (i) pan は指令との差が約 5 tick（約 0.0077 rad）だと動かなかった（M2・M2 の戻し）。**[推測]** 重力のかからない関節でも、小さな差は詰まらない。
 - (ii) `--joints-deg` のとき GOAL の行に `candidates=0` と出る（IK を解いていない印。`ik_move.py:238`・`241-244`。表示の改善はリリース時の整理で検討）。
+
+## `so_arm101_camera` の C1-a（2026-11-16。コード: コミット `6cd918c`。計画は `docs/camera_stage_plan.md`。実機・launch・RealSense は使っていない）
+
+### 要点
+
+- 新しいパッケージ `src/so_arm101_camera/`（ament_cmake と ament_cmake_python。MIT）。`launch/camera.launch.py`、`config/realsense.yaml`（読む相手は rs_launch.py。3 値）、`config/apriltag.yaml`（読む相手は apriltag_node。旧の値）、`so_arm101_camera/camera_config.py`、`test/test_camera_config.py`。`docs/third_party.md` に「実行時に使う apt パッケージ（配布しない）」の節を足した。bringup・ik・ほかの既存パッケージ・MoveIt の設定は変えていない。
+- 検査と換算（未宣言の引数の検査、extrinsics の検査と TF の引数の作成、yaml の変換）は camera_config.py だけに書き、camera.launch.py はそれを呼ぶだけ（試験したコードと実際に動くコードが同じ）。未宣言の引数の検査は bringup.launch.py:59-86 の複製で、出どころは camera_config.py のコメントに書いた。
+- extrinsics_file の扱い: 既定のパスでファイルが無いときは TF を出さずログを 1 行。既定以外のパスを指定してファイルが無いとき、およびファイルはあるが中身が不正なとき（キーの欠け・余分、要素数、数値でない・NaN・inf、クォータニオンのノルムが 1 から 1e-3 を超えて離れている）は、どのノードも起動する前にエラーで止まる。ノルムの許容値 1e-3 は**推測の値**（打ち間違いや壊れた値を見つけるため）。TF の引数に渡す前の正規化はしていない（yaml の値をそのまま渡す。tf2 側で正規化されるかは未確認）。yaml の形は C1 で決めた `translation_m`（3 要素）と `quaternion_xyzw`（4 要素）で、C3 がこの形で書く。
+- `ros2 launch so_arm101_camera camera.launch.py --show-args` の表示は 2 個だけ（use_apriltag、extrinsics_file）。rs_launch の引数は出ない。
+
+### 試験の件数（so_arm101_camera）
+
+- 48 件（pytest 31、lint 11、CTest 6）。失敗 0、skip 0。見込み（計画の 33、承認した 36）との差は pytest が +12。extrinsics の不正な内容の網羅（12 通り）、既定以外のパスの不在、ノルムの境界、壊れた yaml を足したため。
+- 既存の 591 件は変わらない（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 364）。累計は 591 + 48 = 639 件。失敗 0。
+- bringup の `--show-args` は 21 個で、前後の diff は空。
+
+### gen_rd6.sh の件
+
+- 6 通りの `.urdf` の sha256（先頭 16 桁）は、記録済みの基準（上の「新しい基準」）と一致した: 1・2 `d8eebdcd27762b2b`、3 `f8dc8da49a238a75`、4 `088bdfa09bdeb0ca`、5 `c5a19e7a006e269c`、6 `1461b070b550512d`。`.err` は 6 つとも `37d255df752f8d3d`（基準と一致）。
+- `~/so_arm101_check/urdf_after/` は、コミット `5b35507`（2026-11-12。ドライバの 1 周期の変化量の上限 `max_joint_speed` などを足した）より前の保存物で古い。3〜6 番は、`<param name="max_joint_speed">0.75</param>` が無い分だけ今の出力と違う。基準としては使わない。
+- 実装の前の gen_rd6.sh の出力は取っておらず、実装の後に 1 回だけ取って、記録済みの基準と比べた。xacro の側は変えていない（追跡ファイルの変更は docs/third_party.md だけ）ので、前後で同じ内容になる。
+
+### そのほか
+
+- `rosdep check --from-paths src --ignore-src -r` で未解決だったのは、既存の apt の `ros-humble-warehouse-ros-mongo` の 1 件だけ（so_arm101_camera の依存は全部解決）。
+- `ros2 run tf2_ros static_transform_publisher --help`（`ROS_DOMAIN_ID=87 timeout 5`）は終了コード 0。ノードは起動しない。Humble では名前付きの引数（`--x` … `--frame-id`、`--child-frame-id`）が使える。
+
+### 未確認（C1 の実機で見る）
+
+- rs_launch.py が、自分の知らない launch 引数を警告する（rs_launch.py:124-126）のを、`GroupAction(forwarding=False)` で防げたか。起動しない評価では確かめていない。実機の起動の画面で、黄色の警告の有無を見る。警告だけで動作は変わらない。
+- ros-humble-librealsense2 2.58.4 と Intel の librealsense2 2.56.5 が混ざって読み込まれないか（ドライバの Built with と Running with の 2 行。4 章）。2 つの版の出どころは `docs/camera_stage_plan.md:170-171` の表（前のセッションで ls・cat・grep で調べた結果）。今回のセッションでは版を確かめていない。混在するかは [推測] 段階の見立てで、実機のログで確かめる。
