@@ -35,8 +35,8 @@ PKG = Path(__file__).resolve().parents[1]
 APRILTAG_YAML = PKG / 'config' / 'apriltag.yaml'
 SHIPPED = PKG / 'config' / 'tag_mount.yaml'
 
-# The values of the test are made here. The values measured on 2026-11-16 are NOT in the package
-# (the shipped file has null): they are written to the report only.
+# The values of most tests are made here (GOOD), so that they do not depend on the shipped file.
+# The shipped file holds the values measured on 2026-11-16 and has its own tests.
 GOOD = {
     'tag_id': 0,
     'tag_size_m': 0.06,
@@ -82,19 +82,20 @@ def test_t_pose_text_front_up_left_from_the_signs_only(tmp_path):
     assert 'front 38.0 mm, up 62.0 mm, left 0.0 mm' in lines[1]
 
 
-def test_the_shipped_file_is_not_measured_and_is_refused():
+def test_the_shipped_file_is_measured_and_loads():
     data = yaml.safe_load(SHIPPED.read_text())
     assert set(data) == set(tm.KEYS)
-    assert data['ref_to_tag_gripper_frame_m'] is None
-    with pytest.raises(tm.TagMountError, match='not been measured'):
-        tm.load_tag_mount(SHIPPED, APRILTAG_YAML)
-
-
-def test_the_shipped_file_is_valid_once_a_measurement_is_given(tmp_path):
-    data = yaml.safe_load(SHIPPED.read_text())
-    data['ref_to_tag_gripper_frame_m'] = [-0.038, 0.0, -0.062]
-    mount = tm.load_tag_mount(_write(tmp_path, data), APRILTAG_YAML)
+    assert data['ref_to_tag_gripper_frame_m'] == [-0.038, 0.0, -0.062]
+    mount = tm.load_tag_mount(SHIPPED, APRILTAG_YAML)
+    assert mount.ref_to_tag == (-0.038, 0.0, -0.062)
     assert mount.offset == pytest.approx((-0.038, 0.0, -0.0557))
+
+
+def test_the_shipped_file_without_its_measurement_is_refused(tmp_path):
+    data = yaml.safe_load(SHIPPED.read_text())
+    data['ref_to_tag_gripper_frame_m'] = None
+    with pytest.raises(tm.TagMountError, match='not been measured'):
+        tm.load_tag_mount(_write(tmp_path, data), APRILTAG_YAML)
 
 
 def test_null_measurement_is_refused(tmp_path):
