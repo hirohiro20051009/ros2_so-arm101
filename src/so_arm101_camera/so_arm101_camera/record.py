@@ -39,6 +39,7 @@ import re
 
 import numpy as np
 from so_arm101_ik import step_runner as sr
+from so_arm101_ik.urdf_kinematics import UrdfChain
 import yaml
 
 from . import tag_mount as tm
@@ -347,6 +348,28 @@ def to_plain(value):
     return value
 
 
+def load_chain(urdf_path):
+    """Return the UrdfChain (base_link to gripper_frame_link) of a URDF file."""
+    return UrdfChain(Path(urdf_path).read_text(encoding='utf-8'))
+
+
+def identity_from_files(tag_mount_yaml, urdf, apriltag_yaml, realsense_yaml, tag_id):
+    """Return the identity of a session: the sha256 of the four files that were used and tag_id."""
+    return make_identity(tm.sha256_file(tag_mount_yaml), tm.sha256_file(urdf),
+                         tm.sha256_file(apriltag_yaml), tm.sha256_file(realsense_yaml), tag_id)
+
+
+def camera_extra(k, d, width, height, optical_translation, optical_quaternion):
+    """Return the camera values written to the meta file (camera_info, camera_link to optical)."""
+    return to_plain({
+        'camera_info': {'k': list(k), 'd': list(d), 'width': int(width), 'height': int(height)},
+        'camera_link_to_optical_frame': {
+            'parent': 'camera_link', 'child': 'camera_color_optical_frame',
+            'translation_m': list(optical_translation),
+            'quaternion_xyzw': list(optical_quaternion)},
+    })
+
+
 def thresholds():
     """Return the values of this module and of so_arm101_ik that decide what is recorded."""
     return {'frames_wanted': FRAMES_WANTED, 'match_min': MATCH_MIN,
@@ -443,7 +466,7 @@ class RecordLoop:
         self.io = io
         self.chain = chain
         self.mount = mount
-        self.csv_path = Path(csv_path)
+        self.csv_path = Path(csv_path) if csv_path else None  # None: only investigating
         self.identity = identity
         self.extra = extra or {}
 
@@ -497,6 +520,9 @@ class RecordLoop:
         """Investigate a point and, unless investigate_only, record it. Return an exit code."""
         say = self.io.say
         if not investigate_only:
+            if self.csv_path is None:
+                say('refused: a point can only be recorded into a CSV file')
+                return EXIT_REFUSED
             try:
                 check_session(self.csv_path, label, self.identity)
             except SessionError as exc:

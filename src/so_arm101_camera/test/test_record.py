@@ -22,6 +22,7 @@
 
 import csv
 import fcntl
+import hashlib
 import math
 from pathlib import Path
 import threading
@@ -551,3 +552,77 @@ def test_appending_waits_for_the_lock_of_another_run(tmp_path):
         fcntl.flock(held, fcntl.LOCK_UN)
     thread.join(10)
     assert done.is_set() and [r['label'] for r in _rows(path)] == ['P01', 'P02']
+
+
+# --- the functions the tool uses (it has no open of its own) ---
+
+def _share_urdf():
+    share = Path(get_package_share_directory('so_arm101_description'))
+    return share / 'urdf' / 'so101_new_calib.urdf'
+
+
+def test_load_chain_reads_the_urdf_file():
+    chain = rec.load_chain(_share_urdf())
+    assert chain.fk(Q_T)[0] == pytest.approx(_chain().fk(Q_T)[0])
+
+
+def test_load_chain_of_a_missing_file_raises():
+    with pytest.raises(OSError):
+        rec.load_chain('/nonexistent/robot.urdf')
+
+
+def test_the_identity_is_made_from_the_sha256_of_the_four_files(tmp_path):
+    paths = []
+    for name in ('tag_mount', 'urdf', 'apriltag', 'realsense'):
+        path = tmp_path / (name + '.txt')
+        path.write_text(name)
+        paths.append(path)
+    identity = rec.identity_from_files(*paths, 0)
+    assert identity == {
+        'tag_mount_sha256': hashlib.sha256(b'tag_mount').hexdigest(),
+        'urdf_sha256': hashlib.sha256(b'urdf').hexdigest(),
+        'apriltag_yaml_sha256': hashlib.sha256(b'apriltag').hexdigest(),
+        'realsense_yaml_sha256': hashlib.sha256(b'realsense').hexdigest(),
+        'tag_id': 0}
+    assert tuple(identity) == rec.IDENTITY_KEYS
+
+
+def test_the_identity_changes_with_the_file_it_comes_from(tmp_path):
+    paths = []
+    for name in ('a', 'b', 'c', 'd'):
+        path = tmp_path / name
+        path.write_text(name)
+        paths.append(path)
+    before = rec.identity_from_files(*paths, 0)
+    paths[3].write_text('changed')
+    after = rec.identity_from_files(*paths, 0)
+    assert [k for k in before if before[k] != after[k]] == ['realsense_yaml_sha256']
+    with pytest.raises(OSError):
+        rec.identity_from_files(*paths[:3], tmp_path / 'missing', 0)
+
+
+def test_camera_extra_has_plain_values_that_yaml_can_write():
+    extra = rec.camera_extra(np.arange(9.0), np.zeros(5), np.int64(640), 480,
+                             np.array([0.0, 0.015, 0.0]), (-0.5, 0.5, -0.5, 0.5))
+    assert extra['camera_info']['k'] == [float(i) for i in range(9)]
+    assert extra['camera_info']['width'] == 640 and extra['camera_info']['height'] == 480
+    link = extra['camera_link_to_optical_frame']
+    assert (link['parent'], link['child']) == ('camera_link', 'camera_color_optical_frame')
+    assert link['translation_m'] == [0.0, 0.015, 0.0]
+    assert yaml.safe_load(yaml.safe_dump(extra)) == extra
+
+
+def test_camera_extra_goes_into_the_meta_file(tmp_path):
+    extra = rec.camera_extra([1.0] * 9, [0.0] * 5, 640, 480, (0.0, 0.0, 0.0), (0, 0, 0, 1))
+    meta = rec.build_meta(IDENTITY, MOUNT, (-0.055, 0.0, 0.035), '2026-11-16', extra)
+    assert meta['extra']['camera_info']['width'] == 640
+
+
+def test_investigating_needs_no_csv_but_recording_does(tmp_path):
+    io = FakeIo()
+    loop = rec.RecordLoop(io, _chain(), MOUNT, None, IDENTITY)
+    assert loop.run('investigate', investigate_only=True) == rec.EXIT_OK
+    io = FakeIo()
+    loop = rec.RecordLoop(io, _chain(), MOUNT, None, IDENTITY)
+    assert loop.run('P01') == rec.EXIT_REFUSED
+    assert io.waits == [] and list(tmp_path.iterdir()) == []

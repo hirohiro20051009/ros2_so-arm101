@@ -118,6 +118,25 @@ def check_tag_size(tag_size_m, tag_id, apriltag_yaml):
             f'{apriltag_yaml}')
 
 
+def tag_frame_name(apriltag_yaml, tag_id):
+    """Return the TF frame of tag_id in apriltag.yaml (the lists ids and frames are parallel)."""
+    try:
+        params = load_yaml_mapping(apriltag_yaml)['apriltag']['ros__parameters']['tag']
+        ids = list(params['ids'])
+        frames = list(params['frames'])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise TagMountError(
+            f'cannot read the tag ids and frames of {apriltag_yaml}: {exc}') from exc
+    if len(ids) != len(frames):
+        raise TagMountError(f'{apriltag_yaml}: ids and frames have different lengths')
+    if tag_id not in ids:
+        raise TagMountError(f'tag_id {tag_id} is not in the ids {ids} of {apriltag_yaml}')
+    name = frames[ids.index(tag_id)]
+    if not isinstance(name, str) or not name:
+        raise TagMountError(f'the frame of tag {tag_id} in {apriltag_yaml} is not a name')
+    return name
+
+
 def load_tag_mount(path, apriltag_yaml):
     """
     Read and check tag_mount.yaml; apriltag_yaml is the file whose tag size must agree.

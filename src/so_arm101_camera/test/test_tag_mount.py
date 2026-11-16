@@ -188,3 +188,31 @@ def test_the_offset_is_turned_back_to_the_base_axes_at_zero():
         (-0.055, 0.0, 0.035), abs=2e-5)
     assert math.isclose(float(np.linalg.norm(tm.offset_in_base_at_zero(chain, in_gripper))),
                         float(np.linalg.norm(in_gripper)))
+
+
+def _apriltag_yaml(tmp_path, ids, frames):
+    data = {'apriltag': {'ros__parameters': {'tag': {'ids': ids, 'frames': frames}}}}
+    return _write(tmp_path, data, 'apriltag.yaml')
+
+
+@pytest.mark.parametrize('tag_id, frame', [(0, 'tag36h11_0'), (1, 'tag36h11_1')])
+def test_the_frame_of_a_tag_is_read_from_apriltag_yaml(tag_id, frame):
+    assert tm.tag_frame_name(APRILTAG_YAML, tag_id) == frame
+
+
+def test_a_tag_that_is_not_in_apriltag_yaml_has_no_frame():
+    with pytest.raises(tm.TagMountError, match='not in the ids'):
+        tm.tag_frame_name(APRILTAG_YAML, 5)
+
+
+def test_ids_and_frames_of_different_lengths_are_refused(tmp_path):
+    path = _apriltag_yaml(tmp_path, [0, 1], ['only_one'])
+    with pytest.raises(tm.TagMountError, match='different lengths'):
+        tm.tag_frame_name(path, 0)
+
+
+def test_a_frame_that_is_not_a_name_is_refused(tmp_path):
+    path = _apriltag_yaml(tmp_path, [0, 1], [5, 'tag_b'])
+    with pytest.raises(tm.TagMountError, match='not a name'):
+        tm.tag_frame_name(path, 0)
+    assert tm.tag_frame_name(path, 1) == 'tag_b'

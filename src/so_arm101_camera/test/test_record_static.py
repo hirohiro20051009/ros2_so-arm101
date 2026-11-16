@@ -41,6 +41,9 @@ FORBIDDEN_NAMES = {
     'call_async', 'Serial', 'serial', 'pyrealsense2', 'subprocess', 'Popen', 'popen', 'system',
     'socket', 'urlopen', 'requests', 'write_text', 'write_bytes', 'truncate', 'unlink', 'remove',
     'rename', 'replace', 'rmtree', 'chmod', 'ctypes', 'importlib', 'eval', 'exec',
+    'execl', 'execle', 'execlp', 'execlpe', 'execv', 'execve', 'execvp', 'execvpe', 'spawnl',
+    'spawnle', 'spawnlp', 'spawnlpe', 'spawnv', 'spawnve', 'spawnvp', 'spawnvpe', 'kill', 'killpg',
+    'fork', 'forkpty',
 }
 
 # Values that come from so_arm101_ik and must not be written again in this package.
@@ -70,6 +73,9 @@ def test_nothing_that_sends_opens_a_port_or_removes_a_file_is_named(name):
             found.add(node.id)
         elif isinstance(node, ast.Attribute) and node.attr in FORBIDDEN_NAMES:
             found.add(node.attr)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            # "from os import kill" names kill without using it.
+            found |= {a.name.split('.')[-1] for a in node.names} & FORBIDDEN_NAMES
     assert not found, found
 
 

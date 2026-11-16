@@ -25,6 +25,8 @@ if(BUILD_TESTING)
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   ament_add_pytest_test(test_record_static test/test_record_static.py
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
+  ament_add_pytest_test(test_camera_record_static test/test_camera_record_static.py
+                        ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
 endif()
 
 ament_package()
