@@ -13,6 +13,7 @@ so_arm101 のドライバ（`so_arm101_hardware` の `Sts3215System`）は **LeR
 | 利用したもの | LeRobot 0.4.2 の出典（ファイル / 関数・表） | so_arm101 での場所 |
 |---|---|---|
 | raw → 正規化値の式（angle: DEGREES、gripper: RANGE_0_100 と範囲 clamp） | `lerobot/motors/motors_bus.py` `MotorsBus._normalize()`（770-797 行） | `src/so_arm101_hardware/src/calibration.cpp` `raw_to_rad()` |
+| **（出典なし。本リポジトリの独自の拡張）** angle の角度の補正値 `zero_offset_deg`（度、既定 0）。読みで +δ、書きで −δ。既定 0 のとき上の式・下の逆変換の式と同じ値（LeRobot 0.4.2 にない項。`docs/joint_offset_plan.md`） | なし（LeRobot の `_normalize()`・`_unnormalize()` に対応する項は無い） | `src/so_arm101_hardware/src/calibration.cpp` `raw_to_rad()`・`rad_to_raw_continuous()`、`config/follower_calibration.yaml` の `zero_offset_deg` |
 | モータ定義（angle 5 関節 = DEGREES、gripper = RANGE_0_100） | `lerobot/robots/so101_follower/so101_follower.py` `SO101Follower.__init__`（48-59 行） | `config/follower_calibration.yaml` の `kind` |
 | 度 → rad（gripper の 0..100 も度として扱う） | so_arm101_lerobot_bridge の `bridge.py` 132-133 行（`math.radians`）。LeRobot 本体ではなく、元は nimiCurtis/so101_ros2（MIT） | 同上 |
 | STS3215 のレジスタ表（アドレス・バイト数） | `lerobot/motors/feetech/tables.py` `STS_SMS_SERIES_CONTROL_TABLE`（41-101 行） | `include/so_arm101_hardware/sts3215_bus.hpp` `reg::`（読み取りに使う 6 つだけ） |
