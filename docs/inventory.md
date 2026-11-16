@@ -2710,3 +2710,10 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - C3 で決めること: tag_seen は 1 のままで cam_n で選ぶこと、やり直しの label（P05b など）の選び方、stable を使うか。
 - C2-b の手順書に入れること: 軸の対応表（+x 後ろ、+y 左、+z 下）を実物で確かめる段、camera の終了コード 3（タグが見えない）と ik の 3（START_REFUSED）の意味の違い、ik_move_run で各区間を `--dry-run` してから動かす順路（12 から T は 1 回では通らず、点 1 の再訪を経由）、tag_mount.yaml へ測定値を書く手順、新しい CSV の名前を `ls` で確かめること。
 - numpy の 2 版（`python3 -s` と `python3`）の版そのものの表示は、まだしていない（記録済みの値による推定）。
+
+### 測定値の書き込みと C2-b の手順書（2026-11-16）
+
+- コミット `f566392`: `tag_mount.yaml` に測定値 `[-0.038, 0.0, -0.062]` と `measured_note` を書き、`test_tag_mount.py` の 2 試験を直した（旧 `test_the_shipped_file_is_not_measured_and_is_refused` → 新 `test_the_shipped_file_is_measured_and_loads`、旧 `test_the_shipped_file_is_valid_once_a_measurement_is_given` → 新 `test_the_shipped_file_without_its_measurement_is_refused`）。camera は 218 件・失敗 0。null の拒否は `test_null_measurement_is_refused` が tmp の中身で守る。
+- 段 1b（ROS_DOMAIN_ID=87、`--investigate` だけ）の結果: `front 38.0 mm, up 55.7 mm, left 0.0 mm` と `front 38.0 mm, up 62.0 mm, left 0.0 mm` の 2 行のあと `exit=5`。src と install の `tag_mount.yaml` の sha256 は一致（`51fc015e476340de33a3a3c1577059aaed0145959c9abaa54273bb296c1044fa`）。
+- install 側の `config/tag_mount.yaml` は symlink ではなくコピー（`ls -l` で通常のファイル）。yaml を直したらビルドが要る。C3 の道具の書き先（src か install か）を決めるときの材料。
+- C2-b の手順書 `docs/camera_c2_real_check.md`（534 行）。実機の結果はまだ無い（未実施）。
