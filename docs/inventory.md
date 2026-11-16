@@ -2658,3 +2658,55 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - 事実: オフセットの同時推定は、ランクが 9 のうち 8 で、カメラの並進の z とオフセットの組み合わせが決まらない（pitch・roll が全点で同じため）。「同時推定をしない」決定（2026-11-16、ユーザー）の記録。
 - 仮定: カメラ A (0.50, 0.30, 0.60) m は、2026-11-15 にユーザーがチャットで報告した旧の起動コマンドの概算（ファイルにはない）。static_transform_publisher の角度の読み（yaw・pitch・roll）は help に出ない推測。
 - 残課題: tag_mount.yaml のフレームとノギスで測る場所、C2-b の手順書に「12 点すべてでタグが見えることの確認」の段、C2-a の記録の道具で複数フレームの平均（推測）。
+
+## C2-a の記録の道具（2026-11-16。コード: コミット `832b882` と `7ae0fbc`。計画は `docs/camera_stage_plan.md` 8 章。実機・カメラ・launch は使っていない。モックの通しは ROS_DOMAIN_ID=87 の合成の発行器）
+
+「事実」は実行して確かめたこと、「推測」は値や見立て。
+
+### コードの要点
+
+- `832b882`（1 回目。ROS を使わない部分）: `tag_mount.py`（tag_mount.yaml の検査、基準点と測定値の和、T の姿勢の表示、FK のタグ中心）、`record.py`（stamp の突き合わせ、MAD の 3 倍と下限 5 mm の外れ値、平均、CSV と meta の session の守り、RecordLoop）、`config/tag_mount.yaml`（測定値は null で、読み込みは拒否）、試験 3 本。camera は 178 件、失敗 0。確認が無いときの終了コードは 2（ik_move の `EXIT_STOPPED` と同じ）。
+- `7ae0fbc`（2 回目）: `tools/camera_record_run.py`（/joint_states・/detections・/tf を購読。新しい CSV のときだけ camera_info と /tf_static。何も publish せず、open を一切使わない。点ごとに起動して同じ CSV に追記）。record.py と tag_mount.py に `load_chain`・`identity_from_files`・`camera_extra`・`tag_frame_name`。調査だけなら CSV が要らない。package.xml に exec_depend 8 行（python3-numpy、so_arm101_ik、so_arm101_description、rclpy、sensor_msgs、apriltag_msgs、tf2_msgs、tf2_ros_py）。静的な試験 `test_camera_record_static.py`。
+- 件数（事実）: camera は 218 件、失敗 0（pytest 185、lint 23、CTest 10。pytest は camera_config 32、record 70、tag_mount 50、camera_record_static 25、record_static 8）。ほかのパッケージは変更していないので、記録済みの値のままで合計は 809 件（bringup 47、calibration 73、description 2、hardware 105、moveit_config 0、ik 364、camera 218）。ほかのパッケージの今回の再実行はしていない。手動の flake8（`python3 -m flake8 --max-line-length 99 tools/camera_record_run.py`）は 0 件（1 回目に E127 が 1 件で、直した）。
+- 守りを外す確認（スクラッチのコピー）: `832b882` の分は 24 通り、`7ae0fbc` の分は 32 通り（ほかにベースラインが各 1）。`832b882` の分は全部捕まった。`7ae0fbc` の分は生き残りが 1 件（`from os import kill` だけの import は、使われないと名前に出ない）。禁止の名前の検査に import の別名を加えて、tools 用と record.py・tag_mount.py 用の両方を塞ぎ、再実行で捕まった。label の正規表現が `P01\n` を通す不具合は、試験を書く途中で見つけて `fullmatch` に直した。
+
+### 基準点と測定値（ユーザー、ノギス、2026-11-16。この時点でリポジトリの tag_mount.yaml には書かない。C2-b の最初に書く）
+
+- 基準点 reference_point_gripper_frame_m = (0.0, 0.0, 0.0063) m。出どころは `ref_point_out.txt`（固定あごの先端の層の +z の最大 0.006298、前の面 x = 0.000、幅の中心 y = 0）。
+- 測定値 ref_to_tag_gripper_frame_m = (−0.038, 0.0, −0.062) m。前 38 mm は台紙の厚みを含めた印刷面まで、上は先端の端から 62 mm、左右 0。
+- 足した値 offset = (−0.038, 0.0, −0.0557) m。T の姿勢（先端が真下）の表示は「前へ 38.0、上へ 55.7、左へ 0.0 mm」（試験とモックの両方で確認）。
+- タグは固定あご（gripper_link）側に付いている。
+- 事実（`ref_point_out.txt` の 4）: 全関節 0 で gripper_frame の +x は下、+y は左、+z は前（root の軸で +x (0, 0.0487, −0.9988)、+y (0, 0.9988, 0.0487)、+z (1, 0, 0)）。軸は完全な下と左から約 2.8° 傾いている。
+
+### スクラッチの控え（git 管理外。`~/so_arm101_check/camera_20261116_C2a/`。cp のみ）
+
+| ファイル | sha256 |
+|---|---|
+| ref_point_study.py | c2b0e69733a15627699ef1613916161400743c9434b3c34a513ab8af8ea86bda |
+| ref_point_out.txt | 24dc15c1a7c66e6055e898db8f716c9c71947fc948433ed5b658f352f67ddfe7 |
+| mutate.sh | 4ddf5a971351d270fa81ba874820cf09e97822498a1322329d079a85afbc9eed |
+| mutate2.sh | 2f9d4ea08a51084834d607a535605261843e23943c9ff0598bd02b3f4d65f88a |
+| fake_camera_world.py | 1ec0dc90b8301f371c4530e9a685154a94cf432322dbee48013d2980c7716472 |
+
+- ref_point_study.py は STL と URDF だけを読む（標準ライブラリだけ）。1 回だけ実行した。fake_camera_world.py は合成の発行器で、リポジトリには入れない。モックの CSV と meta は残していない。
+
+### モックの通しの結果（事実。ROS_DOMAIN_ID=87、rmw_cyclonedds_cpp。発行器 4 回、ツール 11 回。実機・シリアル・カメラ・bringup のモックは使っていない）
+
+- S0（発行器なし。新しい CSV に P01）: 終了コード 5、CSV も meta も作られない。
+- S1（タグが見える）: a の調査だけは終了コード 0（何も書かれず、matched 15 前後、検出の率 1.00）。b はリポジトリの yaml（null）で終了コード 2（ノードを作らない）。c の P01 は 0 で CSV と meta ができた。d の P02 は 0 で idx 2、meta の sha256 は変わらない。e の同じ label は 2（CSV 不変）。f の no の答えは 2（CSV 不変）。g の tag_mount を変えたコピーは 2（tag_mount_sha256 の不一致。CSV 不変）。最終の CSV は 3 行。
+- S2（`--tag-visible false`）: 終了コード 3、ファイルは作られない。
+- S3（`--stamp-skew-ns 1000`）: matched 0、unmatched は検出 150、タグの位置 150、終了コード 3。
+- S4（`--moving`）: `arm stopped: NO` と表示し、still=0 の行を書いて終了コード 0（q_span 0.009 rad）。
+- 後始末: 発行器は 1 つずつ控えた PID への `kill -INT` で止め、ps と `ros2 node list --no-daemon`（ROS_DOMAIN_ID=87）が空であることを毎回確かめた。
+- A の突き合わせ（S1 の c、P01 の行）:
+  - fk_tcp = (0.176658, −0.000010, 0.058772) m。見込み (0.1767, 0.0000, 0.0588) と合う。
+  - fk_tag = (0.215579, −0.001859, 0.113801) m。見込み (0.2147, 0.0000, 0.1145) との差は x +0.9、y −1.9、z −0.7 mm（見込みの ±2 mm の内側）。y の差は、gripper_frame の +x 軸が y 方向に 0.0487 傾いている影響（0.0487 × −0.038 m = −1.85 mm）で説明できる（計算）。
+  - meta の camera_link から camera_color_optical_frame: translation (−4.8236e-05, 0.0148089, 4.5874e-05) は C1 の camera_color_frame の値と同じ。quaternion (−0.499821, 0.498996, −0.500495, 0.500686) は、C1 の camera_color_frame の回転と (−0.5, 0.5, −0.5, 0.5) の積と手計算で一致（w と x を確認）。
+  - cam_n 15、cam_tag は約 (0.1001, 0.0500, 0.6000)、tag_seen 1、still 1。incidence_deg は、発行器のタグの向きが回転なしなので評価していない。
+- 限界（推測）: 発行器は stamp を同じにして作っているので、実機の apriltag_ros の /detections と /tf のタグの stamp が実際に等しいか、QoS が合うかは、C2-b の調査モードでの確認になる（全フレームが不一致なら unmatched の数に出る）。
+
+### 残すこと
+
+- C3 で決めること: tag_seen は 1 のままで cam_n で選ぶこと、やり直しの label（P05b など）の選び方、stable を使うか。
+- C2-b の手順書に入れること: 軸の対応表（+x 後ろ、+y 左、+z 下）を実物で確かめる段、camera の終了コード 3（タグが見えない）と ik の 3（START_REFUSED）の意味の違い、ik_move_run で各区間を `--dry-run` してから動かす順路（12 から T は 1 回では通らず、点 1 の再訪を経由）、tag_mount.yaml へ測定値を書く手順、新しい CSV の名前を `ls` で確かめること。
+- numpy の 2 版（`python3 -s` と `python3`）の版そのものの表示は、まだしていない（記録済みの値による推定）。
