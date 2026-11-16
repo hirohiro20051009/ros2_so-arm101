@@ -1,0 +1,12 @@
+# Read by: the recording tool of C2 (tools/camera_record_run.py via tag_mount.py). Written by hand.
+# All vectors are in the axes of gripper_frame_link (URDF). ref_to_tag_gripper_frame_m is measured
+# with callipers; null means "not measured yet" and the recording tool refuses to start.
+# The tag offset used by the forward kinematics is reference_point + ref_to_tag (computed, not written).
+tag_id: 0
+tag_size_m: 0.06
+reference_point_gripper_frame_m: [0.0, 0.0, 0.0063]
+reference_point_source: >-
+  tip of the fixed jaw: the highest +z point of the tip layer of wrist_roll_follower_so101_v1.stl
+  (0.006298), front face x = 0.000, centre of the width y = 0 (from ref_point_out.txt)
+ref_to_tag_gripper_frame_m: null
+measured_note: ''
