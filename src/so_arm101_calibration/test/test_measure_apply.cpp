@@ -1130,3 +1130,148 @@ TEST(Apply, TheRenderedYamlKeepsTheOldFormat)
   EXPECT_NE(text.find("applied_by: " + tool_id() + "\n"), std::string::npos) << text;
   EXPECT_EQ(text.find("0.1.0"), std::string::npos) << text;
 }
+
+// ---------------------------------------------------------------- zero_offset_deg の持ち越し（J3）
+namespace
+{
+/// ApplyRig の yaml の elbow_flex（center 1975）に zero_offset_deg を足し、gripper には 0 を足す
+void add_offsets(ApplyRig & t, const std::string & elbow, const std::string & gripper = "")
+{
+  std::string text = t.yaml_text();
+  const std::string e = "elbow_flex: {id: 3, kind: angle, direction: 1, center: 1975,";
+  ASSERT_NE(text.find(e), std::string::npos);
+  text.replace(text.find(e), e.size(), e + " zero_offset_deg: " + elbow + ",");
+  if (!gripper.empty()) {
+    const std::string g = "gripper: {id: 6, kind: linear_percent, direction: 1,";
+    ASSERT_NE(text.find(g), std::string::npos);
+    text.replace(text.find(g), g.size(), g + " zero_offset_deg: " + gripper + ",");
+  }
+  std::ofstream(t.yaml, std::ios::trunc) << text;
+}
+}  // namespace
+
+TEST(ApplyZeroOffset, TheValueIsCarriedOverAsTheSameString)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.30", "0");
+  const std::string text = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  EXPECT_NE(text.find(", center: 2047, zero_offset_deg: -6.30, min: "), std::string::npos) << text;  // 元の桁のまま
+  EXPECT_NE(text.find("direction: 1, zero_offset_deg: 0, min: "), std::string::npos) << text;  // gripper の 0
+  const std::string path = t.dir + "/rendered_zo.yaml";
+  {std::ofstream(path) << text;}
+  const auto cal = so_arm101_hardware::load_calibration(path);
+  EXPECT_EQ(cal.find("elbow_flex")->zero_offset_deg, -6.3);
+  EXPECT_EQ(cal.find("gripper")->zero_offset_deg, 0.0);
+}
+
+TEST(ApplyZeroOffset, JointsWithoutTheKeyDoNotGainOne)
+{
+  ApplyRig t;
+  const std::string none = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  EXPECT_EQ(none.find("zero_offset_deg"), std::string::npos) << none;  // 補正の無い yaml の出力にキーは出ない
+  add_offsets(t, "-6.3");
+  const std::string some = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  size_t n = 0;
+  for (size_t p = some.find("zero_offset_deg"); p != std::string::npos; p = some.find("zero_offset_deg", p + 1)) {++n;}
+  EXPECT_EQ(n, 1u) << some;  // elbow だけ
+  EXPECT_NE(some.find("shoulder_lift: {id: 2, kind: angle, direction: 1, center: "), std::string::npos);
+}
+
+TEST(ApplyZeroOffset, ANonNumberInTheOldYamlIsRefused)
+{
+  ApplyRig t;
+  add_offsets(t, "[1, 2]");
+  EXPECT_THROW(render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "x"), std::runtime_error);
+}
+
+TEST(ApplyZeroOffset, AFullApplyKeepsTheOffsetInTheYamlFile)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.3");
+  std::string text;
+  ASSERT_EQ(t.run(t.args(), &text), kExitOk) << text;
+  EXPECT_NE(t.yaml_text().find(", zero_offset_deg: -6.3, min: "), std::string::npos) << t.yaml_text();
+  EXPECT_NE(text.find("yaml を更新した"), std::string::npos) << text;
+}
+
+TEST(ApplyZeroOffset, AGroupApplyLeavesAYamlWithAnOffsetUnchanged)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.3");
+  const std::string before = t.yaml_text();
+  ApplyArgs a = t.args();
+  a.selected = {3};
+  std::string text;
+  ASSERT_EQ(t.run(a, &text), kExitOk) << text;
+  EXPECT_EQ(t.yaml_text(), before);
+}
+
+TEST(ApplyZeroOffset, TheReloadCheckRefusesATextThatChangesAnOffset)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.3");
+  const std::string before = t.yaml_text();
+  std::string good = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  std::string err;
+  // 補正値を消した text（持ち越しに失敗した出力のつもり）
+  std::string dropped = good;
+  dropped.replace(dropped.find(", zero_offset_deg: -6.3"), std::string(", zero_offset_deg: -6.3").size(), "");
+  EXPECT_FALSE(update_calibration_yaml(t.yaml, dropped, &err));
+  EXPECT_NE(err.find("zero_offset_deg"), std::string::npos) << err;
+  // 値を変えた text
+  std::string changed = good;
+  changed.replace(changed.find("-6.3"), 4, "-6.0");
+  EXPECT_FALSE(update_calibration_yaml(t.yaml, changed, &err));
+  EXPECT_EQ(t.yaml_text(), before);
+  EXPECT_FALSE(fs::exists(t.yaml + ".new"));
+  // 正しい text は通る
+  EXPECT_TRUE(update_calibration_yaml(t.yaml, good, &err)) << err;
+}
+
+TEST(ApplyZeroOffset, TheDryRunListsTheCarriedValueOnlyWhenThereIsOne)
+{
+  {
+    ApplyRig t;
+    add_offsets(t, "-6.3");
+    std::string text;
+    ASSERT_EQ(t.run(t.args(false), &text), kExitOk) << text;
+    EXPECT_NE(text.find("elbow_flex: zero_offset_deg -6.3（そのまま持ち越す）"), std::string::npos) << text;
+  }
+  {
+    ApplyRig t;
+    std::string text;
+    ASSERT_EQ(t.run(t.args(false), &text), kExitOk) << text;
+    EXPECT_EQ(text.find("zero_offset_deg"), std::string::npos) << text;
+  }
+}
+
+TEST(ApplyZeroOffset, TheCenterWarningAppearsFromTenTicksOnAndOnlyForJointsWithAnOffset)
+{
+  const struct {double shift; bool warn;} cases[] = {{9.5, false}, {10.0, true}, {-10.0, true}, {19.5, true}};
+  for (const auto & c : cases) {
+    ApplyRig t;
+    add_offsets(t, "-6.3");
+    ApplyArgs a = t.args(false);
+    a.measure.joints[2].new_center = 1975 + c.shift;  // elbow（補正あり）
+    a.measure.joints[1].new_center = 2029 + 80;        // shoulder_lift（補正なし）は大きく動いても出ない
+    std::string text;
+    ASSERT_EQ(t.run(a, &text), kExitOk) << text;
+    EXPECT_EQ(text.find("WARN  elbow_flex: center が") != std::string::npos, c.warn) << c.shift << "\n" << text;
+    EXPECT_EQ(text.find("WARN  shoulder_lift"), std::string::npos) << text;
+  }
+}
+
+TEST(ApplyZeroOffset, TheCenterWarningHasTheValuesAndOnlyChecksTheSelectedJoints)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.3");
+  ApplyArgs a = t.args(false);
+  a.measure.joints[2].new_center = 1975 + 19.5;
+  std::string text;
+  ASSERT_EQ(t.run(a, &text), kExitOk) << text;
+  EXPECT_NE(text.find("center が 1975 -> 1994.5 に 19.5 tick（1.71°）動いた。zero_offset_deg -6.3 は古い center との組"),
+    std::string::npos) << text;
+  a.selected = {1};  // elbow を選ばない apply では出ない
+  ASSERT_EQ(t.run(a, &text), kExitOk) << text;
+  EXPECT_EQ(text.find("WARN  elbow_flex"), std::string::npos) << text;
+}

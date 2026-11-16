@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <ostream>
 #include <sstream>
 
@@ -79,6 +80,15 @@ std::string render_calibration_yaml(
     o << "  " << j.name << ": {id: " << int(j.id) << ", kind: " << oj["kind"].as<std::string>()
       << ", direction: " << oj["direction"].as<int>();
     if (oj["kind"].as<std::string>() == "angle") {o << ", center: " << num(j.new_center);}
+    // zero_offset_deg は EEPROM と無関係な機械の量なので、そのまま持ち越す（元の文字列を写す）。
+    // キーが無かった関節にはキーを足さない。docs/joint_offset_plan.md 2.2
+    const YAML::Node zo = oj["zero_offset_deg"];
+    if (zo.IsDefined()) {
+      if (!zo.IsScalar() || zo.Scalar().empty()) {
+        throw std::runtime_error("joint " + j.name + ": zero_offset_deg in " + old_yaml_path + " is not a number");
+      }
+      o << ", zero_offset_deg: " << zo.Scalar();
+    }
     o << ", min: " << j.new_min << ", max: " << j.new_max << ", eeprom: {homing_offset: " << j.new_homing_offset
       << ", min_limit: " << j.new_min << ", max_limit: " << j.new_max << "}}\n";
   }
@@ -113,6 +123,23 @@ bool update_calibration_yaml(const std::string & yaml_path, const std::string & 
     if (c.joints.empty()) {throw std::runtime_error("no joints");}
   } catch (const std::exception & e) {
     if (err) {*err = std::string("new yaml does not load: ") + e.what();}
+    std::remove(tmp.c_str());
+    return false;
+  }
+  // 補正値（zero_offset_deg）が、全関節で古い yaml と同じであること（この時点で real はまだ古い yaml）
+  try {
+    const auto oldc = so_arm101_hardware::load_calibration(real.string());
+    const auto newc = so_arm101_hardware::load_calibration(tmp);
+    for (const auto & nj : newc.joints) {
+      const auto * oj = oldc.find(nj.name);
+      if (!oj || oj->zero_offset_deg != nj.zero_offset_deg) {
+        throw std::runtime_error(
+                "zero_offset_deg of " + nj.name + " differs from the old yaml (" +
+                std::to_string(oj ? oj->zero_offset_deg : 0.0) + " -> " + std::to_string(nj.zero_offset_deg) + ")");
+      }
+    }
+  } catch (const std::exception & e) {
+    if (err) {*err = std::string("zero_offset_deg is not carried over: ") + e.what();}
     std::remove(tmp.c_str());
     return false;
   }
@@ -233,6 +260,34 @@ static int run_apply_impl(
       out << "  " << name_of(a.all, p.id) << " (id " << int(p.id) << ") " << kLabel[i] << ": "
           << show_value(r, p.old_[i]) << " -> " << show_value(r, p.neu[i]) << "\n";
     }
+  }
+  // 補正値（zero_offset_deg）の持ち越しと、center が動いた関節の警告（古い yaml が読めなければ黙って省く）
+  try {
+    const auto oldc = so_arm101_hardware::load_calibration(a.yaml_path);
+    bool header = false;
+    for (const auto & oj : oldc.joints) {
+      if (oj.zero_offset_deg == 0.0) {continue;}
+      if (!header) {out << "\n== yaml へ持ち越す補正値（EEPROM とは無関係。そのまま書く）\n"; header = true;}
+      out << "  " << oj.name << ": zero_offset_deg " << num(oj.zero_offset_deg) << "（そのまま持ち越す）\n";
+    }
+    for (uint8_t id : sel) {
+      const auto * m = a.measure.find(id);
+      if (!m) {continue;}
+      const auto it = std::find_if(
+        oldc.joints.begin(), oldc.joints.end(), [&](const so_arm101_hardware::JointCalibration & c) {return c.id == id;});
+      if (it == oldc.joints.end() || it->kind != so_arm101_hardware::JointKind::Angle || it->zero_offset_deg == 0.0) {
+        continue;
+      }
+      const double shift = m->new_center - it->center;
+      if (std::fabs(shift) >= kCenterShiftWarnTicks) {
+        std::ostringstream deg;
+        deg << std::fixed << std::setprecision(2) << std::fabs(shift) * 360.0 / oldc.angle_ticks;
+        out << "WARN  " << m->name << ": center が " << num(it->center) << " -> " << num(m->new_center) << " に "
+            << num(std::fabs(shift)) << " tick（" << deg.str() << "°）動いた。zero_offset_deg " << num(it->zero_offset_deg)
+            << " は古い center との組。apply の後、出発点で物差しを測り直して確かめる（docs/joint_offset_plan.md 2.3）\n";
+      }
+    }
+  } catch (const std::exception &) {
   }
   out << (all_joints ? "全関節を 1 回で書く。成功したら yaml を 1 回だけ更新する: " + a.yaml_path :
     "一部の関節だけを書く。yaml は更新しない") << "\n";

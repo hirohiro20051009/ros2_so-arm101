@@ -22,6 +22,10 @@
 namespace so_arm101_calibration
 {
 
+/// 補正値 zero_offset_deg を持つ関節の center がこの tick 数以上動いたら、apply が警告を出す（約 0.9°）。
+/// 補正値は古い center との組なので、再確認を促す。docs/joint_offset_plan.md 2.2・2.3
+constexpr double kCenterShiftWarnTicks = 10.0;
+
 struct ApplyArgs
 {
   MeasureFile measure;
@@ -39,12 +43,14 @@ struct ApplyArgs
 int run_apply(
   CalibWriteBus & bus, const ApplyArgs & args, const std::function<bool()> & confirm, std::ostream & out);
 
-/// 更新後の yaml のテキスト（従来の yaml と同じ形式。direction・bus・conversion は元の yaml から引き継ぐ）。
+/// 更新後の yaml のテキスト（従来の yaml と同じ形式。direction・bus・conversion と、キーがあった関節の
+/// zero_offset_deg は元の yaml からそのまま引き継ぐ。キーが無かった関節にはキーを足さない）。
 std::string render_calibration_yaml(
   const std::string & old_yaml_path, const MeasureFile & m, const std::string & backup_path,
   const std::string & measure_path, const std::string & applied_at);
 
-/// yaml を実体の場所に、一時ファイル → 読み直して検査 → rename で書く。
+/// yaml を実体の場所に、一時ファイル → 読み直して検査（全関節の zero_offset_deg が古い yaml と同じことを含む）
+/// → rename で書く。
 bool update_calibration_yaml(const std::string & yaml_path, const std::string & text, std::string * err);
 
 }  // namespace so_arm101_calibration
