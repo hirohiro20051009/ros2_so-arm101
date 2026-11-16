@@ -152,7 +152,8 @@ def load_extrinsics(path):
     Read and check the extrinsics file (base_link to camera_link).
 
     Keys: translation_m [x, y, z] in metres and quaternion_xyzw [x, y, z, w] (unit length).
-    Returns (translation, quaternion). Raises ExtrinsicsError if the content is not valid.
+    Returns (translation, quaternion); the quaternion is normalised after the check. Raises
+    ExtrinsicsError if the content is not valid.
     """
     try:
         data = load_yaml_mapping(path)
@@ -170,6 +171,8 @@ def load_extrinsics(path):
     norm = math.sqrt(sum(q * q for q in quaternion))
     if abs(norm - 1.0) > QUATERNION_NORM_TOLERANCE:
         raise ExtrinsicsError(f'{path}: quaternion_xyzw must have unit length, its norm is {norm}')
+    # The norm is within the tolerance: normalise before the quaternion is passed on.
+    quaternion = [q / norm for q in quaternion]
     return translation, quaternion
 
 

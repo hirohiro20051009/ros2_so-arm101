@@ -254,3 +254,14 @@ def test_apriltag_yaml_has_the_old_values():
         'image_rect': '/camera/camera/color/image_raw',
         'camera_info': '/camera/camera/color/camera_info',
     }
+
+
+def test_quaternion_is_normalised_before_it_is_passed_on(tmp_path):
+    off = _with(quaternion_xyzw=[0, 0, 0, 1 + 0.5e-3])
+    args = cc.plan_extrinsics_tf(_write(tmp_path, off), DEFAULT)
+    q = [float(args[args.index(flag) + 1]) for flag in ('--qx', '--qy', '--qz', '--qw')]
+    assert abs(sum(v * v for v in q) ** 0.5 - 1.0) < 1e-12
+    # A tilted quaternion keeps its direction.
+    tilted = _with(quaternion_xyzw=[0.0, 0.0, 0.6 * (1 + 0.5e-3), 0.8 * (1 + 0.5e-3)])
+    q = cc.load_extrinsics(_write(tmp_path, tilted, 'tilted.yaml'))[1]
+    assert q == pytest.approx([0.0, 0.0, 0.6, 0.8], abs=1e-12)
