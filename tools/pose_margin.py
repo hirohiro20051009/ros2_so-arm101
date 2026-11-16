@@ -9,7 +9,11 @@
   C3 で読み取り専用の起動をしたときの /joint_states の値を使う。
 表示: 各関節で「URDF の下限・上限までの残り（rad）」。負なら範囲の外（OUT）、threshold 未満なら余裕が小さい（LOW）。
       校正で記録した範囲の両端（rad。yaml の min/max と center から換算）も、URDF の範囲と比べる。
-式は so_arm101_hardware の raw_to_rad と同じ（angle: (raw − center)·360/angle_ticks 度、gripper: 0..100% を度として rad）。
+式は so_arm101_hardware の raw_to_rad と同じ（angle: direction·(raw − center)·360/angle_ticks + zero_offset_deg 度、
+gripper: 0..100%（direction −1 なら 100 − %）を度として rad）。zero_offset_deg は yaml の任意キー（既定 0）。direction が −1 の
+関節は下限・上限を並べ替えて表示する。
+--pose の値は補正後の /joint_states の値なので、zero_offset_deg を足さない（足すと二重になる）。
+実行の前に /opt/ros/humble/setup.bash と install/setup.bash を source する（xacro が $(find so_arm101_description) を使う）。
 """
 import argparse
 import math
@@ -25,8 +29,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def urdf_limits(xacro_path):
-    xml = subprocess.run(['xacro', xacro_path, 'use_fake_hardware:=true'], check=True, capture_output=True,
-                         text=True).stdout
+    r = subprocess.run(['xacro', xacro_path, 'use_fake_hardware:=true'], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.stderr.write(r.stderr)
+        sys.exit(f'xacro が失敗した（終了コード {r.returncode}）。/opt/ros/humble/setup.bash と '
+                 f'install/setup.bash を source したか（$(find so_arm101_description) が要る）。')
+    xml = r.stdout
     lim = {}
     for j in ET.fromstring(xml).iter('joint'):
         n = j.get('name')
@@ -38,8 +46,12 @@ def urdf_limits(xacro_path):
 
 def raw_to_rad(j, angle_ticks, raw):
     if j['kind'] == 'angle':
-        return math.radians((raw - j['center']) * 360.0 / angle_ticks)
+        # ドライバ（calibration.cpp の raw_to_rad）と同じ: direction を掛けた後に zero_offset_deg（度）を足す
+        value = j.get('direction', 1) * ((raw - j['center']) * 360.0 / angle_ticks)
+        return math.radians(value + j.get('zero_offset_deg', 0.0))
     pct = (min(max(raw, j['min']), j['max']) - j['min']) / (j['max'] - j['min']) * 100.0
+    if j.get('direction', 1) == -1:
+        pct = 100.0 - pct
     return math.radians(pct)
 
 
@@ -61,13 +73,15 @@ def main():
     print(f'URDF の関節リミット（{args.xacro}）と校正（{args.calibration}）。LOW < {thr} rad、OUT < 0')
     print('\n== 校正で記録した範囲の両端と、URDF の範囲（rad）')
     print(f'{"joint":15s} {"calib_min":>10s} {"calib_max":>10s} {"urdf_lower":>11s} {"urdf_upper":>11s} '
-          f'{"lower_margin":>13s} {"upper_margin":>13s}')
+          f'{"lower_margin":>13s} {"upper_margin":>13s}  {"dir":>3s} {"zero_off_deg":>13s}')
     for n in JOINTS:
         j = cal['joints'][n]
-        lo, hi = raw_to_rad(j, ticks, j['min']), raw_to_rad(j, ticks, j['max'])
+        a, b = raw_to_rad(j, ticks, j['min']), raw_to_rad(j, ticks, j['max'])
+        lo, hi = min(a, b), max(a, b)  # direction が −1 だと min・max の順が逆になる
         ul, uu = lim[n]
         lm, um = lo - ul, uu - hi  # 校正の端が URDF の内側なら正（URDF の範囲の方が広い）
-        print(f'{n:15s} {lo:10.4f} {hi:10.4f} {ul:11.4f} {uu:11.4f} {lm:+9.4f} {flag(lm, thr):>3s} {um:+9.4f} {flag(um, thr):>3s}')
+        print(f'{n:15s} {lo:10.4f} {hi:10.4f} {ul:11.4f} {uu:11.4f} {lm:+9.4f} {flag(lm, thr):>3s} {um:+9.4f} {flag(um, thr):>3s}'
+              f' {j.get("direction", 1):4d} {j.get("zero_offset_deg", 0.0):13.4f}')
     print('  （margin が負 = 校正の範囲が URDF の範囲より広い。サーボは URDF の外まで動ける）')
     worst = []
     for p in args.pose:
