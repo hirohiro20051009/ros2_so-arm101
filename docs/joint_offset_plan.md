@@ -47,6 +47,7 @@ elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, zero_offset_deg: 
 - 事実: apply は `render_calibration_yaml`（`apply.cpp:55-90`）で、古い yaml から id・kind・direction だけを引き継ぎ、center・min・max・eeprom を新しく書く。ほかのキーは書かないので、補正値は消える。ヘッダのコメントも固定の文面で作り直す（`apply.cpp:57-59`）。
 - 案（推奨）: `render_calibration_yaml` が、古い yaml の `zero_offset_deg` を読み、**キーがあった関節は同じ値を書く**。キーが無かった関節は書かない（今の出力と同じ）。`update_calibration_yaml`（`apply.cpp:95-`）の読み直しの検査に「古い yaml の補正値と、新しい yaml の補正値が全関節で同じ」を足す。
 - 試験: 補正値あり・無しの古い yaml から apply の出力を作り、(i) 補正値が同じ、(ii) 無かった関節にキーが増えない、(iii) 選択した関節だけの apply でも全関節の補正値が残る。
+  - **注記（2026-11-16、J3 でユーザー承認）**: 上の (iii)「選択した関節だけの apply でも全関節の補正値が残る」は成り立たない。一部の関節だけの apply は yaml を更新しない（`apply.cpp` の「一部の関節だけを書く。yaml は更新しない」）。(iii) は「**一部の関節だけの apply では yaml は変わらない**」に置き換えた（試験 `AGroupApplyLeavesAYamlWithAnOffsetUnchanged`）。元の記述は上に残す。
 - 変えない: eeprom 欄（`homing_offset`・`min_limit`・`max_limit`）は今までどおり。補正値は EEPROM に関係しない。
 - 注意（推測）: コメントは apply のたびに固定の文面になる。補正値の由来（日付・方法・材料の sha256）は yaml のコメントに頼らず、`inventory.md` に書く（元の yaml の内容を控える決まりにも合う）。
 

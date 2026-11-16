@@ -3064,3 +3064,28 @@ elbow の関節角に δ を足して fk_tag を計算し直し、道具と同�
 
 - 実機・シリアルポート・カメラ・launch・モックは使っていない（ユーザーが「実機も launch も動かしていない」と記入したうえで、全体の `colcon build` と hardware・calibration の `colcon test` を実行した）。Python は実行していない。
 - 守りを外す確認の材料は `/tmp/claude-1000/.../scratchpad/mut/`（スクラッチ。リポジトリの外）。
+
+## J3: apply の持ち越しと pose_margin.py（2026-11-16。コード: コミット `6398331`、`pose_margin.py`: コミット `aeb009b`。計画は `docs/joint_offset_plan.md` の 2.2・3 章・8.4。yaml は変えていない。実機・launch・モックは使っていない）
+
+- 戻し方: J3 の直前のコミット `9c1806d` から取り出せる（`git revert` は承認を得てから）。yaml は変えていないので、補正値の無い yaml では apply の出力は今までと同じ。
+- **apply の持ち越し**（`apply.cpp` の `render_calibration_yaml`）: 古い yaml に `zero_offset_deg` があった関節は、同じ**文字列のまま**（桁を変えない）center の直後に書く。キーが無かった関節にはキーを足さない。値が数値でない（スカラーでない）ときは例外で書かない。EEPROM は触らない。
+- **読み直しの検査**（`update_calibration_yaml`）: rename の前に、古い yaml（実体）と新しい text を読み、全関節の `zero_offset_deg` が同じことを確かめる。違えば書かずに失敗（`.new` は消す）。
+- **dry-run の表示**: 補正値を持つ関節があるときだけ「== yaml へ持ち越す補正値」の節に `elbow_flex: zero_offset_deg -6.3（そのまま持ち越す）` の形で出す。補正値が無い yaml では出力は増えない。古い yaml が読めないときは黙って省く。
+- **center の警告**: `δ ≠ 0` の関節だけ（angle）。|新しい center − 古い yaml の center| が `kCenterShiftWarnTicks`（10 tick。`apply.hpp`。以上で出す）以上なら、dry-run でも書き込みでも、確認の入力の前に `WARN  elbow_flex: center が 1975 -> 1994.5 に 19.5 tick（1.71°）動いた。zero_offset_deg -6.3 は古い center との組。…` を出す。選択していない関節は見ない。書き込みは止めない。
+- 計画 2.2 の (iii) は成り立たなかったので「一部の関節だけの apply では yaml は変わらない」に置き換えた（元の記述は計画に残し、注記を足した）。
+- 試験: calibration 73 → **82**（+9。条件は 6〜16）。失敗 0。hardware（137）・ik・camera・bringup・description・moveit_config は不変。全体は 908 → 917。lint の追加は無い。
+- 守りを外す確認（スクラッチのコピー。別の build・install。リポジトリの build・install は使わない）: 6 補正値を書かない → 持ち越し・読み直し検査の 4 件が落ちた。16 キーが無い関節にもキーを足す → 旧形式の維持とキーの無いままの 2 件。17 読み直しの検査を外す → 読み直しの試験。18 警告を全関節に広げる → 警告の対象と dry-run の 2 件。19 閾値を `>` にする → 警告の境界の試験。20 警告を外す → 警告の 2 件。いずれも期待どおり。（スクラッチのコピーでは、リポジトリ外のデータを相対パスで読む `ProductionYaml.MatchesTheEepromReadAfterC3` が、変更の無い状態でも落ちる。本番のビルドでは通る。）
+- **`tools/pose_margin.py`**: ドライバの `raw_to_rad` と同じ式にした（angle: direction × (raw − center) × 360 / angle_ticks + `zero_offset_deg` 度。gripper: direction −1 なら 100 − %）。校正の範囲の下限・上限は min・max で並べ替える。表に `dir`・`zero_off_deg` の列を足した（行の末尾）。`--pose` の値は補正後の `/joint_states` なので δ を足さない（docstring に明記）。xacro が失敗したら stderr を出し、`install/setup.bash` を source したかのヒントを出して終了する（`check=True` をやめた）。
+- **1 回目の失敗の原因**: 前の実行は `/opt/ros/humble/setup.bash` だけを source し、`install/setup.bash` を source していなかった。xacro の `$(find so_arm101_description)`（`so101_new_calib.urdf.xacro:21`）が解決できず、xacro が終了コード 2、Python が未処理の例外で rc=1。手順書 `so_arm101_calibration_check.md:392` の「`source install/setup.bash` の後に実行」を守っていなかった。xacro の引数は 11 個とも default 付きで、どのコミット（URDF の置き換え、hardware 引数の削除）でも壊れていない。
+- **3 回の実行**（いずれも `/opt/ros/humble/setup.bash` と `~/ros2_so-arm101/install/setup.bash` を source した後。`--pose start=-0.0982,-1.4830,1.6901,0.5033,-0.0483,0.0152 --xacro src/so_arm101_moveit_config/config/so101_new_calib.urdf.xacro`。出力はスクラッチの `/tmp/claude-1000/-home-hirok-ros2-so-arm101/24e6e9f1-f548-4e61-adfc-46db766eafbf/scratchpad/` に別名で）:
+  1. 旧版（`git show 9c1806d:tools/pose_margin.py` の内容）を本番の yaml で: rc 0、23 行。
+  2. 新版を本番の yaml で: rc 0、23 行。1 回目との diff は表の 7 行（見出しと 6 関節）だけで、足した 2 列（`dir`・`zero_off_deg`）を取り除くと**完全に同じ**。elbow は calib ±1.7192、lower・upper の余裕 −0.0292 OUT。
+  3. 新版を、yaml のコピー（elbow_flex に `zero_offset_deg: -6.3` だけを足したもの）で: rc 0。2 回目との diff は 1 行目のパスと elbow の行だけ。elbow は calib_min −1.8292、calib_max **1.6093**（92.20°）、lower_margin −0.1392 OUT、upper_margin **+0.0807 ok**。変化の大きさは lower・upper とも約 0.110（0.10996）。ほかの関節と `--pose` の表は 2 回目と同じ。
+  - upper が ok になるのは、サーボの上端が URDF の上限（1.69）の内側へ 0.0807 rad 入るため（計画 4.1 の「4.6° 届かない」と同じ量）。lower は URDF の下限を約 8° 超える（計画 4.1 のとおり）。
+- 出力ファイルの sha256: `pm_run1_old_r2.txt` f93a284b129927f90caf4360ab1ace7ec71cc4b8ceb623d17d863b536d7f336b、`pm_run2_new_r2.txt` e26164f6f69a7d141f3fcde0ca367d3342692f14ca77bcd911914ce4afe628c2、`pm_run3_elbow_r2.txt` d96b9548eafd68172aa5969180df33ab2222e02053e479b1813ab5c9d112fe33、入力のコピー `cal_elbow_m63_r2.yaml` 3d5a75e08163171e5b5d8090f27cb1e44cd797a1715fac630d298ac25955b699、旧版 `pose_margin_old.py` 69f9af12e636947dd35397eb0a0ab798d9e034f2017ab68ef68d3da310c5e110。
+- 次の段: J4（camera の `--joint-offset`・sidecar の δ）。J5（yaml に δ を書く）は J1〜J4 のバイナリをビルドした後。J5 の実機の手順書では、起動の INFO 行（`zero_offset_deg: …`）が出ることで δ が読まれたことを確認する（J2 の節）。
+
+### 進め方の記録（J3）
+
+- 1 回目の Python の実行は、`install/setup.bash` を source しなかったために失敗し、承認の条件に従って止めて報告した。ユーザーの承認を得て、両方を source して 3 回をやり直した。Python の実行は、この 3 回（と、失敗した 1 回）だけ。
+- 実機・シリアルポート・カメラ・launch・モックは使っていない（ユーザーが「実機も launch も動かしていない」と記入したうえで、全体の `colcon build` と calibration の `colcon test` を実行した）。
