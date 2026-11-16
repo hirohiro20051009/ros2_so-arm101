@@ -2573,7 +2573,75 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - `rosdep check --from-paths src --ignore-src -r` で未解決だったのは、既存の apt の `ros-humble-warehouse-ros-mongo` の 1 件だけ（so_arm101_camera の依存は全部解決）。
 - `ros2 run tf2_ros static_transform_publisher --help`（`ROS_DOMAIN_ID=87 timeout 5`）は終了コード 0。ノードは起動しない。Humble では名前付きの引数（`--x` … `--frame-id`、`--child-frame-id`）が使える。
 
-### 未確認（C1 の実機で見る）
+### 未確認（C1 の実機で見る）→ 2026-11-16 に C1 で確認済み、問題なし（下の「C1 の実機の確認」）
 
-- rs_launch.py が、自分の知らない launch 引数を警告する（rs_launch.py:124-126）のを、`GroupAction(forwarding=False)` で防げたか。起動しない評価では確かめていない。実機の起動の画面で、黄色の警告の有無を見る。警告だけで動作は変わらない。
-- ros-humble-librealsense2 2.58.4 と Intel の librealsense2 2.56.5 が混ざって読み込まれないか（ドライバの Built with と Running with の 2 行。4 章）。2 つの版の出どころは `docs/camera_stage_plan.md:170-171` の表（前のセッションで ls・cat・grep で調べた結果）。今回のセッションでは版を確かめていない。混在するかは [推測] 段階の見立てで、実機のログで確かめる。
+- **[C1 で確認済み、問題なし。警告 0 件]** rs_launch.py が、自分の知らない launch 引数を警告する（rs_launch.py:124-126）のを、`GroupAction(forwarding=False)` で防げたか。起動しない評価では確かめていない。実機の起動の画面で、黄色の警告の有無を見る。警告だけで動作は変わらない。
+- **[C1 で確認済み、問題なし。Built with・Running with とも 2.58.4。maps は 2.58.4 だけ]** ros-humble-librealsense2 2.58.4 と Intel の librealsense2 2.56.5 が混ざって読み込まれないか（ドライバの Built with と Running with の 2 行。4 章）。2 つの版の出どころは `docs/camera_stage_plan.md:170-171` の表（前のセッションで ls・cat・grep で調べた結果）。今回のセッションでは版を確かめていない。混在するかは [推測] 段階の見立てで、実機のログで確かめる。
+
+## C1 の実機の確認（2026-11-16。ユーザーが実施し、すべて合格。記録のみ。docs だけ。手順書は `docs/camera_real_check.md`。コード・設定は変えていない）
+
+ファイルから読んで確かめた値は「ファイル」、保存ファイルが無い値は「ユーザーの報告」と書く。
+
+### 材料
+
+`~/so_arm101_check/camera_20261116_C1/`（読むだけ。変更・削除なし）。sha256（全桁）:
+
+| ファイル | sha256 |
+|---|---|
+| C1-1_camera_info.txt | 98de16a2e4b5ecd9658af93fa24a7b5b660ca4355a4ee8da24cd437406859d55 |
+| C1-1_hz.txt（失敗の残り） | ffbf2ec62e476991511de94b1fe504f44ed39e2ff4226116aeeed6ad3713ee6a |
+| C1-1_hz2.txt | 8cfc97806b22222ad2ca774f9343ec1330d8905f996f8d0d0928445258941313 |
+| C1-1_launch.log | 84e6bf7562658bc6fe2c85ac4e07d9864d1855dacc5e461314d67c822a351d6d |
+| C1-1_tf_static_pairs.txt（0 バイト。失敗の残り） | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 |
+| C1-1_tf_static_pairs2.txt | 12d5db8d35bc4c70e2ad046d68ce96498806c2c7dbbe8e60ce529cebef94e19a |
+| C1-1_tf_static_raw.txt | f3d2a8f96d029c7bea666cf57e135cccfab4be81a57437fc8960f7ff2191e701 |
+| C1-1_topics.txt | f0de07364ff50401b3a6f37d3e269489d96771da8be20ca18e3e59632c80578f |
+| C1-2_detections.txt | 1f77a46fd659941e182af8694d4f747209fa07ad9d332a5504f356874de19acd |
+| C1-2_launch.log | b44137ef54505f0d7e914befa4e7b95937bddb5a2b4d16ed5d70b75f86e17aef |
+| C1-2_tag0_0.6m.txt | 9ad1c0f8ae4721858905d0a8e748044e210808407778a37e2e3f16bd1e935a5b |
+| C1-2_tag0_0.8m.txt | 73fbbc1326d4f5b452eb39ae24bdabdc0bdf9ec7f2d3954c87941f46c8a997d1 |
+| C1-2_tag0_1.0m.txt | 6b39b4f996362901f034206759a544d3f78af28620b6c8f34f70a87750ac9fe5 |
+| C1-2_tf_tag0.txt | 9fa3fc3c2e4f4a0e9be033a668a78f759cbb00c08b9a881d1f6d2ffbcf9fe9a9 |
+| C1-2_tf_tag1.txt | dc7fb250a36cdd58b11409475c59655951998b557562339d9d5efcbceeeab268 |
+| C1-3_launch.log | 109156cdfd805d8d8d05c5ee68b04c31641536da8bb6b7281702bf9a50ecb8e8 |
+
+### C1-0
+
+- 引数は 2 つ（`use_apriltag`、`extrinsics_file`）。タグの一辺は ID 0・1 とも 60 mm（ノギス。ユーザーの報告）。`config/apriltag.yaml` の 0.06 m と一致。
+
+### C1-1（ドライバ）
+
+- rs_launch の警告 0 件（ユーザーの報告）。ファイル（C1-1_launch.log）の `[WARN]` は 2 行だけで、どちらもドライバ自身の `re-enable the stream for the change to take effect.`。rs_launch の「知らない引数」の警告ではない。
+- ファイル: `Built with LibRealSense v2.58.4`、`Running with LibRealSense v2.58.4`（RealSense ROS v4.58.4、D415、FW 5.17.0.10）、`Device USB type: 3.2`。開いたプロファイル: Depth Z16 640x480x15、Color RGB8 640x480x15。
+- `/proc/<PID>/maps` の librealsense2 は `/opt/ros/humble/lib/x86_64-linux-gnu/librealsense2.so.2.58.4` だけで、2.56.5 は読み込まれない（ユーザーの報告）。
+- param は `640x480x15`・`640x480x15`・`True`（ユーザーの報告。launch.log の Open profile の行と矛盾しない）。
+- camera_info（ファイル）: 640x480、`plumb_bob`、d は 5 つともすべて 0.0、fx 612.63、fy 612.40、cx 308.64、cy 243.04。
+- hz: 14.88（ユーザーの報告）。ファイル（C1-1_hz2.txt）は `average rate` が 14.914 から 14.884 に収束（window 211、min 0.066 s、max 0.068 s）。C1-1_hz.txt は `--no-daemon` で失敗した最初の試行（exit=2）。
+- `/tf_static`（ファイル C1-1_tf_static_raw.txt、pairs2）: 4 本で、根は `camera_link`（camera_link→camera_color_frame→camera_color_optical_frame、camera_link→camera_depth_frame→camera_depth_optical_frame）。子が `camera_link` の行は 0 件。`static_transform_publisher` なし（ユーザーの報告）。
+- `tf2_echo camera_link camera_color_optical_frame` は Translation (−0.000, 0.015, 0.000)（ユーザーの報告）。ファイルの camera_link→camera_color_frame は (−4.8e-5, 0.01481, 4.6e-5) で一致。
+- 深度のトピック名（ファイル C1-1_topics.txt）: `/camera/camera/depth/image_rect_raw`、`/camera/camera/aligned_depth_to_color/image_raw`。
+- camera.launch.py のログ（ファイル）: extrinsics が無いので `base_link` から `camera_link` の TF は出さない、の 1 行。
+- launch は Ctrl-C で `exit=0`（ユーザーの報告）。ファイル末尾は `process has finished cleanly`。
+
+### C1-2（AprilTag）
+
+- ファイル（C1-2_detections.txt）: ID 0・1 とも `hamming: 0`、`decision_margin` 123.74・127.93（124・128）。
+- タグの TF の親は `camera_color_optical_frame`。約 0.6 m の 2 枚（ファイル C1-2_tf_tag0/1.txt）: Translation は ID 0 (0.110, 0.137, 0.702)、ID 1 (0.157, 0.074, 0.745)。
+- 巻き尺（カメラの前面から。ユーザーの報告）は ID 0 が 710 mm、ID 1 が 750 mm。z との差は −8・−5 mm、中心までの直線距離との差は +14・+15 mm。巻き尺の当て方（光軸に沿ってか、斜めにまっすぐか）が区別できず、タグは約 38° 傾いていた。
+- C1-2d（ID 0、画像の中央、正面向き。置いた距離は目安で、置き方の誤差あり。ユーザーの報告）: z は 0.594・0.807・0.987 m、各 11 回、読みのばらつきは表示の桁 1 mm 未満（ユーザーの報告）。ファイルでは、0.6 m は 11 回とも 0.594、0.8 m は 0.803〜0.809（0.807 が 6 回。1 回だけ (0.124, 0.067, 0.803) と外れる）、1.0 m は 0.985〜0.991（0.987 が 7 回）。平均・標準偏差は計算していない。
+- C1-2 の launch の `exit=` は未記録。ログの最後は 2 つのプロセス（realsense、apriltag）とも `process has finished cleanly`。
+
+### C1-3
+
+- `exit=1`（ユーザーの報告）。表示（ファイル C1-3_launch.log）: `[ERROR] [launch]: Caught exception in launch (see debug for traceback): extrinsics_file /tmp/so_arm101_no_such_extrinsics.yaml does not exist`。ドライバは起動していない（`Launching as Normal ROS Node` の行なし）。
+
+### 手順書の直し（`docs/camera_real_check.md`。元の記述は残し、「2026-11-16 の実機で直した」と書いた）
+
+- C1-1c と共通の約束: `ros2 topic hz` は `--no-daemon` を受け付けない（exit=2）ので外した。
+- C1-1d: `/tf_static` は `--once` を付け、ファイルに受けてから `grep frame_id | paste - - | sort | uniq -c` する形に直した（元の形では表が空）。
+- C1-2c: `tf2_echo` に `timeout 12`（`head` で切ると exit=120）。巻き尺は光軸に沿って当てる。タグを画像の中央に正面向きで置くと、z と巻き尺を直接比べられる。
+- C1-3: 見込みを実機の表示と `exit=1` に直した。冒頭に「2026-11-16 にユーザーが実施し、すべて合格」を足した。
+
+### 残課題に追加
+
+- `extrinsics_file` の既定値は `install/so_arm101_camera/share/so_arm101_camera/config/camera_extrinsics.yaml`。C3 の道具がどこに書くか（src か install か）と、symlink-install で、ビルドの後に作ったファイルが install 側に現れるかを、C3 の計画で決める。

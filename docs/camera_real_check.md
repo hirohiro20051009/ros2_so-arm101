@@ -1,5 +1,7 @@
 # 実機確認手順: カメラの段 C1（`camera.launch.py`。腕は使わない）
 
+**2026-11-16 にユーザーが実施し、すべて合格。** 結果は `docs/inventory.md` の「C1 の実機の確認（2026-11-16）」。実機で直した箇所は、各段に「2026-11-16 の実機で直した」と書いた（元の記述は残してある）。
+
 計画: `docs/camera_stage_plan.md`（決定 D1〜D6 は 0 章、C1 の骨組みは 10 章、フレームは 6 章、依存は 4 章）。実装: コミット `6cd918c`（C1-a）と `d2b497b`（クォータニオンの正規化）。記録: `docs/inventory.md` の「`so_arm101_camera` の C1-a」。
 
 > **この手順書のコマンドは、Claude Code が一つも実行していない（未実行）。** Claude が実行したのは、C1-a のオフラインの試験（`colcon test`）と `--show-args` までで、**カメラ（RealSense）も launch も開いていない**。**この手順書はユーザーだけが実行する。** 書いた内容は、apt のファイルとリポジトリのファイルを読んで確かめた（確かめた場所は各段に `ファイル:行` で書く）。読んで確かめられなかったことは「見込み」と書く。
@@ -14,7 +16,7 @@
 |---|---|
 | 実行するのはユーザーだけ | launch の端末（ログを流す。操作しない）と操作用の端末の 2 つ。止めるのは Ctrl-C だけ（`kill -9`・`pkill`・`killall` はしない） |
 | 新しい端末 | **conda を activate していない**端末。準備の 3 行は下の「ユーザーがすること」。**`ROS_DOMAIN_ID` は設定しない（87 はモック専用）** |
-| `--no-daemon` | `ros2 topic`・`ros2 node`・`ros2 param` には付ける。付けて `unrecognized arguments` になったら、付けずに実行し、その旨を報告する（未確認。計画 6 章と同じ扱い） |
+| `--no-daemon` | `ros2 topic`・`ros2 node`・`ros2 param` には付ける。付けて `unrecognized arguments` になったら、付けずに実行し、その旨を報告する（未確認。計画 6 章と同じ扱い）。**2026-11-16 の実機で直した。`ros2 topic hz` は `--no-daemon` を受け付けない**（`unrecognized arguments`、exit=2）。`hz` には付けない。ほかのコマンドは付けて通った |
 | ログ | `tee -i` と `; echo "exit=${PIPESTATUS[0]}"`。保存先は `~/so_arm101_check/camera_<日付>_C1/` |
 | 同名のファイル | **書く前に `ls` で同名が無いことを確かめる**（`No such file or directory` が出るのが期待どおり）。`tee` は上書きする |
 | コードと設定 | **この段では何も変えない。** タグの一辺が 0.06 m と違っても `config/apriltag.yaml` は変えず、報告だけ（D4） |
@@ -67,7 +69,7 @@
 | 場面 | 見込み |
 |---|---|
 | launch を Ctrl-C で止めた | `exit=0`、または 130 など。どれかを記録する（C1-a ではこの値を確かめていない） |
-| C1-3 の存在しないパス | **0 以外**（Python の例外で止まる。値は 1 の見込み。記録する） |
+| C1-3 の存在しないパス | **0 以外**（Python の例外で止まる。値は 1 の見込み。記録する）。**2026-11-16 の実機で直した。実機の値は 1**（元は「値は 1 の見込み」） |
 | `timeout N ros2 …` | 時間切れは `exit=124`（期待どおり） |
 
 ## C1-0. タグの一辺の実測（D4。launch なし）
@@ -153,11 +155,13 @@ ros2 param get --no-daemon /camera/camera rgb_camera.color_profile
 ros2 param get --no-daemon /camera/camera align_depth.enable
 timeout 5 ros2 topic echo --no-daemon --once /camera/camera/color/camera_info 2>&1 \
   | tee ~/so_arm101_check/camera_<日付>_C1/C1-1_camera_info.txt; echo "exit=${PIPESTATUS[0]}"
-timeout 15 ros2 topic hz --no-daemon /camera/camera/color/image_raw 2>&1 \
+timeout 15 ros2 topic hz /camera/camera/color/image_raw 2>&1 \
   | tee ~/so_arm101_check/camera_<日付>_C1/C1-1_hz.txt; echo "exit=${PIPESTATUS[0]}"
 ```
 
 （2 つのファイルは、書く前に `ls` で同名が無いことを確かめる。）
+
+> **2026-11-16 の実機で直した。** 元は `timeout 15 ros2 topic hz --no-daemon /camera/camera/color/image_raw`。`ros2 topic hz` は `--no-daemon` を受け付けず、`unrecognized arguments`（exit=2）になった。`--no-daemon` を外した形に直した（上のコマンド）。
 
 - 値の出どころ: `config/realsense.yaml:22-24`（`rs_launch.py:44`、`:37`、`:82` の引数）。
 - **合格:**
@@ -173,13 +177,18 @@ timeout 15 ros2 topic hz --no-daemon /camera/camera/color/image_raw 2>&1 \
 
 ```bash
 ls ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_pairs.txt
-PYTHONUNBUFFERED=1 timeout 5 ros2 topic echo --no-daemon --qos-durability transient_local --qos-reliability reliable /tf_static 2>&1 \
-  | grep frame_id | paste - - | sort | uniq -c | tee ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_pairs.txt
+ls ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_raw.txt
+timeout 10 ros2 topic echo --no-daemon --once --qos-durability transient_local --qos-reliability reliable /tf_static \
+  > ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_raw.txt 2>&1
+grep frame_id ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_raw.txt | paste - - | sort | uniq -c \
+  | tee ~/so_arm101_check/camera_<日付>_C1/C1-1_tf_static_pairs.txt
 ros2 topic info -v --no-daemon /tf_static
 ros2 node list --no-daemon
 ps aux | grep -E "static_transform_publisher" | grep -v -E "grep|gvfsd"
 timeout 10 ros2 run tf2_ros tf2_echo camera_link camera_color_optical_frame 2>&1 | head -20
 ```
+
+> **2026-11-16 の実機で直した。** 元は `PYTHONUNBUFFERED=1 timeout 5 ros2 topic echo --no-daemon --qos-durability transient_local --qos-reliability reliable /tf_static 2>&1 | grep frame_id | paste - - | sort | uniq -c`（`--once` なし、パイプで直接受ける形）。この形では `timeout` が止めたときに出力が失われ、表が空（`Terminated` だけ）になった。上のように `--once` を付け、いったんファイル（`C1-1_tf_static_raw.txt`）に受けてから `grep` する形で通った（表は 4 行）。
 
 `paste - -` は、`frame_id`（親。`header` の中）と `child_frame_id`（子）の 2 行を 1 行にする。1 行が 1 本の TF（親、子の順）。
 
@@ -242,17 +251,21 @@ timeout 10 ros2 topic echo --no-daemon --once /detections 2>&1 \
 ### C1-2c. タグの TF
 
 ```bash
-ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11_0 2>&1 \
-  | head -40 | tee ~/so_arm101_check/camera_<日付>_C1/C1-2_tf_tag0.txt
-ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11_1 2>&1 \
-  | head -40 | tee ~/so_arm101_check/camera_<日付>_C1/C1-2_tf_tag1.txt
+timeout 12 ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11_0 2>&1 \
+  | tee ~/so_arm101_check/camera_<日付>_C1/C1-2_tf_tag0.txt
+timeout 12 ros2 run tf2_ros tf2_echo camera_color_optical_frame tag36h11_1 2>&1 \
+  | tee ~/so_arm101_check/camera_<日付>_C1/C1-2_tf_tag1.txt
 ```
 
-（書く前に `ls` で同名が無いことを確かめる。`tf2_echo` は止まらないので、`head -40` で切るか、Ctrl-C で止める。）
+（書く前に `ls` で同名が無いことを確かめる。`tf2_echo` は止まらないので、`timeout 12` で切る。）
+
+> **2026-11-16 の実機で直した。** 元は `tf2_echo ... | head -40 | tee ...`（`head -40` で切る、または Ctrl-C）。実機では `timeout 12` を付けた形で実行した。`head` で切ると exit=120 になった。
+
+- **巻き尺は光軸に沿って当てる。タグを画像の中央に、正面向き（光軸に垂直）に置くと、z と巻き尺を直接比べられる**（C1-2d の置き方）。2026-11-16 の最初の 2 枚（タグが約 38° 傾いていた）は、巻き尺の当て方（光軸に沿ってか、斜めにまっすぐか）が区別できず、z との直接の比較にならなかった（ID 0 は巻き尺 710 mm に対し z 0.702、ID 1 は 750 mm に対し 0.745。ユーザーの報告）。
 
 - フレーム名は `config/apriltag.yaml:17`（`tag36h11_0`、`tag36h11_1`）。親は、画像の `header` の `frame_id`（ドライバのカラーの光学フレーム `camera_color_optical_frame` の見込み。**推測**。旧の読み方は `lookup_transform(camera_color_optical_frame, tag36h11_0)`。計画 6 章）。
 - **合格: 2 つのタグの TF が出る**（`Translation` が出る。`Could not transform` や `frame does not exist` が出続けない）。
-- **合格: `Translation` の z（光学フレームの前方の距離）が、巻き尺の距離と 2 cm 以内で合う**（**2 cm は推測の値**。根拠のある値ではない）。巻き尺は、**カメラの前面から、タグの面まで**当てる。光学フレームの原点は、前面より数 mm 奥にある見込み（**[推測]**。D415 の資料は確かめていない）なので、z は巻き尺の値より数 mm 大きく出る見込み。測った距離と z の値を併せて報告する。
+- **合格: `Translation` の z（光学フレームの前方の距離）が、巻き尺の距離と 2 cm 以内で合う**（**2 cm は推測の値**。根拠のある値ではない）。巻き尺は、**カメラの前面から、タグの面まで**当てる。光学フレームの原点は、前面より数 mm 奥にある見込み（**[推測]**。D415 の資料は確かめていない）なので、z は巻き尺の値より数 mm 大きく出る見込み。測った距離と z の値を併せて報告する。**（2026-11-16 の実機で直した。実測は z が巻き尺より 5〜8 mm 小さく、この見込みは検証できなかった。上の注を参照。）**
 
 ### C1-2d. 距離を変えて見る（0.6、0.8、1.0 m）
 
@@ -285,7 +298,7 @@ ros2 launch so_arm101_camera camera.launch.py extrinsics_file:=/tmp/so_arm101_no
 
 （2 つめの `ls` は、`/tmp/so_arm101_no_such_extrinsics.yaml` が**無い**ことの確認。`No such file or directory` が出るのが期待どおり。あったら別の名前にする。）
 
-- 見込みの表示: `ExtrinsicsError: extrinsics_file /tmp/so_arm101_no_such_extrinsics.yaml does not exist`（`camera_config.py:203`）を含む例外の表示（`Caught exception in launch` の形。**文言は未確認**）。
+- 見込みの表示: `ExtrinsicsError: extrinsics_file /tmp/so_arm101_no_such_extrinsics.yaml does not exist`（`camera_config.py:203`）を含む例外の表示（`Caught exception in launch` の形。**文言は未確認**）。**2026-11-16 の実機で直した。実機の表示は `[ERROR] [launch]: Caught exception in launch (see debug for traceback): extrinsics_file /tmp/so_arm101_no_such_extrinsics.yaml does not exist`、`exit=1`。ドライバは起動しなかった。**（元は上の「見込みの表示」で、`ExtrinsicsError:` の接頭辞が付く形を見込んでいた。実機の表示には `ExtrinsicsError:` の語は出ていない。）
 - **合格:**
   - `exit=` が 0 以外。
   - 上の `does not exist` の文言が出る。
