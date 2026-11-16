@@ -2717,3 +2717,132 @@ V7 の解析スクリプト（extract.py、analyze.py、events.py、resid.py）�
 - 段 1b（ROS_DOMAIN_ID=87、`--investigate` だけ）の結果: `front 38.0 mm, up 55.7 mm, left 0.0 mm` と `front 38.0 mm, up 62.0 mm, left 0.0 mm` の 2 行のあと `exit=5`。src と install の `tag_mount.yaml` の sha256 は一致（`51fc015e476340de33a3a3c1577059aaed0145959c9abaa54273bb296c1044fa`）。
 - install 側の `config/tag_mount.yaml` は symlink ではなくコピー（`ls -l` で通常のファイル）。yaml を直したらビルドが要る。C3 の道具の書き先（src か install か）を決めるときの材料。
 - C2-b の手順書 `docs/camera_c2_real_check.md`（534 行）。実機の結果はまだ無い（未実施）。
+
+## C2 の実機の確認（2026-11-16 17:19〜18:09。ユーザーが実施し、すべて合格。記録のみ。docs だけ。手順書は `docs/camera_c2_real_check.md`。コード・設定は変えていない）
+
+使ったコード: コミット `86826ad`（`git log -1`）。`tag_mount.yaml` の sha256: `51fc015e476340de33a3a3c1577059aaed0145959c9abaa54273bb296c1044fa`（src と install が一致。`c2_points.csv.meta.yaml` の `identity` とも一致）。
+
+ファイルから読んで確かめた値は「ファイル」、保存ファイルが無い値は「ユーザーの報告」と書く。
+
+### 材料の場所と sha256
+
+- 材料: `~/so_arm101_check/camera_20261116_C2/`（71 ファイル）。
+- `SHA256SUMS.txt`（71 行。`sha256sum -c` で 71 件すべて OK）。`SHA256SUMS.txt` 自身の sha256: `ec5cfb8a484118864cc570b681f5c5a5eb25eebf11c8c66d7cea3ba044acce0e`。
+- 書き方: 手順書の `sha256sum * | tee SHA256SUMS.txt` は、`tee` が先にファイルを作ると自分自身を数えて合わなくなる恐れがあるので使わず、`find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS.txt` で書いた。
+- 手順書との差: 手順書が挙げる `S2_stp.txt` は作っていない（stp の数は画面で確かめた。ユーザーの報告）。手順書に無い `C2_end_pose.txt` がある。
+
+### 合格の要約
+
+- 13 点（P01〜P13）をすべて記録した。見えない点は 0。`c2_points.csv` は 13 行・41 列で、全行が `tag_seen`=1、`cam_n`=15、`still`=1、`stable`=1、`det_n`=`matched_n`=15、`unmatched_det`=0、`invalid_n`=0。
+- 移動 14 回（P01〜P13 と T への戻し）は、REACHED が 7 回（P01、P04、P07、P08、P09、P12、T への戻し）、SHORT が 7 回（P02、P03、P05、P06、P10、P11、P13。exit 4）。SHORT はすべて基準内（stuck 最大 0.04653 rad、先端の z 最小 0.04617 m）。
+- `FAULT` は 0 件。終了時の `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints` と `deactivated.` の 2 行が出た（`W0_arm_launch.log` の 693〜694 行）。
+- 合否の最終判断は、手順書のとおり C3 の入力として使えるかで決める。C2 では Kabsch を計算していない。
+
+### 点ごとの表
+
+出どころ: ik の判定・先端の誤差・FK(q_meas) − target の z・desired − q_meas・計画の長さは `P*_move.log`。目標は `P*_dry.log`。matched・incidence・std z は `P*_rec.log` の 2 つ目の「frames:」の塊（再測定の値。`c2_points.csv` と一致）。row は `P*_rec.log` の `recorded` の行。
+
+| 点 | ik 判定 | 先端の誤差 mm | FK(q_meas) − target の z mm | desired − q_meas の最大の関節と値 rad | 計画の長さ（秒/点） | matched | incidence ° | std z mm | row |
+|---|---|---|---|---|---|---|---|---|---|
+| P01 | REACHED | 5.44 | −5.17 | wrist_flex −0.01659 | 5.35/55 | 15 | 32.3 | 0.12 | 1 |
+| P02 | SHORT | 13.58 | −12.54 | elbow −0.03924 | 5.11/53 | 15 | 35.7 | 0.15 | 2 |
+| P03 | SHORT | 15.57 | −14.48 | elbow −0.04116 | 2.95/31 | 15 | 24.4 | 0.15 | 3 |
+| P04 | REACHED | 3.91 | −3.69 | shoulder_lift −0.01801 | 5.14/53 | 15 | 18.1 | 0.09 | 4 |
+| P05 | SHORT | 12.65 | −11.87 | elbow −0.03798 | 3.26/34 | 15 | 3.9 | 0.11 | 5 |
+| P06 | SHORT | 17.52 | −16.15 | elbow −0.04653 | 4.88/50 | 15 | 14.8 | 0.16 | 6 |
+| P07 | REACHED | 4.22 | −3.47 | wrist_flex −0.01607 | 5.07/52 | 15 | 15.0 | 0.20 | 7 |
+| P08 | REACHED | 4.11 | −3.91 | shoulder_lift −0.02147 | 4.97/51 | 15 | 6.8 | 0.18 | 8 |
+| P09 | REACHED | 3.62 | −3.37 | shoulder_lift −0.01652 | 3.63/38 | 15 | 16.1 | 0.18 | 9 |
+| P10 | SHORT | 13.71 | −11.16 | elbow −0.03423 | 5.64/58 | 15 | 23.5 | 0.17 | 10 |
+| P11 | SHORT | 15.59 | −13.83 | shoulder_lift −0.02667 | 2.99/31 | 15 | 34.1 | 0.16 | 11 |
+| P12 | REACHED | 3.03 | −2.73 | shoulder_lift −0.01655 | 5.93/61 | 15 | 29.6 | 0.33 | 12 |
+| P13 | SHORT | 13.26 | −13.10 | elbow −0.04353 | 5.14/53 | 15 | 32.0 | 0.22 | 13 |
+| T への戻し（W3_T） | REACHED | 6.83 | −3.95 | elbow −0.03474 | 5.34/55 | - | - | - | - |
+
+- FK(q_meas) − target の z は、14 移動のすべてで負（先端が目標より低く着いた）。
+- `c2_points.csv` の列名（41 列）: `idx, time, label, q_shoulder_pan, q_shoulder_lift, q_elbow_flex, q_wrist_flex, q_wrist_roll, q_span, fk_tcp_x, fk_tcp_y, fk_tcp_z, fk_tag_x, fk_tag_y, fk_tag_z, det_n, tf_n, matched_n, unmatched_det, unmatched_tf, invalid_n, cam_dropped, cam_n, cam_tag_x, cam_tag_y, cam_tag_z, cam_std_x, cam_std_y, cam_std_z, cam_ptp_x, cam_ptp_y, cam_ptp_z, cam_normal_x, cam_normal_y, cam_normal_z, cam_margin_min, cam_margin_mean, incidence_deg, tag_seen, still, stable`。
+- `P*_rec.log` には 2 つの「frames:」の塊がある。1 つ目は調査の測定、2 つ目が記録に使った再測定（`c2_points.csv` の値と一致）。
+
+### 合格の基準との突き合わせ
+
+| 項目 | 結果 | 根拠 |
+|---|---|---|
+| 記録: P01 が見える | 満たす | row 1 |
+| 記録: 12 点（P01〜P12）中 10 点以上が見える | 満たす（12/12） | `c2_points.csv` の `tag_seen` |
+| 記録: still が 1 | 満たす（13/13） | `c2_points.csv` |
+| 記録: tag_seen が 1 の行の `cam_n` が 8 以上 | 満たす（全行 15） | `c2_points.csv` |
+| 移動: REACHED、または SHORT で stuck 0.05 rad 以下かつ先端の z 0.045 m 以上 | 満たす | stuck 最大 0.04653（P06）。先端の z 最小 0.04617（P11。`c2_points.csv` の `fk_tcp_z`）、次は P10 の 0.04884 |
+| 移動: FAULT なし | 満たす | `W0_arm_launch.log` を検索して 0 件 |
+| 移動: WARN なし | 満たす（「ドライバ・コントローラの異常を示す WARN なし」と読む。ユーザーの承認） | 下の「記録だけの出力」 |
+| 移動: 異音なし | 満たす | ユーザーの報告 |
+| 停止: `[deactivate]` の 2 行 | 満たす | `W0_arm_launch.log` 693〜694 行 |
+| 停止: ps と node list が空 | 満たす | ユーザーの報告 |
+| 段 0・1: tag_mount.yaml の sha256 が src と install で一致 | 満たす | sha256sum で確認（上） |
+| 段 0・1: T の表示 2 行と `exit=5` | 満たす | 2 行は `S1_display.log`（ファイル）。`exit=5` はユーザーの報告（ファイルには `exit=` の行が無い） |
+| 段 2: `child_frame_id: camera_link` が 0 件 | 満たす | `S2_tf_static_raw.txt`（ファイル） |
+| 段 2: stp の数 0、1、1 | 満たす | ユーザーの報告（`S2_stp.txt` は作っていない） |
+| 段 2: stamp 一致（`matched` が `detections` の半分以上） | 満たす | `S2_inv_rest.log`・`S2_inv_T2.log` は 15/15（ファイル） |
+| 段 2: 軸の対応表が実物と合う | 満たす | ユーザーの目視の報告 |
+
+記録だけの出力（異常ではない。ユーザーの承認）:
+
+- `W0_arm_launch.log`: `Unable to transform object from frame '...' to planning frame 'base_link'` が 102 件（6 フレーム × 17 回。camera_link、camera_depth_frame、camera_depth_optical_frame、camera_color_frame、camera_color_optical_frame の各 17 件と tag36h11_0 の 17 件）。発信は move_group の `planning_scene_monitor`。時刻は 1794818220〜1794820013。S2 のログでは 0 件。
+- `Maybe failed to update robot state, time diff: 0.141s` が 1 件（`W0_arm_launch.log` の 677 行。rviz2。停止の約 72 秒前）。
+- 終了時の `interactive_marker_display` の WARN が 1 件。
+- 終了時の rviz2 と move_group の exit -11。`[deactivate]` の後に出ており、既知の挙動（この文書の過去の記録を参照）。
+- 起動時の kdl_parser（root link の inertia）、Deprecated、WRITE mode の注意、octomap（3D センサー未設定）。
+
+### 気づき（事実と推測）
+
+**事実（ファイルで確かめた）**
+
+- `C2_start_pose.txt`（W0 の起動直後の出発点）: elbow +1.70544 は、URDF の上限 1.69 を 0.0154 rad 超えていた。`C2_end_pose.txt` は elbow +1.67475。RViz の計画は W1・W4 とも通った（W4 の目標は −4、−86、+96、+38、−3 度。ユーザーの報告）。
+- 手前止まりの向き: elbow の値が 0.05 rad 以上減る移動（P02、P05、P06、P10、P13）は 5 つ全部が SHORT。elbow の値が増える移動（P01、P04、P07、P08、P09、P12）は 6 つ全部が REACHED。P03・P11 は elbow がほとんど動かない移動（P03 は −0.014、P11 は +0.008）で、どちらも直前が SHORT。
+- 同じ目標の P01（T から、5.44 mm）と P13（P12 から、13.26 mm、elbow の手前止まり 0.04353 rad）で差が出た。
+- x 0.315 の SHORT は P02、P03、P06、P10、P11 の 5 点で、z の誤差は −11.2〜−16.1 mm。P07 は −3.5 mm で出なかった。x 0.245 でも P05（−11.9 mm）と P13（−13.1 mm）が SHORT だった。つまり「遠い点で低く着く」より、動いた向き（elbow が減る）のほうが当てはまりがよい。
+- 低い層（z 0.06）の最小の z は P11 の 0.04617 m。P07 は 0.0565 m（z の誤差 −3.47 mm）。チャットの側の「P07 は z が 0.045 を下回るかもしれない」という見込みは外れた。
+- T（先端が真下）の detections: `S2_inv_T.log`・`W1_inv_T.log` とも 0。`S2_inv_T2.log` は 15/15（incidence 46.4°、decision_margin 最小 102.9）。`S2_inv_rest.log`（折りたたみ姿勢）は 15/15（incidence 28.4°）。`C2_T_pose.txt`（17:41）の関節角は P01 の移動前と一致する。`C2_T_pose2.txt` は 18:05 の T への戻しの後で、`S2_inv_T2.log`（17:33）の姿勢ではない。T2 の姿勢の関節角はファイルに無い。
+- `[diag]`: S2 と W0 の両方で、5 関節が `acceleration=0 torque_limit=1000`、gripper が `acceleration=0 torque_limit=500`（`S2_arm_launch.log` と `W0_arm_launch.log` の `[diag]` の行）。`[diag]` は書き込みの前の値。
+- `sts3215_system.cpp:946` の「the servo was powered off or reset (SRAM returned to its power-on values)」のメッセージは、`S2_arm_launch.log`・`W0_arm_launch.log` のどちらにも出ていない（検索して 0 件。この検査は書き込みモードの監視の中にあり、S2 の読み取り専用では動かない）。
+- 「開く向き」の手前止まりの大きさ: 過去の記録は約 0.04 rad（約 27 tick。`docs/inventory.md` 1069 行）。今回の elbow の手前止まりは 0.034〜0.047 rad（SHORT の elbow の 5 点）で、同程度。
+
+**事実（ユーザーの報告。ファイルに無い）**
+
+- 段 2 で腕を手で動かしたため、W0 の出発点が 11-15 の最後と違い、wrist_flex が +0.22 rad、elbow が +1.70544 だった。
+- 12 V を入れたままだったのに、S2 の `[diag]` の SRAM が電源投入時の値だった。
+- `S2_inv_T.log` は 2 回目の実行で、1 回目（折りたたみ姿勢のまま実行）は上書きされた。`P05_dry.log` は 2 回実行したうちの 2 回目。
+- 異音は無かった。ps と node list は空だった。`S1` の `exit=5`。stp の数 0、1、1。軸の対応表の目視。
+
+**根拠と、確かめた範囲（elbow の向きと自重）**
+
+- 記録にある根拠: 「開く向き = 自重に逆らう向き。T で elbow・lift は −、重力は + 向き。URDF の質量・重心からの計算」（`docs/accuracy_measurement_plan.md` 9 行）。「出発点・T とも elbow で重力は + 向き（elbow − が開く向き）」（`docs/servo_w3_investigation_plan.md` 41 行・203 行。計算）。「開く向き（自重に逆らう向き）では目標の約 0.04 rad（約 27 tick）手前で止まり、閉じる向きでは約 3 tick」（`docs/inventory.md` 1069 行）。
+- 範囲: この計算は出発点と T の姿勢だけである。**今回の 13 点の姿勢（特に低い層の elbow 1.3〜1.5 付近、wrist_flex が負の姿勢）で、重力が elbow で + 向きかどうかは確かめていない。** 今回の記録は、elbow が減る向き（上の記録で開く向きと同じ符号）で、手前止まりが出たという事実までである。
+
+**推測（未確認）**
+
+- 自重に逆らう向きの関節に手前止まりが出る、という見方と合う（上の範囲の制限つき）。
+- P03・P11 の誤差は、直前の SHORT の状態が残ったもの（未確認）。
+- T で見えなかった理由は、入射角が大きすぎる可能性（T2 の 46.4° は margin 最小 102.9 で、ほかの点より低い）。境の姿勢を取り直さないと分からない。
+- `Unable to transform` の WARN が計画に影響しないこと: 14 回の計画がすべて `PLAN OK` だったのは事実だが、MoveIt のソースを読んでいないので、「影響しない」と断言はできない（推測）。
+- RViz の `Maybe failed to update robot state, time diff: 0.141s` の原因は不明（移動と計画には影響が出ていない）。
+
+**SRAM の `[diag]` が電源投入時の値だったこと（原因は不明）**
+
+- 記録では、書き込みモードの停止後、電源を入れ直すまで SRAM の Acceleration=50 が残る（`docs/inventory.md` 876 行: 停止後の状態は 6 関節とも `acceleration=50`。879 行: 起動の 2・3 回目は 50 が残った状態からの起動）。
+- したがって、S2 で Acceleration が 0（電源投入時の値）だったこと自体が、サーボが何かで元に戻った印である。ユーザーは 12 V を入れたままだったと報告している（食い違い）。
+- 原因は不明のまま。W0 でも同じ値で、S2・W0 とも `sts3215_system.cpp:946` のメッセージは出ていない。
+
+**`dry-run` の `windup before` の行**
+
+- `tools/ik_move_run.py` の dry-run は、新しい `controller_state`（受信から 0.3 秒以内）が無くても進む。そのとき `q_desired` が None になり、`goal_lines`（`so_arm101_ik/ik_move.py:459`）がこの行を出さない。`P12_dry.log` にだけ無いのはこのため。実行（`P12_move.log`）は 5 秒まで待つので、必ず出る。目標の判定には影響しない。なぜ間に合わなかったかは推測（起動直後の競合）。
+
+### 残課題
+
+- **本番のキャリブの自動化（ユーザーの要望）**: 開始の確認を 1 回だけにして、全点を自動で回し、最後に要約を表示する道具。点ごとの dry-run と Enter の手間をなくす。
+  - 各点で、道具が dry-run 相当の検査と計画の検査を自動で行い、通らなければ（IK なし、FAULT、先端の z が 0.045 m 未満、stuck が 0.05 rad 超、タグが見えない、still が 0）その場で止まり、理由を示す。
+  - SHORT は、基準内なら記録して続け、要約に点ごとの誤差を出す。
+  - **道具の Ctrl-C は進行中の移動を止めない。** 今の道具と同じく、次の点へ進まないだけである。腕を止めるのは S5・S6 の手順（`docs/camera_c2_real_check.md`）。
+  - 方針: 今日のデータで C3・C4 を行い、キャリブが正しくできることを確かめてから、道具を整理する。ただし C3 で取り直しが要ると分かったら、その前に自動で回す道具を作る。
+- **T で見えない**: T（先端が真下）では、手でも移動でも detections が 0 だった。見える・見えないの境の姿勢は未調査。C3 以降で T が必要になったら、境の姿勢を調べる。
+- **SRAM が電源投入時の値に戻っていた原因**: 不明。次回の起動でも S2 のような値かを `[diag]` で見る。
+- **`Unable to transform` の WARN（102 件）**: カメラの TF が `base_link` につながっていないために出る。C3・C4 でつないだ後に、この WARN が消えるかを確かめる。
