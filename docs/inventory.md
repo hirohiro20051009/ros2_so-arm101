@@ -3089,3 +3089,37 @@ elbow の関節角に δ を足して fk_tag を計算し直し、道具と同�
 
 - 1 回目の Python の実行は、`install/setup.bash` を source しなかったために失敗し、承認の条件に従って止めて報告した。ユーザーの承認を得て、両方を source して 3 回をやり直した。Python の実行は、この 3 回（と、失敗した 1 回）だけ。
 - 実機・シリアルポート・カメラ・launch・モックは使っていない（ユーザーが「実機も launch も動かしていない」と記入したうえで、全体の `colcon build` と calibration の `colcon test` を実行した）。
+
+## J4: camera の `--joint-offset`、sidecar の δ、記録の識別（2026-11-17。コード: J4a コミット `8d99a03`、J4b コミット `c046cde`。計画は `docs/joint_offset_plan.md` の 6 章・8.4・9.1（項目 8・10）。yaml は変えていない。実機・launch・モックは使っていない）
+
+- 戻し方: J4a の直前のコミット `ed74d37` から取り出せる（`git revert` は承認を得てから）。J4a と J4b は互いに独立に戻せる。
+- **`--joint-offset NAME=DEG`（J4a。`tools/camera_extrinsics_run.py`、`so_arm101_camera/extrinsics.py`）**: q_true = q_meas + δ。CSV の `q_*` 列（5 関節。rad）に δ（度）を足した角度で、fk_tag を計算し直す（`tag_mount.fk_tag`。tag の offset は meta の `tag_mount.offset_gripper_frame_m`）。複数可。`elbow_flex=-6.3` なら、elbow の角度に −6.3° を足してから FK。元の CSV と meta は書かない。
+  - 引数の検査（どれも拒否して終了コード 2。何も読む前に）: `=` が無い、数でない、非有限、絶対値が 10° 超（10 はよい）、関節名が 5 つの angle 関節以外、gripper（「no zero offset」の文面）、同じ関節の重複。0 は許す（`NAME=0` は「補正なし」の明示）。
+  - `--urdf`: **meta の `identity.urdf_sha256` と同じ sha256 のものだけ**受け付ける（違えば拒否）。`--joint-offset` と一緒のときだけ（単独は拒否）。**既定のパス**は `get_package_share_directory('so_arm101_description')/urdf/so101_new_calib.urdf`（install 側の生成物。C2 の meta の sha256 279b8e7d… と一致。リポジトリの `third_party/SO-ARM100/so101_new_calib.urdf` は別物の 3a65d2d3…）。
+  - 自己検査: 再計算の前に、δ = 0 で q から計算した fk_tag が CSV の fk_tag と 5 µm 以内で一致することを全行で確かめる（外れたら、その行の label を挙げて拒否。URDF・tag の offset・角度の取り違えを止める）。C2 では最大 0.7 µm。
+  - q が数でない行は fk を nan にして、`select_rows` が通常どおり除く。
+- **二重にかからない仕組み**（決定 8）: 記録の道具は meta の `identity` に `follower_calibration_sha256` と `zero_offset_deg`（angle の 5 関節の辞書）を記録する（J4b）。道具（J4a）の扱い:
+  - meta に `zero_offset_deg` が無い（古い meta。C2 の 13 行）: `--joint-offset` と一緒のときだけ使える。無しで使えば拒否（「give --joint-offset NAME=DEG … NAME=0 for none」）。
+  - meta に δ が記録され、すべて 0: `--joint-offset` ありでも無しでもよい（後から補正を当てる使い方）。
+  - meta に 0 でない δ が記録された（ドライバが補正済みの角度で記録した）: `--joint-offset` を重ねたら拒否（「count them twice」。`NAME=0` でも拒否）。無しなら CSV の fk_tag をそのまま使う。
+  - 記録の形が不正（5 関節が揃わない、数でない、10° 超）は拒否。
+- **sidecar**（`camera_extrinsics.yaml.meta.yaml` の `joint_offsets` 節）: `sign`、`source`（`command_line` または `none`）、`applied_deg`、`fk_tag_source`（`recomputed` または `csv`）、`meta_zero_offset_deg`（無ければ `absent`）、`meta_follower_calibration_sha256`（無ければ `absent`）、`urdf_sha256`、`tag_offset_gripper_frame_m`、`baseline_check_max_um`。`identity` 節（meta のコピー）には新しい 2 キーも入る。表示にも `zero offsets applied …` の 2 行を出す。
+- **記録の識別（J4b。`record.py`、`tools/camera_record_run.py`）**: `IDENTITY_KEYS` に `follower_calibration_sha256` と `zero_offset_deg` を足した。2 点目以降の一致の検査（`identity_mismatches`）に入るので、キーの無い古い CSV（C2 の 13 行）には新しい道具で追記できない（ユーザー了承済み。C4 は新しい CSV）。yaml の δ は `read_zero_offsets`（`record.py`）が読む。検査はドライバ（`calibration.cpp`）と同じ: 有限・±10° 以内、gripper に 0 以外は拒否、5 関節は `kind: angle`、キーが無ければ 0。`--calibration-yaml` の既定は `get_package_share_directory('so_arm101_hardware')/config/follower_calibration.yaml`（install 側のコピー）。
+  - 限界: 記録するのは**記録の道具が読んだ yaml**の sha256 と δ で、ドライバが起動時に読み込んだ内容とは同じとは限らない。J5 の実機の手順では、起動の INFO 行（`zero_offset_deg: …`）で δ が読まれたことを確かめる。
+- **package.xml の変更（J4b。事前の報告に無かったが、ユーザーが了承）**: `src/so_arm101_camera/package.xml:23` に `<exec_depend>so_arm101_hardware</exec_depend>`。理由: `tools/camera_record_run.py:189` が、`--calibration-yaml` の既定値に `get_package_share_directory('so_arm101_hardware')` を引くため（install 側の `config/follower_calibration.yaml`）。この依存が無いと、hardware が入っていない環境でこの既定が解決できない。静的な試験 `test_the_hardware_package_of_the_calibration_yaml_is_declared` で宣言を確かめている。
+- **試験（camera）: 285 → 343、+58、失敗 0**（承認した範囲 25〜50 を超えた。ユーザーが選択肢 A で承認）。内訳: pytest 244 → 299（+55: `test_extrinsics_offsets.py` 新設 41、`test_record.py` +13、`test_camera_record_static.py` +1）、lint 29 → 31（+2: 新しい試験ファイルの copyright と pep257）、CTest 12 → 13（+1: 新ファイルの登録）。超過の主な理由は、パラメータ化の展開（不正な引数 11 通りと重複 2 通り、不正な meta の記録 4 通り、yaml の拒否 6 通りと 1 通り）。計画 8.1 の見込み（camera 10〜16、全体 +36〜54）は少なすぎた（過去と同じ傾向）。全体は 917 → 975（hardware 137、calibration 82、ik 364、bringup 47、description 2、moveit_config 0、camera 343）。
+  - 試験の C2 の角度 13 組は、`c2_points.csv`（sha256 `8a4fc4b80bd3192ecd7e0bc9fc10f4da9dba5462457175769e238a201d30a229`）の `q_*` 列を**値として試験ファイルに写した**（`test_extrinsics_offsets.py` の `POSES`。外のファイルは読まない）。合成の姿勢では最小の広がりが 25 mm に届かなかったため。
+- **守りを外す確認**（スクラッチのコピー、別の build・install。リポジトリの build・install は使わない。スクラッチ（git 管理外）: `mutate_j4.sh` sha256 `b5707df7ff6d58c67519a0b2a5e0cd8e688a6e2d3f7610d0fdcdf286aeea9404`、結果 `mutate_j4_result.txt` `2aa9bd13b69f4757f07299365b164f9dfbe5f0d6111e4c109e59e9a10081ab54`、m19 の再実行 `mutate_j4_m19.sh` `56f8d5f56ac39ddd931fad7afa818e03ded843f0836da0aadca710e81c65a531`、結果 `mutate_j4_m19_result.txt` `b1efde325b21c3892e567bed751a5c42ef34afa4653f13f8c5babe2b2875063a`）。ベースラインは 343 件が通る。21 通り＋再実行 1 通りが、すべて期待どおり落ちた。
+  - 元の CSV に書く（m02）、行を in place で変える（m01）、符号を逆（m03）、δ を無視（m04）、baseline 検査を外す（m05）、URDF の sha256 検査を外す（m06）、重ね掛けの拒否を外す（m07）、古い meta を無条件に許す（m08）、10° の上限を外す（m09）、関節名の検査を外す（m10）、重複の拒否を外す（m11）、識別から `zero_offset_deg` を外す（m12）、識別から yaml の sha256 を外す（m13）、sidecar の `applied_deg` を空にする（m14）、yaml の読み取りで 10° の上限を外す（m15）、gripper の検査を外す（m16）、`--urdf` の単独を許す（m17）、meta の記録の検査を外す（m18）、gripper の専用の拒否を外す（m19）、既定の URDF を壊す（m20）、sidecar に meta の δ を書かない（m21）。
+  - m19 は最初の実行では落ちなかった（gripper は名前の検査でも拒否されるので、結果が変わらない等価な変異）。試験に「gripper の拒否の文面に `no zero offset`」の確認を足して（件数は増えない）、再実行したところ落ちた。
+- **dry 実行 3 回**（C2 の 13 行、読むだけ、`--write` なし、出力はスクラッチへのリダイレクトだけ。いずれも終了コード 2。`/opt/ros/humble/setup.bash` と `install/setup.bash` を source）。出力のファイルは `/tmp/claude-1000/-home-hirok-ros2-so-arm101/bed3c8ac-c1f5-4f77-8517-76d2c196ebc4/scratchpad/` の `c2_dry_j4_d0.log`、`c2_dry_j4_d-6.31.log`、`c2_dry_j4_d-6.3.log`。
+  1. `elbow_flex=0`（sha256 `dca6d20bec3a49503f254a85b1c9d85a31e20c2c3e7a43e6e4c2c3cb5f66ac00`）: RMS 4.84、最大 6.67、LOO 8.16、スケール 0.9505、translation [0.47022, 0.3146, 0.60113]、rpy [−4.71, 53.85, −145.9]。`C3_dry.log` と一致（LOO とスケールの 2 つで不合格）。違いは P03 の残差が 1.93 mm（`C3_dry.log` は 1.94。`refit_elbow.log` は 1.93。丸めの境界で、再計算の fk と CSV の fk の差は最大 0.7 µm）と、追加の 2 行だけ。
+  2. `elbow_flex=-6.31`（sha256 `e5221729bac5f9459914a4909455fd3fe9771d1e3154a84fadc675343815f5c1`）: RMS 1.55、最大 2.51、LOO 2.73、スケール 0.9879、translation [0.44969, 0.31279, 0.63989]、rpy [−1.38, 56.8, −143.57]、s_min 31.8。`refit_elbow.log` の −6.31 の欄と表示の桁で一致。スケールだけで不合格。
+  3. `elbow_flex=-6.3`（sha256 `6328ab72105c74f62ebc3fc851929bfdad687b6d698d1c9a6fa1c4a72da467e4`）: RMS 1.55、最大 2.51、LOO 2.73、スケール 0.9878、translation [0.44973, 0.3128, 0.63983]、rpy [−1.38, 56.79, −143.57]。−6.25（RMS 1.56、LOO 2.73、スケール 0.9875）と −6.31 の間。スケールだけで不合格。
+  - これで、再計算の経路が CSV の fk_tag の経路と同じ数値を出すこと（1）と、スクラッチの計算と一致すること（2・3）を確かめた。不合格の理由はスケールのゲートだけ（J4d で扱う。方針: ±1% で警告、±5% で不合格）。
+- 次の段: J4d（スケールのゲート。別の承認）。その後 J5（yaml に δ を書く）。
+
+### 進め方の記録（J4）
+
+- **誤り（記録）**: 実装の途中で、確認のコマンドに空の heredoc の `python3` を誤って混ぜた（ユーザーの禁止事項）。自動の分類器に止められ、実行されなかった。それ以外の Python は、承認された `colcon test`（リポジトリ 4 回、スクラッチ 24 回）と、承認された dry 実行 3 回だけ。
+- 実機・シリアルポート・カメラ・launch・モックは使っていない（ユーザーが「実機も launch も動かしていない」と記入したうえで、`colcon build` と camera の `colcon test` を実行した）。

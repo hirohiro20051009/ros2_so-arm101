@@ -217,6 +217,7 @@ elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, zero_offset_deg: 
 - **推奨: 案 1 を先に（δ の値の確かめ用）、δ が決まったら、案 3 の一部（点の数を減らした取り直し、または C4 の独立した点）で補正後の経路を確かめる**。理由: (i) C3 の目的（外部パラメータ）は、記録済みの q_meas と tag の観測から厳密に計算できる。(ii) ただし、補正後のドライバ（yaml の補正値）が実機で期待どおり効いていることの確認は、記録の再計算では確かめられない。C4（独立した確認）が補正後のドライバの経路を通るので、そこで確かめる。
 - 事実: `camera_extrinsics_run.py` の `--write` と sidecar（`extrinsics.py:490-`）は CSV の sha256 を残す。案 1 では、sidecar に「joint_offsets: elbow_flex −6.31」を足す（案。C3-b の前に実装）。
 - 新しい記録の識別（案）: `record.py` の IDENTITY_KEYS に、`follower_calibration.yaml` の sha256 と補正値を足す。これで、補正後の記録と補正なしの記録を区別できる。既存の記録（13 行）の識別はキーが足りないので、道具が「識別の欠けた記録」として扱うか、`--joint-offset` と一緒に使うときだけ許す（実装の前に決める。決定の表の項目 8）。
+- **注記（2026-11-17、J4）**: 計算し直しに使う URDF は、**meta の `urdf_sha256` と同じ sha256 のものだけ**受け付ける。既定は `get_package_share_directory('so_arm101_description')/urdf/so101_new_calib.urdf`（install 側の生成物。C2 の meta の 279b8e7d…）。リポジトリの `third_party/SO-ARM100/so101_new_calib.urdf`（3a65d2d3…）は別物で、使えない。古い meta は `--joint-offset` と一緒のときだけ許し、記録済みの δ ≠ 0 の meta に重ねたら拒否する。識別に足した 2 キーと package.xml の `so_arm101_hardware` の依存の理由は `inventory.md` の J4 の節。
 
 ## 7. 補正で変わる既存の値と docs
 
@@ -278,6 +279,7 @@ elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, zero_offset_deg: 
 | bringup・description・moveit_config | 変更なし | 0 |
 | 合計 | | 約 36〜54（上限は 70 前後まで広がりうる）。累計で約 910〜930（推測） |
 
+- **訂正（2026-11-17、J4）**: camera の見込み（10〜16）は少なすぎた。実績は +58（pytest +55、lint +2、CTest +1。camera 285 → 343、全体 917 → 975）。理由は、`--joint-offset` の検査・重ね掛け・識別・yaml の読み取りのパラメータ化の展開。詳細は `inventory.md` の J4 の節。
 - 件数の確かめ方（C1 と同じ）: `git diff --stat` に ik・bringup・moveit_config・description が出ない。パッケージごとの件数が、変えないものは不変（bringup 47、description 2、moveit_config 0、ik 364）。hardware・calibration・camera の増分を実測して報告。
 - `colcon test` は、hardware・calibration・camera（と、不変の確認に ik）を、コミットの前に実行（`/opt/ros/humble/setup.bash` と `install/setup.bash` を source してから）。失敗があれば先に報告。docs だけの変更は省略して報告に書く。
 
