@@ -37,7 +37,10 @@ EXIT_REJECTED = 2  # the checks failed or the input was refused (nothing is past
 H_PRIOR_MM = -2.4  # the desk height when the arm and the desk are on the same surface
 H_SIGMA_MM = 1.0
 SIGMA_CONTACT_MM = 1.0  # scatter of one touch
-SIGMA_90_EXTRA_MM = 1.0  # added in quadrature to a vertical (about 90 deg) touch
+# Added in quadrature to a vertical (EPS_90_MIN_DEG or more) touch.  0: the user checked on the
+# real arm that, with the jaw closed, the moving jaw does not touch the desk first (the model says
+# 1.26 mm lower at 90 deg; the difference is 未確認, plan 8).  1.0 was the first guess.
+SIGMA_90_EXTRA_MM = 0.0
 EPS_90_MIN_DEG = 80.0  # an elevation of at least this is called vertical (state: a few deg off)
 EPS_MIN_DEG = 45.0
 MIN_POSES = 4
@@ -135,12 +138,23 @@ class FixedJaw:
 
 
 def tool_state(chain, q5):
-    """Return (x in mm of the reference point, elevation in deg; 90 is straight down)."""
-    position, rotation = chain.fk(np.asarray(q5, dtype=float))
+    """
+    Return (x in mm of the reference point, elevation in deg of the tool axis).
+
+    The elevation is directed, not folded: 90 is straight down, less than 90 is a forward tilt
+    (the tip ahead of the wrist) and more than 90 is a backward tilt (up to 135 and more), so
+    that 85 and 95 are told apart.  Forward is the direction of the pan plane (the horizontal
+    direction that the pan joint turns from +x of base_link at pan 0).
+    """
+    q5 = np.asarray(q5, dtype=float)
+    position, rotation = chain.fk(q5)
     position, rotation = np.asarray(position, float), np.asarray(rotation, float)
     reference = position + rotation @ np.array([0.0, 0.0, REF_POINT_Z_M])
     axis = rotation[:, 2]
-    eps = math.degrees(math.atan2(-axis[2], math.hypot(axis[0], axis[1])))
+    turned = chain.frames(q5)['shoulder_pan'][1] @ chain.frames(np.zeros_like(q5))[
+        'shoulder_pan'][1].T
+    forward = turned @ np.array([1.0, 0.0, 0.0])
+    eps = math.degrees(math.atan2(-axis[2], float(axis[0] * forward[0] + axis[1] * forward[1])))
     return float(reference[0] * 1000.0), float(eps)
 
 

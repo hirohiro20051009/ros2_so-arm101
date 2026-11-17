@@ -136,6 +136,27 @@ def test_the_elevation_and_x_of_the_plan_poses(pose, eps, x):
     assert got_x == pytest.approx(x, abs=10.0)
 
 
+def state_with_elevation(eps, pan_deg=0.0):
+    """Return the P3 true state with the wrist moved so that the elevation is eps (deg)."""
+    q = true_poses('A')['P3'].copy()
+    _, now = zo.tool_state(CHAIN, q)
+    q[3] += math.radians(eps - now)
+    q[0] = math.radians(pan_deg)
+    return q
+
+
+@pytest.mark.parametrize('eps', [50.0, 85.0, 90.0, 95.0, 110.0, 130.0])
+def test_the_elevation_is_directed_not_folded_so_that_95_and_85_are_told_apart(eps):
+    assert zo.tool_state(CHAIN, state_with_elevation(eps))[1] == pytest.approx(eps, abs=1e-6)
+
+
+@pytest.mark.parametrize('pan_deg', [-45.0, -20.0, 20.0, 45.0])
+@pytest.mark.parametrize('eps', [85.0, 95.0])
+def test_the_elevation_does_not_depend_on_the_pan_angle(eps, pan_deg):
+    assert zo.tool_state(CHAIN, state_with_elevation(eps, pan_deg))[1] == pytest.approx(
+        eps, abs=1e-3)
+
+
 # ----------------------------------------------------------------------------- the fit
 
 @pytest.mark.parametrize('pose_set, delta', [
@@ -166,8 +187,15 @@ def test_the_delta_is_absolute_when_the_driver_already_applied_one(old):
     assert solution.delta_deg == pytest.approx(fitted('A', delta).delta_deg, abs=0.02)
 
 
-def test_a_vertical_touch_has_a_larger_sigma():
-    options = zo.Options()
+def test_the_default_gives_no_extra_sigma_to_a_vertical_touch():
+    assert zo.SIGMA_90_EXTRA_MM == 0.0 and zo.Options().sigma_90_extra_mm == 0.0
+    sigmas = {t.label: zo.touch_sigma_mm(CHAIN, t, zo.Options())
+              for t in make_touches('A', (0, 0, 0))}
+    assert set(sigmas.values()) == {1.0}
+
+
+def test_a_vertical_touch_has_a_larger_sigma_when_an_extra_is_asked_for():
+    options = zo.Options(sigma_90_extra_mm=1.0)
     sigmas = {t.label: zo.touch_sigma_mm(CHAIN, t, options) for t in make_touches('A', (0, 0, 0))}
     assert sigmas['P1#1'] == pytest.approx(math.sqrt(2.0))
     assert sigmas['P2#2'] == pytest.approx(math.sqrt(2.0))
@@ -177,8 +205,8 @@ def test_a_vertical_touch_has_a_larger_sigma():
 
 def test_the_sigma_of_the_vertical_touches_changes_the_sd():
     touches = make_touches('A', (0.0, -6.3, -3.0))
-    plain = zo.fit(CHAIN, JAW, touches, NO_OLD, zo.Options(sigma_90_extra_mm=0.0))
-    extra = zo.fit(CHAIN, JAW, touches, NO_OLD)
+    plain = zo.fit(CHAIN, JAW, touches, NO_OLD)
+    extra = zo.fit(CHAIN, JAW, touches, NO_OLD, zo.Options(sigma_90_extra_mm=1.0))
     assert np.all(extra.sd_model_deg > plain.sd_model_deg)
 
 
@@ -218,7 +246,7 @@ def test_leaving_one_record_out_is_the_refit_without_it():
 def test_a_bad_record_changes_the_delta_when_it_is_left_out():
     touches = make_touches('A', (0.0, -6.3, -3.0))
     q = list(touches[2].q)
-    q[2] += math.radians(2.5)
+    q[2] += math.radians(3.0)
     bad = touches[:2] + [zo.Touch(touches[2].label, tuple(q))] + touches[3:]
     base = zo.fit(CHAIN, JAW, bad, NO_OLD)
     changes = zo.leave_one_out(CHAIN, JAW, bad, NO_OLD, base)

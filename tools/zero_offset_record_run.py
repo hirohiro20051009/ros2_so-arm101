@@ -6,7 +6,12 @@
 腕はトルク OFF の読み取り専用の起動（ユーザーが実施。docs/zero_offset_calib_plan.md 7.5）で、
 手で動かして先端を机にそっと当てる。
 
-  python3 tools/zero_offset_record_run.py --csv ~/so_arm101_check/zero_offset_NEW/zero.csv
+  python3 tools/zero_offset_record_run.py --csv ~/so_arm101_check/zero_offset_NEW/zero.csv \
+      --expected-offset elbow_flex=-6.3
+
+目標の姿勢（P1〜P4）は実物（真の角度）の傾きと x。yaml に δ がまだ無い間は、--expected-offset で
+「実物 = 読んだ角度 + オフセット」と見込んだ値で案内する（表示・目標の判定・45° の下限だけ）。
+記録する角度と fit には使わない。yaml に δ を入れた後は渡さない。
 
 端末: Enter で今の姿勢を記録（静止していて、仰角 45° 以上のときだけ）。P1〜P4 で目標の姿勢を選ぶ。
 y で、目標の範囲の外の記録を確認する。q で終了。CSV と meta を書くのは
@@ -71,19 +76,21 @@ class RunNode(Node):
         return None if not self._samples else time.monotonic() - self._samples[-1][0]
 
 
-def status_line(label, node, chain, jaw, options):
+def status_line(label, node, chain, jaw, options, offsets=None):
     """Return the one-line display of the present state against the target of the label."""
     samples = node.recent()
     if len(samples) == 0:
         return f'{label}: no /joint_states yet'
     mean, span = zr.window_stats(samples)
-    x_mm, eps = zo.tool_state(chain, mean[:len(zr.ARM_JOINTS)])
+    arm = mean[:len(zr.ARM_JOINTS)]
+    _, eps_read = zo.tool_state(chain, arm)
+    x_mm, eps = zo.tool_state(chain, zr.expected_state(arm, offsets))
     dx, de, inside = zr.target_delta(label.split('#')[0], x_mm, eps)
-    height = zo.height_above_desk_mm(chain, jaw, mean[:len(zr.ARM_JOINTS)], options)
+    height = zo.height_above_desk_mm(chain, jaw, arm, options)
     still = 'still' if zr.is_still(span) else 'MOVING'
-    return (f'{label}: x {x_mm:6.1f} mm ({dx:+6.1f})  elevation {eps:5.1f} deg ({de:+5.1f})  '
-            f'{"in range" if inside else "OUT of range"}  moving {np.max(span[:5]):4.2f} deg '
-            f'{still}  model height {height:+6.1f} mm')
+    return (f'{label}: x {x_mm:6.1f} mm ({dx:+6.1f})  elevation {eps:5.1f} deg ({de:+5.1f}) '
+            f'[read {eps_read:5.1f}]  {"in range" if inside else "OUT of range"}  '
+            f'moving {np.max(span[:5]):4.2f} deg {still}  model height {height:+6.1f} mm')
 
 
 def provisional_fit(csv_path, chain, jaw, identity, options):
@@ -106,20 +113,24 @@ def record(node, label, args, chain, jaw, options, identity, state):
         return False
     mean, span = zr.window_stats(samples)
     try:
-        row = zr.make_row(label, time.time(), mean, span, len(samples), chain, jaw, options)
-        dx, de, inside = zr.target_delta(row['pose'], float(row['x_mm']), float(row['eps_deg']))
+        row = zr.make_row(label, time.time(), mean, span, len(samples), chain, jaw, options,
+                          args.expected_offsets)
+        dx, de, inside = zr.target_delta(row['pose'], float(row['x_expected_mm']),
+                                         float(row['eps_expected_deg']))
         if not inside and state.get('confirmed') != label:
             state['ask'] = label
             print(f'\n{label}: outside the target (dx {dx:+.1f} mm, d-elevation {de:+.1f} deg). '
                   'Type y and Enter to record it anyway, or move the arm.')
             return False
         meta = zr.build_meta(identity, options, datetime.datetime.now(
-            datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
+            datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            expected_offset_deg=args.expected_offsets)
         idx = zr.write_point(args.csv, label, identity, meta, row)
     except zr.SessionError as error:
         print(f'\nnot recorded: {error}')
         return False
-    print(f'\nrecorded {label} (row {idx}): x {row["x_mm"]} mm, elevation {row["eps_deg"]} deg, '
+    print(f'\nrecorded {label} (row {idx}): x {row["x_expected_mm"]} mm, elevation '
+          f'{row["eps_expected_deg"]} deg (read {row["eps_deg"]}), '
           f'model height {row["model_height_mm"]} mm {row["warn"]}')
     for line in provisional_fit(args.csv, chain, jaw, identity, options):
         print(line)
@@ -141,7 +152,8 @@ def loop(node, args, chain, jaw, options, identity):
         node.spin(0.05)
         if time.monotonic() - last >= DISPLAY_SECONDS:
             last = time.monotonic()
-            text = status_line(label, node, chain, jaw, options) if label else 'all poses recorded'
+            text = (status_line(label, node, chain, jaw, options, args.expected_offsets)
+                    if label else 'all poses recorded')
             print(f'\r{text}   ', end='', flush=True)
         ready, _, _ = select.select([sys.stdin], [], [], 0.0)
         if not ready:
@@ -187,7 +199,17 @@ def parse_args(argv):
     ap.add_argument('--h-prior-mm', type=float, default=zo.H_PRIOR_MM)
     ap.add_argument('--h-sigma-mm', type=float, default=zo.H_SIGMA_MM)
     ap.add_argument('--target', choices=sorted(zr.POSES), help='start with this pose')
-    return ap.parse_args(argv)
+    ap.add_argument('--expected-offset', action='append', default=[], metavar='NAME=DEG',
+                    help='where the arm really is = the angle read + DEG (e.g. elbow_flex=-6.3). '
+                         'A guide for the hand only (the display, the target and the 45 deg '
+                         'limit); the recorded angles and the fit do not use it. Not for a '
+                         'yaml that already has zero_offset_deg')
+    args = ap.parse_args(argv)
+    try:
+        args.expected_offsets = zr.parse_expected_offsets(args.expected_offset)
+    except ValueError as error:
+        ap.error(str(error))
+    return args
 
 
 def main(argv):
@@ -199,10 +221,13 @@ def main(argv):
         chain = UrdfChain(urdf_xml)
         jaw = zo.FixedJaw.from_urdf(urdf_xml, args.mesh_dir)
         identity = zr.identity_from_files(args.calibration_yaml, args.urdf, args.mesh_dir)
-        zr.check_file(args.csv, identity)
+        zr.check_file(args.csv, identity, expected_offset_deg=args.expected_offsets)
     except (zr.SessionError, OSError, ValueError) as error:
         print(f'refused: {error}', file=sys.stderr)
         return EXIT_REFUSED
+    print('expected offset: ' + zr.expected_text(args.expected_offsets)
+          + ' (a guide for the hand only; the recorded angles and the fit do not use it)',
+          flush=True)
     rclpy.init()
     node = RunNode()
     code = 0

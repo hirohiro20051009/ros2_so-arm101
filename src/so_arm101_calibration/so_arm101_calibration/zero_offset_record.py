@@ -37,11 +37,16 @@ TARGET_X_TOL_MM = 10.0
 TARGET_EPS_TOL_DEG = 5.0
 REPEATS = 2
 # The poses of the plan: (target elevation deg, target x mm).  docs/zero_offset_calib_plan.md 5.2.
+# The targets are of the REAL arm (true angles).  The tool compares them with the state plus the
+# expected offset (--expected-offset), which is only a guide for the hand; the fit never sees it.
 POSES = {'P1': (90.0, 100.0), 'P2': (90.0, 300.0), 'P3': (70.0, 150.0), 'P4': (50.0, 250.0)}
 
+# x_mm and eps_deg are of the state that was read (what the fit uses); the two expected columns
+# are of the state plus the expected offset (what the display and the refusals used).
 COLUMNS = (('idx', 'label', 'pose', 'time') + tuple('q_' + n for n in STATE_JOINTS)
            + tuple('span_deg_' + n for n in STATE_JOINTS)
-           + ('samples', 'x_mm', 'eps_deg', 'model_height_mm', 'still', 'warn'))
+           + ('samples', 'x_mm', 'eps_deg', 'x_expected_mm', 'eps_expected_deg',
+              'model_height_mm', 'still', 'warn'))
 IDENTITY_KEYS = ('calibration_kind', 'follower_calibration_sha256', 'zero_offset_deg',
                  'urdf_sha256', 'mesh_sha256')
 
@@ -144,8 +149,67 @@ def is_still(span_deg):
     return bool(np.max(np.asarray(span_deg, dtype=float)[:len(ARM_JOINTS)]) <= STILL_DEG)
 
 
+def parse_expected_offsets(items):
+    """
+    Return {joint: degrees} of the --expected-offset values NAME=DEG (real = read + DEG).
+
+    The same rules and words as the --joint-offset of the camera tools (written again so that
+    this package does not depend on the camera package): a missing "=", the gripper, a name that
+    is not one of the five angle joints, a value that is not a finite number or is over 10 deg,
+    and a joint given twice raise ValueError.  Nothing given: an empty dict.
+    """
+    offsets = {}
+    for item in items:
+        name, separator, text = str(item).partition('=')
+        if not separator:
+            raise ValueError(f'--expected-offset {item}: the form is NAME=DEG')
+        if name == GRIPPER:
+            raise ValueError('--expected-offset gripper: the gripper has no zero offset')
+        if name not in ARM_JOINTS:
+            raise ValueError(f'--expected-offset {name}: not one of {", ".join(ARM_JOINTS)}')
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise ValueError(f'--expected-offset {item}: {text!r} is not a number') from exc
+        if not math.isfinite(value) or abs(value) > ZERO_OFFSET_MAX_DEG:
+            raise ValueError(f'--expected-offset {item}: the value must be finite and within '
+                             f'+-{ZERO_OFFSET_MAX_DEG:g} deg')
+        if name in offsets:
+            raise ValueError(f'--expected-offset {name} is given twice')
+        offsets[name] = value
+    return offsets
+
+
+def full_offsets(offsets):
+    """Return the offsets of all five arm joints (0 where none was given)."""
+    return {name: float((offsets or {}).get(name, 0.0)) for name in ARM_JOINTS}
+
+
+def expected_state(q5, offsets):
+    """
+    Return the five arm angles (rad) plus the expected offsets: where the arm really is.
+
+    Only for the display, the target check and the elevation limit of the record tool.
+    """
+    q = np.array(q5, dtype=float)
+    for index, name in enumerate(ARM_JOINTS):
+        q[index] += math.radians(full_offsets(offsets)[name])
+    return q
+
+
+def expected_text(offsets):
+    """Return the offsets that are not 0 as 'joint=deg, ...' ('none' when all are 0)."""
+    given = {k: v for k, v in full_offsets(offsets).items() if v != 0.0}
+    return ', '.join(f'{k}={v:+g}' for k, v in given.items()) if given else 'none'
+
+
 def target_delta(pose, x_mm, eps_deg):
-    """Return (delta x mm, delta elevation deg, inside the range) against the target of a pose."""
+    """
+    Return (delta x mm, delta elevation deg, inside the range) against the target of a pose.
+
+    x_mm and eps_deg are those of the expected state (the real arm); the elevation is directed,
+    so 95 and 85 are both 5 deg from a vertical target.
+    """
     eps_target, x_target = POSES[pose]
     dx, de = x_mm - x_target, eps_deg - eps_target
     return dx, de, abs(dx) <= TARGET_X_TOL_MM and abs(de) <= TARGET_EPS_TOL_DEG
@@ -175,11 +239,15 @@ def parse_command(line):
     return 'unknown', text
 
 
-def make_row(label, time_s, q_mean, span_deg, samples, chain, jaw, options=zo.Options()):
+def make_row(label, time_s, q_mean, span_deg, samples, chain, jaw, options=zo.Options(),
+             expected_offset_deg=None):
     """
     Return the row of one record, or raise RecordRefused (nothing is recorded).
 
-    q_mean is the mean state of the six joints (the five arm joints and the gripper, rad).
+    q_mean is the mean state of the six joints (the five arm joints and the gripper, rad).  The
+    q, x_mm and eps_deg of the row are of the state that was read.  expected_offset_deg (joint
+    to deg, default none) only moves the elevation limit and the two expected columns: where the
+    arm really is is the state plus the offset.  The fit never uses the expected columns.
     """
     if not isinstance(label, str) or not LABEL_PATTERN.fullmatch(label):
         raise RecordRefused('the label may only have letters, digits, "_", ".", "-" and "#n"')
@@ -190,8 +258,10 @@ def make_row(label, time_s, q_mean, span_deg, samples, chain, jaw, options=zo.Op
             f'the arm is not still (largest span {np.max(span_deg[:len(ARM_JOINTS)]):.2f} deg, '
             f'at most {STILL_DEG:g}): nothing was recorded')
     x_mm, eps = zo.tool_state(chain, q_mean[:len(ARM_JOINTS)])
-    if eps < zo.EPS_MIN_DEG:
-        raise RecordRefused(f'the elevation {eps:.1f} deg is below {zo.EPS_MIN_DEG:g} deg: '
+    x_exp, eps_exp = zo.tool_state(
+        chain, expected_state(q_mean[:len(ARM_JOINTS)], expected_offset_deg))
+    if eps_exp < zo.EPS_MIN_DEG:
+        raise RecordRefused(f'the elevation {eps_exp:.1f} deg is below {zo.EPS_MIN_DEG:g} deg: '
                             'nothing was recorded')
     height = zo.height_above_desk_mm(chain, jaw, q_mean[:len(ARM_JOINTS)], options)
     warnings = []
@@ -203,21 +273,29 @@ def make_row(label, time_s, q_mean, span_deg, samples, chain, jaw, options=zo.Op
         row['q_' + name] = _num(q)
         row['span_deg_' + name] = _num(span, 3)
     row.update(samples=str(int(samples)), x_mm=_num(x_mm, 2), eps_deg=_num(eps, 2),
+               x_expected_mm=_num(x_exp, 2), eps_expected_deg=_num(eps_exp, 2),
                model_height_mm=_num(height, 2), still='1', warn='; '.join(warnings))
     return row
 
 
 # ----------------------------------------------------------------------------- the files
 
-def build_meta(identity, options, created, extra=None):
-    """Return the content of the meta file (the values that explain where the CSV comes from)."""
+def build_meta(identity, options, created, extra=None, expected_offset_deg=None):
+    """
+    Return the content of the meta file (the values that explain where the CSV comes from).
+
+    expected_offset_deg is written in the settings (all five joints) to tell later what the
+    display of the record tool was based on; it is not part of the identity and the fit does not
+    use it.
+    """
     return {'schema': 1, 'calibration_kind': zo.CALIBRATION_KIND, 'created': created,
             'tool': TOOL_VERSION, 'identity': to_plain(identity),
             'settings': {'h_prior_mm': options.h_prior_mm, 'h_sigma_mm': options.h_sigma_mm,
                          'sigma_contact_mm': options.sigma_contact_mm,
                          'sigma_90_extra_mm': options.sigma_90_extra_mm,
                          'eps_min_deg': zo.EPS_MIN_DEG, 'still_deg': STILL_DEG,
-                         'samples': SAMPLES},
+                         'samples': SAMPLES,
+                         'expected_offset_deg': full_offsets(expected_offset_deg)},
             'extra': to_plain(extra or {})}
 
 
@@ -256,13 +334,22 @@ def read_meta(csv_path, meta_path=None):
     return meta
 
 
-def check_file(csv_path, identity, meta_path=None):
+def expected_offset_line(meta):
+    """Return the one line that tells what the display of the record tool was based on."""
+    recorded = (meta.get('settings') or {}).get('expected_offset_deg')
+    text = 'not recorded (an older meta file)' if recorded is None else expected_text(recorded)
+    return (f'expected offset of the record display: {text} (a guide for the hand only; the fit '
+            'does not use it; the elevations here are those of the angles that were read)')
+
+
+def check_file(csv_path, identity, meta_path=None, expected_offset_deg=None):
     """
     Check the CSV and its meta file against the identity.  Return 'new' or 'append'.
 
     new: neither the CSV nor the meta file exists.  append: both exist, the first line and the
     header are the present ones and the identity of the meta file is the present one.  Anything
-    else raises SessionError; nothing is written.
+    else raises SessionError; nothing is written.  expected_offset_deg (not None) must also be
+    the one of the meta file: one CSV is one display basis (the fit tool passes none).
     """
     csv_path = Path(csv_path)
     meta_path = Path(meta_path) if meta_path else meta_path_for(csv_path)
@@ -279,6 +366,12 @@ def check_file(csv_path, identity, meta_path=None):
     if differences:
         raise SessionError(
             'the meta file differs from the present files: ' + '; '.join(differences))
+    if expected_offset_deg is not None:
+        recorded = (meta.get('settings') or {}).get('expected_offset_deg')
+        if recorded != full_offsets(expected_offset_deg):
+            raise SessionError(
+                f'expected_offset_deg: recorded {recorded}, now '
+                f'{full_offsets(expected_offset_deg)} (one CSV has one expected offset)')
     with open(csv_path, encoding='utf-8') as f:
         first = f.readline().rstrip('\n')
     if first != CSV_COMMENT:
@@ -289,11 +382,11 @@ def check_file(csv_path, identity, meta_path=None):
     return 'append'
 
 
-def check_session(csv_path, label, identity):
+def check_session(csv_path, label, identity, expected_offset_deg=None):
     """Check that the record label may be written to csv_path.  Return 'new' or 'append'."""
     if not isinstance(label, str) or not LABEL_PATTERN.fullmatch(label):
         raise SessionError('the label may only have letters, digits, "_", ".", "-" and "#n"')
-    state = check_file(csv_path, identity)
+    state = check_file(csv_path, identity, expected_offset_deg=expected_offset_deg)
     if state == 'append':
         _, rows = read_rows(csv_path)
         if label in [r[COLUMNS.index('label')] for r in rows if len(r) == len(COLUMNS)]:
@@ -310,7 +403,8 @@ def write_point(csv_path, label, identity, meta, row):
     """
     csv_path = Path(csv_path)
     meta_path = meta_path_for(csv_path)
-    state = check_session(csv_path, label, identity)
+    expected = (meta.get('settings') or {}).get('expected_offset_deg')
+    state = check_session(csv_path, label, identity, expected)
     if state == 'new':
         try:
             with open(meta_path, 'x', encoding='utf-8') as f:
@@ -328,7 +422,7 @@ def write_point(csv_path, label, identity, meta, row):
     with open(csv_path, 'a+', newline='', encoding='utf-8') as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
-            if check_session(csv_path, label, identity) != 'append':
+            if check_session(csv_path, label, identity, expected) != 'append':
                 raise SessionError(f'{csv_path} changed while it was checked')
             idx = len(read_rows(csv_path)[1]) + 1
             writer = csv.DictWriter(f, COLUMNS, lineterminator='\n')

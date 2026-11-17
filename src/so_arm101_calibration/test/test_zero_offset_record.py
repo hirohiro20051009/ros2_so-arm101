@@ -130,7 +130,8 @@ def test_the_meta_file_is_a_zero_offset_one_with_the_settings(tmp_path):
     assert meta['calibration_kind'] == 'zero_offset'
     assert meta['identity'] == yaml.safe_load(yaml.safe_dump(IDENTITY))
     assert meta['settings']['h_prior_mm'] == -2.4 and meta['settings']['eps_min_deg'] == 45.0
-    assert meta['settings']['sigma_90_extra_mm'] == 1.0
+    assert meta['settings']['sigma_90_extra_mm'] == 0.0
+    assert meta['settings']['expected_offset_deg'] == ZERO
 
 
 def test_a_meta_file_of_another_kind_is_not_read(tmp_path):
@@ -242,3 +243,92 @@ def test_a_changed_calibration_yaml_changes_the_sha256_and_the_offset(tmp_path):
                                    SHARE / 'meshes')
     assert [k for k in before if before[k] != after[k]] == [
         'follower_calibration_sha256', 'zero_offset_deg']
+
+
+# ------------------------------------------------- the expected offset (a guide, not the fit)
+
+ELBOW = {'elbow_flex': -6.3}
+
+
+def test_the_targets_are_of_the_real_arm_and_a_vertical_one_is_5_deg_either_side():
+    assert zr.POSES == {'P1': (90.0, 100.0), 'P2': (90.0, 300.0), 'P3': (70.0, 150.0),
+                        'P4': (50.0, 250.0)}
+    inside = {a: zr.target_delta('P1', 100.0, a)[2] for a in (84.9, 85.0, 95.0, 95.1)}
+    assert inside == {84.9: False, 85.0: True, 95.0: True, 95.1: False}
+
+
+TWO = {'elbow_flex': 10.0, 'wrist_flex': -10.0}
+
+
+@pytest.mark.parametrize('items, expected', [
+    ([], {}), (['elbow_flex=-6.3'], ELBOW), (['elbow_flex=10', 'wrist_flex=-10'], TWO)])
+def test_the_expected_offsets_are_read_as_name_equals_degrees(items, expected):
+    assert zr.parse_expected_offsets(items) == expected
+
+
+@pytest.mark.parametrize('item, words', [
+    ('elbow_flex', 'the form is NAME=DEG'), ('gripper=1', 'the gripper has no zero offset'),
+    ('foo=1', 'not one of'), ('elbow_flex=x', 'is not a number'),
+    ('elbow_flex=10.001', 'within +-10'), ('elbow_flex=nan', 'finite'),
+    ('elbow_flex=-10.001', 'within +-10')])
+def test_an_expected_offset_the_camera_tools_would_refuse_is_refused_too(item, words):
+    with pytest.raises(ValueError, match='--expected-offset') as exc:
+        zr.parse_expected_offsets([item])
+    assert words in str(exc.value)
+
+
+def test_the_same_joint_may_not_be_given_twice():
+    with pytest.raises(ValueError, match='given twice'):
+        zr.parse_expected_offsets(['elbow_flex=1', 'elbow_flex=2'])
+
+
+def test_the_expected_state_adds_the_offsets_to_the_five_arm_angles_only():
+    q = Q_P3[:5]
+    assert zr.expected_state(q, None) == pytest.approx(q)
+    moved = zr.expected_state(q, ELBOW)
+    assert moved[2] - q[2] == pytest.approx(math.radians(-6.3))
+    assert np.delete(moved - q, 2) == pytest.approx(np.zeros(4))
+
+
+def test_the_expected_offset_moves_only_the_expected_columns_of_a_row():
+    plain, guided = row_of(), zr.make_row('P3#1', 1000.0, Q_P3, STILL, 20, CHAIN, JAW,
+                                          expected_offset_deg=ELBOW)
+    for name in zr.COLUMNS:
+        if name not in ('x_expected_mm', 'eps_expected_deg'):
+            assert plain[name] == guided[name], name
+    assert plain['eps_expected_deg'] == plain['eps_deg']
+    assert plain['x_expected_mm'] == plain['x_mm']
+    read = float(plain['eps_deg'])
+    assert float(guided['eps_expected_deg']) == pytest.approx(read - 6.3, abs=0.01)
+
+
+@pytest.mark.parametrize('offset, accepted', [(None, True), (ELBOW, False)])
+def test_the_limit_of_45_deg_is_judged_on_the_expected_elevation(offset, accepted):
+    q = with_elevation(50.0)  # read 50 deg: the real arm is at 43.7 deg when elbow is -6.3
+    if accepted:
+        assert row_of(q=q)['eps_deg'] != ''
+    else:
+        with pytest.raises(zr.RecordRefused, match='below 45'):
+            zr.make_row('P4#1', 1000.0, q, STILL, 20, CHAIN, JAW, expected_offset_deg=offset)
+
+
+def test_the_expected_offset_is_in_the_meta_and_a_csv_keeps_one_expected_offset(tmp_path):
+    path = tmp_path / 'a.csv'
+    meta = zr.build_meta(IDENTITY, zo.Options(), '2026-11-17T00:00:00Z', expected_offset_deg=ELBOW)
+    zr.write_point(path, 'P3#1', IDENTITY, meta, row_of('P3#1'))
+    settings = yaml.safe_load(zr.meta_path_for(path).read_text())['settings']
+    assert settings['expected_offset_deg'] == dict(ZERO, **ELBOW)
+    before = path.read_bytes()
+    with pytest.raises(zr.SessionError, match='expected_offset_deg'):
+        zr.write_point(path, 'P3#2', IDENTITY, meta_of(), row_of('P3#2'))
+    assert path.read_bytes() == before
+    assert zr.write_point(path, 'P3#2', IDENTITY, meta, row_of('P3#2')) == 2
+    assert zr.check_file(path, IDENTITY) == 'append'  # the fit tool asks for no offset
+
+
+def test_the_line_for_the_fit_tool_says_the_offset_and_that_the_fit_does_not_use_it():
+    none, given = zr.expected_offset_line(meta_of()), zr.expected_offset_line(
+        zr.build_meta(IDENTITY, zo.Options(), 'now', expected_offset_deg=ELBOW))
+    assert 'none' in none and 'elbow_flex=-6.3' in given
+    assert 'fit does not use it' in given
+    assert 'not recorded' in zr.expected_offset_line({'settings': {}})

@@ -53,3 +53,8 @@ def test_the_pure_modules_import_no_ros_serial_or_process_module():
         if path.name in ('__init__.py',):
             continue
         assert imports_of(path) & FORBIDDEN_IMPORTS == set(), path.name
+
+
+def test_the_fit_module_knows_nothing_of_an_expected_offset():
+    source = (PACKAGE / 'so_arm101_calibration' / 'zero_offset.py').read_text(encoding='utf-8')
+    assert 'expected' not in source.lower()

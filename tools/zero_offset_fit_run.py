@@ -43,7 +43,7 @@ def parse_args(argv):
                     help='leave this record out (can be given more than once)')
     ap.add_argument('--sigma-contact', type=float, metavar='MM', help='scatter of one touch (1.0)')
     ap.add_argument('--sigma-90-extra', type=float, metavar='MM',
-                    help='added in quadrature for a vertical touch (1.0)')
+                    help='added in quadrature for a vertical touch (default: from the meta; 0)')
     ap.add_argument('--h-prior-mm', type=float, help='the desk height (default: from the meta)')
     ap.add_argument('--h-sigma-mm', type=float, help='its sigma (default: from the meta)')
     ap.add_argument('--calibration-yaml', default=os.path.join(
@@ -97,6 +97,7 @@ def main(argv):
         print(f'cannot read: no such record to exclude: {", ".join(unknown)}', file=sys.stderr)
         return EXIT_ERROR
     touches = [t for t in touches if t.label not in set(args.exclude)]
+    print(zr.expected_offset_line(meta))
     if args.exclude:
         print('left out: ' + ', '.join(args.exclude))
     report = zo.evaluate(chain, jaw, touches, identity['zero_offset_deg'], options_of(args, meta))

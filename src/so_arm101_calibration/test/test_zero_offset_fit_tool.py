@@ -56,7 +56,7 @@ def calibration_yaml(directory, elbow=None, name='follower_calibration.yaml'):
     return path
 
 
-def make_csv(directory, delta_true, bad_label=None, name='zero_offset.csv'):
+def make_csv(directory, delta_true, bad_label=None, name='zero_offset.csv', expected=None):
     """Write the records of the four poses (twice each) for the given true deltas (deg)."""
     calibration = calibration_yaml(directory)
     identity = zr.identity_from_files(calibration, URDF, SHARE / 'meshes')
@@ -69,9 +69,11 @@ def make_csv(directory, delta_true, bad_label=None, name='zero_offset.csv'):
                 state[index] -= math.radians(delta_true[k])
             if label == bad_label:
                 state[2] += math.radians(6.0)
-            row = zr.make_row(label, 1000.0, np.append(state, 0.0), np.zeros(6), 20, CHAIN, JAW)
+            row = zr.make_row(label, 1000.0, np.append(state, 0.0), np.zeros(6), 20, CHAIN, JAW,
+                              expected_offset_deg=expected)
             zr.write_point(path, label, identity,
-                           zr.build_meta(identity, zo.Options(), '2026-11-17T00:00:00Z'), row)
+                           zr.build_meta(identity, zo.Options(), '2026-11-17T00:00:00Z',
+                                         expected_offset_deg=expected), row)
     return path, calibration
 
 
@@ -144,6 +146,23 @@ def test_a_bad_record_is_rejected_with_every_item_and_no_line_to_paste(tmp_path)
     assert code == 2
     assert 'result: rejected (nothing to paste)' in out
     assert 'paste:' not in out and '[FAIL]' in out and '] condition:' in out
+
+
+def test_the_expected_offset_of_the_records_is_shown_and_the_fit_does_not_use_it(tmp_path):
+    plain = tmp_path / 'plain'
+    guided = tmp_path / 'guided'
+    plain.mkdir()
+    guided.mkdir()
+    csv_a, yaml_a = make_csv(plain, (0.5, 0.0, -2.0))
+    csv_b, yaml_b = make_csv(guided, (0.5, 0.0, -2.0), expected={'elbow_flex': -3.0})
+    code_a, out_a, _ = run(csv_a, yaml_a)
+    code_b, out_b, _ = run(csv_b, yaml_b)
+    assert 'expected offset of the record display: none' in out_a
+    assert 'expected offset of the record display: elbow_flex=-3' in out_b
+    assert 'fit does not use it' in out_b
+    keep = [line for line in out_b.splitlines() if not line.startswith('expected offset')]
+    assert code_a == code_b and keep == [
+        line for line in out_a.splitlines() if not line.startswith('expected offset')]
 
 
 def test_an_excluded_record_is_not_used(tmp_path):
@@ -225,6 +244,11 @@ def test_there_is_no_argument_and_no_call_that_writes_a_yaml_or_a_file():
         names |= {node.attr} if isinstance(node, ast.Attribute) else set()
     assert names & FORBIDDEN_NAMES == set()
     assert calls('open') == []
+
+
+def test_the_expected_offset_is_not_an_argument_of_the_evaluation():
+    evaluations = calls('evaluate')
+    assert len(evaluations) == 1 and 'expected' not in ast.unparse(evaluations[0])
 
 
 def test_the_first_thing_main_does_is_to_print_the_banner_and_no_line_is_too_long():
