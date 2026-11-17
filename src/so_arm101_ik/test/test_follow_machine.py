@@ -878,3 +878,82 @@ def test_c1_is_judged_only_while_running():
     out = rig.tick(p=P_IN0 + [0.0, 0.07, 0.0])
     assert out.state == fm.HOLD_JUMP
     assert rig.tick(p=P_IN0 + [0.0, 0.2, 0.0]).state == fm.HOLD_JUMP
+
+
+# ---------------------------------- the resume compares with the last accepted solution
+
+def test_after_a_60_mm_jump_the_resume_is_not_judged_against_the_jumped_message():
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0])
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.065, 0.0])  # 60 mm: HOLD_JUMP
+    assert out.state == fm.HOLD_JUMP and out.point is None
+    # the hand comes back: the solution is next to the last accepted one, so the compared value
+    # is small (not the large step of the jumped message)
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.006, 0.0])
+    assert out.state == fm.TRACKING and out.point is not None, (out.reason, out.detail)
+    assert out.detail['ik_jump'] < 0.05
+    # and the follow goes on: the next message is compared with the accepted one
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.007, 0.0])
+    assert out.state == fm.TRACKING and out.detail['ik_jump'] < 0.05
+
+
+def test_during_a_hold_the_solution_is_solved_from_the_last_accepted_one(monkeypatch):
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0])
+    accepted = rig.f._q_ik.copy()
+    original = fc.solve_target
+    starts = []
+
+    def recording(p, r, q_prev, config):
+        starts.append(np.asarray(q_prev, dtype=float).copy())
+        return original(p, r, q_prev, config)
+
+    monkeypatch.setattr(fm.fc, 'solve_target', recording)
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.065, 0.0]).state == fm.HOLD_JUMP
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.12, 0.0]).state == fm.HOLD_JUMP  # still away
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.006, 0.0]).state == fm.TRACKING
+    assert len(starts) >= 3
+    for start in starts[-3:]:  # the hold ticks and the resume tick start from the accepted one
+        assert np.allclose(start, accepted, atol=1e-9)
+
+
+def test_a_hold_does_not_move_the_solution_to_compare_with():
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0])
+    accepted = rig.f._q_ik.copy()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.065, 0.0])  # HOLD_JUMP
+    assert np.allclose(rig.f._q_ik, accepted)
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.09, 0.0])  # still held and away
+    assert np.allclose(rig.f._q_ik, accepted)
+
+
+def test_a_real_change_of_the_branch_after_a_jump_still_hits_c1_at_the_resume(monkeypatch):
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0])
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.065, 0.0]).state == fm.HOLD_JUMP
+    original = fc.solve_target
+
+    def other_branch(p, r, q_prev, config):
+        q = original(p, r, q_prev, config).copy()
+        q[2] = -q[2]
+        return q
+
+    monkeypatch.setattr(fm.fc, 'solve_target', other_branch)
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.006, 0.0])  # near, but the other branch
+    assert out.state == fm.HOLD_RANGE and out.reason == 'IK_JUMP' and out.point is None
+    monkeypatch.undo()
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.006, 0.0])  # the same hand, the right branch
+    assert out.state == fm.TRACKING and out.point is not None
+
+
+def test_after_stale_the_resume_is_compared_with_the_accepted_solution():
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0])
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.005, 0.0], pose_age=1.0).state == fm.STALE
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.006, 0.0], pose_age=0.0)
+    assert out.state == fm.TRACKING and out.detail['ik_jump'] < 0.05

@@ -294,9 +294,15 @@ class Follower:
         # whose target is 50 mm / 30 deg or more from the target of the message before it, or
         # whose IK solution is ik_jump rad or more from the solution of the message before it
         # (C1: a real change of the branch). The analytic IK is cheap, so every message is solved.
+        #
+        # While the follow is not running (a HOLD or STALE), the solutions are compared with the
+        # last ACCEPTED solution (self._q_ik) and solved from it; the solution of a message that
+        # was not accepted (a jumped one) never becomes the thing to compare with. The check of
+        # the resume below judges the solution of the last message against the accepted one.
         jumped = None
         ik_jumped = None
         ik_largest = 0.0
+        q_last = None  # the solution of the last message of this tick (None: not solved)
         first_solved = max(0, len(messages) - MAX_SOLVES_PER_TICK)
         for index, (p_in, r_in) in enumerate(messages):
             msg_p, msg_r = fc.relative_target(self._p_ref, self._r_ref, self._p_in0, self._r_in0,
@@ -309,19 +315,24 @@ class Follower:
             if cfg.ik_jump <= 0.0:
                 continue
             if index < first_solved:
-                self._prev_msg_q = None  # too many messages: the chain of solutions starts again
+                if running:
+                    self._prev_msg_q = None  # too many: the chain of solutions starts again
                 continue
-            start = self._q_ik if self._prev_msg_q is None else self._prev_msg_q
+            # running: the chain of the messages. Not running: always the last accepted solution
+            before = self._prev_msg_q if running else self._q_ik
+            start = self._q_ik if before is None else before
             try:
                 q_msg = fc.solve_target(msg_p, msg_r, start, cfg)
             except fc.TargetError:
                 q_msg = None  # the range is judged below, for the target of the tick
-            if q_msg is not None and self._prev_msg_q is not None:
-                jump = float(np.max(np.abs(q_msg - self._prev_msg_q)))
+            if q_msg is not None and before is not None:
+                jump = float(np.max(np.abs(q_msg - before)))
                 ik_largest = max(ik_largest, jump)
                 if running and ik_jumped is None and jump >= cfg.ik_jump:
                     ik_jumped = (jump, index)
-            self._prev_msg_q = q_msg
+            q_last = q_msg
+            if running:
+                self._prev_msg_q = q_msg
         cand_p, cand_r = self._prev_msg
         distance, angle = fc.target_difference(self._acc_p, self._acc_r, cand_p, cand_r)
         detail = {'dist_mm': distance * 1000.0, 'angle_deg': float(np.degrees(angle)),
@@ -344,8 +355,8 @@ class Follower:
         detail['track_err'] = error
         if was != HOLD_LAG and cfg.max_tracking_error > 0.0 and error > cfg.max_tracking_error:
             return self._hold(BLOCKED, 'TRACKING_ERROR %.3f rad' % error, detail)
-        if cfg.ik_jump > 0.0 and self._prev_msg_q is not None:
-            q_ik = self._prev_msg_q.copy()  # the solution of the last message
+        if cfg.ik_jump > 0.0 and q_last is not None:
+            q_ik = q_last.copy()  # the solution of the last message
         else:
             try:
                 q_ik = fc.solve_target(cand_p, cand_r, self._q_ik, cfg)
@@ -370,6 +381,8 @@ class Follower:
             return self._hold(HOLD_RANGE, 'FLOOR', detail)
         self._acc_p, self._acc_r = cand_p, cand_r
         self._q_ik = q_ik
+        if cfg.ik_jump > 0.0:
+            self._prev_msg_q = q_ik.copy()  # accepted: the chain goes on from this solution
         self._q_cmd = q_next
         self._set(TRACKING, 'SPEED_LIMITED' if limited else 'OK')
         target_r = fc.tip_rotation(q_ik)
