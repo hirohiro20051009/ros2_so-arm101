@@ -21,7 +21,8 @@ if(BUILD_TESTING)
           test_model_check test_moveit_fixture test_ik_model_check_static
           test_diff_mode test_diff_mode_safety
           test_step_runner test_step_loop test_diff_mode_run_static
-          test_ik_move test_ik_move_loop test_ik_move_run_static)
+          test_ik_move test_ik_move_loop test_ik_move_run_static
+          test_follow_calc test_follow_machine)
     ament_add_pytest_test(${test_name} test/${test_name}.py
                           ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   endforeach()

@@ -3487,3 +3487,11 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - **停止**: 端末 2（カメラ）、端末 1（腕）とも exit=0、ps と `ros2 node list --no-daemon` は空（ユーザーの報告）。`camera_launch.log` の終わりは、realsense・apriltag・static_transform_publisher がすべて `process has finished cleanly`。
 - **腕側の ERROR（`arm_launch.log` 2 件。既知）**: octomap の `No 3D sensor plugin(s) defined`（74 行目）と、終了時の move_group の exit code -11（313 行目）。どちらも前に記録した既知の挙動（上の inventory の C4 などの節）で、カメラの TF とは無関係。
 - **結論**: yaml → install → `camera.launch.py` → TF の木の経路は、値が一致し二重もなく通った。タグ（`tag36h11_0`）の位置の FK との比較は C4-a で行う。値は暫定のまま（C4 で決着）。
+
+## P6a: VR 追従の計算部分と状態機械（2026-11-17。ROS なし）
+
+- 計画: `docs/p6_plan.md`（承認済み。ドライバの step limit の訂正、倍率後の空間での判定、C1〜C4、c0 の合格条件を含む）。
+- 追加: `src/so_arm101_ik/so_arm101_ik/follow_calc.py`、`follow_machine.py`、試験 `test_follow_calc.py`（88 件）、`test_follow_machine.py`（65 件）。`CMakeLists.txt` は試験 2 本の登録だけ。
+- 回転行列と (pitch, roll) の対応（`tip_rotation`）は URDF の origin から手で導き、URDF の鎖（UrdfChain）と 1e-9 で一致した。
+- so_arm101_ik の colcon test: 364 → 527 件、失敗 0。他のパッケージはコードを変えていないので省略。
+- 戻し方: この段のコミットの直前（HEAD 30a6a7a）から取り出せる。
