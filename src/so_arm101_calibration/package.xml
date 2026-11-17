@@ -3,17 +3,27 @@
 <package format="3">
   <name>so_arm101_calibration</name>
   <version>0.2.0</version>
-  <description>SO-ARM101 servo calibration tools (EEPROM backup / restore / measure / apply). Run by the user with ros2_control stopped.</description>
+  <description>SO-ARM101 calibration tools. The center calibration (EEPROM backup / restore / measure / apply, run by the user with ros2_control stopped) and the zero-offset calibration (record the touch poses and fit zero_offset_deg; read-only, display only).</description>
   <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>so_arm101_hardware</depend>
   <depend>ament_index_cpp</depend>
   <depend>yaml-cpp</depend>
 
+  <exec_depend>so_arm101_ik</exec_depend>
+  <exec_depend>so_arm101_description</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
   <test_depend>ament_cmake_gtest</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_cmake_flake8</test_depend>
+  <test_depend>ament_cmake_pep257</test_depend>
+  <test_depend>ament_index_python</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
