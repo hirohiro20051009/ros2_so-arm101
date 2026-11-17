@@ -65,6 +65,10 @@ if(BUILD_TESTING)
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   ament_add_pytest_test(test_zero_offset_static test/test_zero_offset_static.py
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
+  ament_add_pytest_test(test_zero_offset_record test/test_zero_offset_record.py
+                        ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
+  ament_add_pytest_test(test_zero_offset_record_static test/test_zero_offset_record_static.py
+                        ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
 endif()
 
 ament_package()
