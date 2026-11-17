@@ -139,9 +139,9 @@ python3 tools/diff_mode_run.py --route direct --max-steps 4 --offset -0.008 0 0 
 
 ## V8. 出発点へ戻す（W6 の手順。ユーザーが実行）
 
-`docs/servo_real_check.md` の W6: 動きが止まっているのを確認 → 実測を読む → 戻し先は V2b で控えた出発点の実測 → OMPL（Scaling 0.1）で戻す（**elbow_flex は +1.69009 を超える値には戻さない**。実行の開始位置と実測の差が 0.01 rad 以内）。戻したら S5（腕を折りたたみ姿勢で支えて Ctrl-C 1 回）、bag を止める。
+`docs/servo_real_check.md` の W6: 動きが止まっているのを確認 → 実測を読む → 戻し先は V2b で控えた出発点の実測 → OMPL（Scaling 0.1）で戻す（**elbow_flex は +91°（+1.588 rad）を超える値には戻さない**。補正後の真の上限は +92.2° = +1.6093 rad で、+1.69009 は補正前の座標の値。実行の開始位置と実測の差が 0.01 rad 以内）。戻したら S5（腕を折りたたみ姿勢で支えて Ctrl-C 1 回）、bag を止める。
 
-2026-11-15 の実績: RViz の Joints タブで目標（pan −4、lift −85、elbow +96、wrist_flex +25、roll −3 度）を入れて戻した（`send_joint_delta.py` は使っていない）。出発点（`V2a_start_pose.txt`）との差は最大 0.0184 rad（pan）。MoveIt の終点は、RViz の目標から最大 0.0082 rad ずれた（V2b でも同じ。原因は未確認。7.16.4 の 3）。
+2026-11-15 の実績（**補正前の座標。F6 の補正の後は使わない。補正後の戻し先は、起動直後の読みを四捨五入した整数の度で、elbow は約 +90°。`zero_offset_apply_real_check.md` の段 e**）: RViz の Joints タブで目標（pan −4、lift −85、elbow +96、wrist_flex +25、roll −3 度）を入れて戻した（`send_joint_delta.py` は使っていない）。出発点（`V2a_start_pose.txt`）との差は最大 0.0184 rad（pan）。MoveIt の終点は、RViz の目標から最大 0.0082 rad ずれた（V2b でも同じ。原因は未確認。7.16.4 の 3）。
 
 合格: 出発点の実測との差が小さい（W6 の基準）／停止後の確認の 2 行（`torque OFF and Lock=1 confirmed`・`deactivated`）／`ps` と `ros2 node list --no-daemon` が空。
 

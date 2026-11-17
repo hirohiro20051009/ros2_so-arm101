@@ -199,10 +199,10 @@ python3 -u tools/ik_move_run.py --joints-deg 0 -22 30 83 0 \
 
 ## 最後: RViz で出発点へ戻す（V8）
 
-**出発点は床の下（先端 z ≈ 0.033 m）なので、この道具では戻せない**（`START_FLOOR_MEASURED` ではなく、目標の `GOAL_FLOOR` で拒否される）。`diff_mode_real_check.md` の V8（`:140-146`）と同じに、RViz で戻す。2026-11-15 の V8 の実績の目標: **shoulder_pan −4、shoulder_lift −85、elbow_flex +96、wrist_flex +25、wrist_roll −3 度**（出発点との差は最大 0.0184 rad だった）。
+**出発点は床の下（先端 z ≈ 0.033 m）なので、この道具では戻せない**（`START_FLOOR_MEASURED` ではなく、目標の `GOAL_FLOOR` で拒否される）。`diff_mode_real_check.md` の V8（`:140-146`）と同じに、RViz で戻す。2026-11-15 の V8 の実績の目標: **shoulder_pan −4、shoulder_lift −85、elbow_flex +96、wrist_flex +25、wrist_roll −3 度**（出発点との差は最大 0.0184 rad だった）。**これは補正前の座標の実績で、F6 の補正（elbow_flex の `zero_offset_deg = -6.3`）の後は使わない**（elbow +96° は補正後の真の上限 +92.2° を超える。`docs/f6_plan.md`）。**補正後の戻し先は、起動直後（`zero_offset_apply_real_check.md` の段 a）の読みを四捨五入した整数の度**（elbow_flex は約 +90°）。
 
 1. コマンド A で `STOPPED`。実測を読む。
-2. RViz の MotionPlanning: OMPL、Scaling 0.1。Planning タブで **Start State と Goal State を `<current>` に選び直してから**、Joints タブで上の整数の度に設定。Plan → アニメーションを見る（先端が床に近づきすぎない）→ Execute。**elbow_flex は +1.69009 rad を超える値には戻さない**（`servo_real_check.md:341`）。実行の開始位置と実測の差が 0.01 rad 以内であること（`allowed_start_tolerance` 0.01。超えると実行が拒否される。拒否されたら、実測を読み直して計画し直す）。
+2. RViz の MotionPlanning: OMPL、Scaling 0.1。Planning タブで **Start State と Goal State を `<current>` に選び直してから**、Joints タブで上の整数の度に設定。Plan → アニメーションを見る（先端が床に近づきすぎない）→ Execute。**elbow_flex は +91°（+1.588 rad）を超える値には戻さない**（補正後の真の上限は +92.2° = +1.6093 rad。+1.69009 rad は補正前の座標の値で、`servo_real_check.md:341` も補正前の記述）。実行の開始位置と実測の差が 0.01 rad 以内であること（`allowed_start_tolerance` 0.01。超えると実行が拒否される。拒否されたら、実測を読み直して計画し直す）。
 3. 腕を折りたたみ姿勢で支え、**launch の端末で Ctrl-C を 1 回**（S5）。bag の端末でも Ctrl-C。
 4. 停止後の確認: `[deactivate] torque OFF and Lock=1 confirmed …` と `deactivated.` の 2 行、`exit=0`。`ps` と `ros2 node list --no-daemon` が空。
 

@@ -469,7 +469,7 @@ python3 -u tools/ik_move_run.py --joints-deg 0 -22 30 83 0 \
 
 1. コマンド A で `STOPPED`。
 2. RViz の Planning タブで、**Start State と Goal State を `<current>` に選び直す**（ik_move_run で動かしたので、RViz の表示の状態は古い）。
-3. Joints タブで、**`C2_start_pose.txt` の実測に近い整数の度**に設定する（rad から度に直して四捨五入）。2026-11-15 の V8 の目標（pan −4、lift −85、elbow +96、wrist_flex +25、roll −3 度）は参考で、今日の起動直後の実測が違えば、今日の実測を使う。**elbow_flex は +1.69009 rad を超える値にしない。**
+3. Joints タブで、**`C2_start_pose.txt` の実測に近い整数の度**に設定する（rad から度に直して四捨五入）。2026-11-15 の V8 の目標（pan −4、lift −85、elbow +96、wrist_flex +25、roll −3 度）は補正前の座標の参考で、**F6 の補正の後は使わない**（elbow +96° は補正後の真の上限 +92.2° を超える）。今日の起動直後の実測を使う。**elbow_flex は +91°（+1.588 rad）を超える値にしない**（補正後の真の上限は +92.2° = +1.6093 rad。+1.69009 は補正前の座標の値）。
 4. Plan → アニメーションを見る（先端が床に近づきすぎない）→ Execute。実行の開始位置と実測の差が 0.01 rad 以内であること（超えると実行が拒否される。拒否されたら、実測を読み直して計画し直す）。
 
 ## W5. 停止と後始末

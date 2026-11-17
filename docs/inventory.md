@@ -3334,4 +3334,13 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
   - 1 回目 `lowest_point_f6.py`（sha256 `94a0bd38…`、ログ `647ca931…`）: **R1 の補正後の一番低い点 31.28 mm**（予測 31.3 mm。差 −0.02 mm。補正前 4.77 mm）。R1 の感度 −4.33 mm/°。T の一番低い点: 補正後 **53.28 mm**（動くあご。固定あごの先端の点は 54.9 mm）、補正前 69.23 mm。T の感度 −2.49 mm/°。
   - 2 回目 `t_fk_f6.py`（sha256 `d142a052…`、ログ `3ed1c299…`）: T の先端 gripper_frame_link は補正後 (176.66, −0.01, 58.77) mm、補正前 (194.86, −0.01, 73.38) mm。**差（後 − 前）dx −18.20、dz −14.61 mm（大きさ 23.3 mm）。補正後は約 18.2 mm 手前、約 14.6 mm 低い**。感度 dx −3.01、dz −2.16 mm/°。
   - 全桁の sha256: `94a0bd38824fa00b3d03d483c8eee2cad671b28845fa033253e05bad2b8779ae lowest_point_f6.py`、`647ca931dac5070925ab6065f784060ed90d149e7a02e16244074d02baa94f5d lowest_point_f6.log`、`d142a052f7e6fa90cf4ab768c5bbbe87d1066c38b5837098012891d30e9d776a t_fk_f6.py`、`3ed1c29957c6cf4caa65bdee25ad63392bd09686f24ecacdfb7fc3f29e910e7f t_fk_f6.log`。
-- 項目 6（T の許容と中止の値）の案は `docs/f6_plan.md` の段 c（±4 mm、差 6 mm 超または 45 mm 未満で中止）。**決定はユーザーの確認のあと**。
+- 項目 6（T の許容と中止の値）は**決定**（ユーザー、2026-11-17）: 予測 53.3 mm、許容 ±4 mm、差 6 mm 超または 45 mm 未満で中止。**差が 4〜6 mm のときは、lift の −2° 前後（未決着）の可能性があるため、elbow の不合格とは決めず、値を記録して報告する。**
+- スクラッチの確認（F6a の後。守りを外す確認のコピー）: hardware の試験を全部実行して、落ちたのは `DesignLimits.StepLimitCoversTheWorstCaseTrajectoryStep` だけ。原因は、試験が `../so_arm101_moveit_config` と `../so_arm101_bringup` を相対パスで読む（`CMakeLists.txt:74-75`）のにスクラッチのコピーに無かったため（環境の差）。両方を足すと 49 件すべて通った。calibration の `ProductionYaml.MatchesTheEepromReadAfterC3` は、スクラッチは hardware だけをビルドしたので対象外。
+
+### F6b（2026-11-17。docs だけ。colcon test は省略。実機・launch・ビルド・Python は使っていない）
+
+- 戻し方: F6b の直前のコミット `76d5654`（F6a）から取り出せる。
+- 新規: `docs/zero_offset_apply_real_check.md`（段 a〜f。各段の予測値と止める条件。冒頭に「F6a のコミット以降は次の launch から補正が効く（install の yaml は src への symlink）」）。
+- 更新（補正前の座標の記述に注記し、戻し先の elbow を +91° 以下に）: `large_move_real_check.md` の最後の段（`:202`・`:205`）、`diff_mode_real_check.md`（`:142`・`:144`）、`camera_c2_real_check.md`（`:472`）。古い手順書（`servo_real_check.md:341`、`feetech_write_check.md`、`analytic_diff_plan.md:1223`）は当時の記録として変えない（`large_move_real_check.md` の注記で補正前の記述と明記）。
+- 注記（元の記述は残す）: `joint_offset_plan.md`（末尾。7.2・7.4・8.4・9.1 の項目 3・10 章）、`zero_offset_calib_plan.md`（末尾。6.1〜6.3・7.4 の F6 の行・7.5 の 6）。
+- 手順書の決定の反映: 項目 6 の決定（4〜6 mm は記録して報告）、T の gripper の値の確認（計算は 0.02811。T へは arm グループだけを送り、gripper は保持なので同じはず。`c_T_pose.txt` の gripper が 0.02811 ± 0.005。違えば報告。Python は実行しない）、wrist_roll の止める条件、elbow の読みの上端 92.20°、RViz で elbow を +91° より上にしない。

@@ -585,4 +585,12 @@ ament_add_pytest_test(test_zero_offset_fit_tool test/test_zero_offset_fit_tool.p
 | 2. F2 の `CMakeLists.txt`・`package.xml` の変更（5.1 の具体） | 承認する | camera・ik と同じ形 |
 | 3. lint: `ament_flake8()` と `ament_pep257()` だけを明示で足す（`ament_lint_auto` は使わない） | 足す（+9 件） | camera・ik と同じ水準を保てる。足さなければ CMake・package.xml の行が 4 行減り、件数は 9 減る |
 | 4. F1b の C++ の変更（`apply.cpp` のコメント 2 行と gtest 2 件） | 承認する | 決定済み。yaml の中身は変えない |
+
+### 注記（2026-11-17、F6b。上の記述は残す。F6 の計画は `docs/f6_plan.md`、実機の手順書は `docs/zero_offset_apply_real_check.md`）
+
+- **6.1・6.3（「この道具で測った値を yaml に入れる」）**: 床当て（2026-11-17 の 2 回）は不合格で、さらに wrist_roll のねじが緩んだ状態のデータだったため使わない（保留）。J5（F6）は、この道具の結果でなく、**暫定の elbow_flex = −6.3°（カメラ −6.31 ± 0.38 と R1 の物差し）を yaml に入れる**ことに変わった。lift・wrist_flex は書かない（未測定）。F6a（コミット `76d5654`）で入れた。
+- **6.2（当てはめ後の確認の実行。閉ループ）**: 床当てが前提なので行わない。代わりに、物差し（出発点 31.3 mm、T 53.3 mm）が確認の役目で、決着は C4（机の ID 1）。
+- **7.4 の F6 の行・7.5 の 6（反映）**: F6 = F6a（yaml・試験 1 件）＋F6b（手順書）。実機は `zero_offset_apply_real_check.md` の段 a〜f。7.5 の 6 の「確認の実行（6.2）→ R0〜R3」は、この手順書に置き換わった。
+- 材料（`~/so_arm101_check/zero_offset_20261117/`）と道具（`zero_offset_record_run.py`・`zero_offset_fit_run.py`）は残す（読むだけ）。
+
 | 5. 守りを外す確認をスクラッチで行うときの C++ のビルド（F1b の 19・20） | 承認する（別の build・install。ユーザーが実機を使っていない間に実行） | ユーザーが実機を使っている間は、ビルドとモックを実行しない |
