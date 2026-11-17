@@ -768,3 +768,113 @@ def test_the_default_rate_and_point_time():
     f = fm.Follower()
     assert f.config.rate_hz == 10.0 and f.config.point_time_s == 0.08
     assert f.config.period == pytest.approx(0.1)
+
+
+# ------------------------------------------------------- C1 (IK_JUMP), per message
+
+def _messages_y(count, total):
+    """Return count pose messages that move the hand by total in y in equal steps."""
+    return [(P_IN0 + [0.0, total * (i + 1) / count, 0.0], np.eye(3)) for i in range(count)]
+
+
+def test_a_fast_hand_would_hit_c1_per_tick_but_not_per_message():
+    # 150 mm in one tick (1.5 m/s at 10 Hz) in 15 messages of 10 mm
+    config = fc.FollowConfig(floor_z=0.045)
+    p_ref = ik.fk(Q0)[0]
+    q_first = fc.solve_target(p_ref, fc.tip_rotation(Q0), Q0, config)
+    q_last = fc.solve_target(p_ref + [0.0, 0.15, 0.0], fc.tip_rotation(Q0), Q0, config)
+    per_tick = float(np.max(np.abs(q_last - q_first)))
+    assert per_tick >= 0.35  # the check once per tick would stop this hand
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    msgs = _messages_y(15, 0.15)
+    out = rig.tick(dt=0.1, p=msgs[-1][0], msgs=msgs)
+    assert out.state == fm.TRACKING, (out.reason, out.detail)
+    assert out.detail['ik_jump'] < 0.1  # the largest step between two messages
+
+
+def test_the_same_move_in_one_message_hits_c1():
+    rig = Rig(ik_jump=0.35, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.049, 0.0])  # 49 mm: not a pose jump
+    assert out.state == fm.TRACKING
+    # a larger solution step with a small move: a tiny jump limit stands for the 0.35 rad
+    rig = Rig(ik_jump=0.01, rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    out = rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.049, 0.0])
+    assert out.state == fm.HOLD_RANGE and out.reason == 'IK_JUMP' and out.point is None
+
+
+def test_a_real_change_of_the_branch_between_two_messages_hits_c1(monkeypatch):
+    rig = Rig(ik_jump=0.35, max_lag=0.0)
+    rig.start()
+    original = fc.solve_target
+    calls = []
+
+    def flipping(p, r, q_prev, config):
+        calls.append(1)
+        q = original(p, r, q_prev, config)
+        if len(calls) == 2:  # the second message of the tick: the other elbow
+            q = q.copy()
+            q[2] = -q[2]
+        return q
+
+    monkeypatch.setattr(fm.fc, 'solve_target', flipping)
+    msgs = _messages_y(3, 0.006)
+    out = rig.tick(p=msgs[-1][0], msgs=msgs)
+    assert out.state == fm.HOLD_RANGE and out.reason == 'IK_JUMP' and out.point is None
+    assert 'message 2 of 3' in out.detail['message']
+    monkeypatch.undo()
+    out = rig.tick(p=P_IN0 + [0.0, 0.007, 0.0])  # the hand is near the accepted target: resume
+    assert out.state == fm.TRACKING and out.point is not None
+
+
+def test_a_resume_with_another_branch_is_refused(monkeypatch):
+    rig = Rig(ik_jump=0.35, max_lag=0.0)
+    rig.start()
+    rig.tick(p=P_IN0 + [0.0, 0.01, 0.0])
+    rig.tick(p=P_IN0 + [0.0, 0.07, 0.0])  # a pose jump: HOLD_JUMP
+    original = fc.solve_target
+
+    def other_branch(p, r, q_prev, config):
+        q = original(p, r, q_prev, config).copy()
+        q[2] = -q[2]
+        return q
+
+    monkeypatch.setattr(fm.fc, 'solve_target', other_branch)
+    out = rig.tick(p=P_IN0 + [0.0, 0.012, 0.0])  # near the stopped target, but another solution
+    assert out.state == fm.HOLD_RANGE and out.reason == 'IK_JUMP'
+
+
+def test_an_unsolvable_message_in_the_middle_is_not_a_c1_jump():
+    z = ik.fk(Q0)[0][2]
+    rig = Rig(ik_jump=0.35, floor_z=z - 0.01, max_lag=0.0)
+    rig.start()
+    msgs = [(P_IN0 + [0.0, 0.002, 0.0], np.eye(3)), (P_IN0 + [0.0, 0.003, -0.02], np.eye(3)),
+            (P_IN0 + [0.0, 0.004, 0.0], np.eye(3))]  # the middle one is under the floor
+    out = rig.tick(p=msgs[-1][0], msgs=msgs)
+    assert out.state == fm.TRACKING, (out.reason, out.detail)
+
+
+def test_many_messages_in_one_tick_are_handled():
+    rig = Rig(ik_jump=0.35, max_lag=0.0)
+    rig.start()
+    msgs = [(P_IN0 + [0.0, 0.0001 * (i + 1), 0.0], np.eye(3)) for i in range(250)]
+    out = rig.tick(p=msgs[-1][0], msgs=msgs)
+    assert out.state == fm.TRACKING and out.detail['messages'] == 250
+
+
+def test_c1_can_be_disabled_and_is_not_computed_then():
+    rig = Rig(ik_jump=0.0, max_lag=0.0)
+    rig.start()
+    out = rig.tick(p=P_IN0 + [0.0, 0.049, 0.0])
+    assert out.state == fm.TRACKING and 'ik_jump' not in out.detail
+
+
+def test_c1_is_judged_only_while_running():
+    # a message in HOLD_JUMP is not a C1 stop (the pose jump already stopped the follow)
+    rig = Rig(ik_jump=0.01, max_lag=0.0)
+    rig.start()
+    out = rig.tick(p=P_IN0 + [0.0, 0.07, 0.0])
+    assert out.state == fm.HOLD_JUMP
+    assert rig.tick(p=P_IN0 + [0.0, 0.2, 0.0]).state == fm.HOLD_JUMP

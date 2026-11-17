@@ -32,7 +32,8 @@ States (Output.state) and their reasons:
              sent). Resumes when the target is back within 20 mm and 10 deg of the last accepted
              target.
   HOLD_RANGE the target cannot be made: UNREACHABLE, JOINT_RANGE, ELBOW_LIMIT, FLOOR, ORIENT,
-             IK_JUMP. Resumes like HOLD_JUMP.
+             IK_JUMP (C1: the IK solution of a pose message is ik_jump rad or more from the
+             solution of the message before it, judged for every message). Resumes like HOLD_JUMP.
   HOLD_LAG   the target is too far ahead of the commanded tip (C2). The accepted target follows
              the hand; resumes when the lag is back under half of the limit.
   STALE      the pose or the joint states are older than stale_s. Resumes like HOLD_JUMP.
@@ -52,6 +53,8 @@ import numpy as np
 
 from . import analytic_ik as ik
 from . import follow_calc as fc
+
+MAX_SOLVES_PER_TICK = 100  # pose messages of one tick whose IK solution is compared (C1)
 
 IDLE = 'IDLE'
 TRACKING = 'TRACKING'
@@ -129,6 +132,7 @@ class Follower:
         self._p_ref = self._r_ref = self._p_in0 = self._r_in0 = None
         self._acc_p = self._acc_r = None
         self._prev_msg = None  # the target of the previous pose message
+        self._prev_msg_q = None  # the IK solution of that target (None: not known)
         self._q_cmd = self._q_ik = None
 
     @property
@@ -253,6 +257,7 @@ class Follower:
         self._r_in0 = np.asarray(inp.pose[1], dtype=float)
         self._acc_p, self._acc_r = self._p_ref.copy(), self._r_ref.copy()
         self._prev_msg = (self._p_ref.copy(), self._r_ref.copy())
+        self._prev_msg_q = q_desired.copy()
         self._q_cmd = q_desired.copy()
         self._q_ik = q_desired.copy()
         self._rebase = False
@@ -280,29 +285,58 @@ class Follower:
             self._p_ref, self._r_ref = self._acc_p.copy(), self._acc_r.copy()
             self._p_in0, self._r_in0 = p_in.copy(), r_in.copy()
             self._prev_msg = (self._acc_p.copy(), self._acc_r.copy())
+            self._prev_msg_q = self._q_ik.copy()
             self._rebase = False
             messages = messages[-1:]
         was = self.state
-        # The jump is judged for every message of the input (not once per tick): a message
-        # whose target is 50 mm / 30 deg or more from the target of the message before it.
+        running = was in (TRACKING, HOLD_LAG)
+        # The jumps are judged for every message of the input (not once per tick): a message
+        # whose target is 50 mm / 30 deg or more from the target of the message before it, or
+        # whose IK solution is ik_jump rad or more from the solution of the message before it
+        # (C1: a real change of the branch). The analytic IK is cheap, so every message is solved.
         jumped = None
-        for p_in, r_in in messages:
+        ik_jumped = None
+        ik_largest = 0.0
+        first_solved = max(0, len(messages) - MAX_SOLVES_PER_TICK)
+        for index, (p_in, r_in) in enumerate(messages):
             msg_p, msg_r = fc.relative_target(self._p_ref, self._r_ref, self._p_in0, self._r_in0,
                                               p_in, r_in, cfg.scale, cfg.r_fix)
-            if was in (TRACKING, HOLD_LAG) and jumped is None:
+            if running and jumped is None:
                 d, a = fc.target_difference(self._prev_msg[0], self._prev_msg[1], msg_p, msg_r)
                 if fc.is_jump(d, a, cfg):
                     jumped = (d, a)
             self._prev_msg = (msg_p, msg_r)
+            if cfg.ik_jump <= 0.0:
+                continue
+            if index < first_solved:
+                self._prev_msg_q = None  # too many messages: the chain of solutions starts again
+                continue
+            start = self._q_ik if self._prev_msg_q is None else self._prev_msg_q
+            try:
+                q_msg = fc.solve_target(msg_p, msg_r, start, cfg)
+            except fc.TargetError:
+                q_msg = None  # the range is judged below, for the target of the tick
+            if q_msg is not None and self._prev_msg_q is not None:
+                jump = float(np.max(np.abs(q_msg - self._prev_msg_q)))
+                ik_largest = max(ik_largest, jump)
+                if running and ik_jumped is None and jump >= cfg.ik_jump:
+                    ik_jumped = (jump, index)
+            self._prev_msg_q = q_msg
         cand_p, cand_r = self._prev_msg
         distance, angle = fc.target_difference(self._acc_p, self._acc_r, cand_p, cand_r)
         detail = {'dist_mm': distance * 1000.0, 'angle_deg': float(np.degrees(angle)),
                   'scale': cfg.scale, 'messages': len(messages)}
+        if cfg.ik_jump > 0.0:
+            detail['ik_jump'] = ik_largest
         if jumped is not None:
             detail['jump_mm'] = jumped[0] * 1000.0
             detail['jump_deg'] = float(np.degrees(jumped[1]))
             return self._hold(HOLD_JUMP, 'TARGET_JUMP', detail)
-        if was not in (TRACKING, HOLD_LAG) and not fc.is_near(distance, angle, cfg):
+        if ik_jumped is not None:
+            detail['message'] = ('the IK solution moved %.3f rad between two messages (message %d '
+                                 'of %d)' % (ik_jumped[0], ik_jumped[1] + 1, len(messages)))
+            return self._hold(HOLD_RANGE, 'IK_JUMP', detail)
+        if not running and not fc.is_near(distance, angle, cfg):
             # keep waiting for the hand to return
             return self._hold(was, 'WAIT_RETURN' if was == STALE else self.reason, detail)
         q_cmd = self._q_cmd
@@ -310,16 +344,20 @@ class Follower:
         detail['track_err'] = error
         if was != HOLD_LAG and cfg.max_tracking_error > 0.0 and error > cfg.max_tracking_error:
             return self._hold(BLOCKED, 'TRACKING_ERROR %.3f rad' % error, detail)
-        try:
-            q_ik = fc.solve_target(cand_p, cand_r, self._q_ik, cfg)
-        except fc.TargetError as target_error:
-            detail['message'] = str(target_error)
-            return self._hold(HOLD_RANGE, target_error.reason, detail)
-        jump = float(np.max(np.abs(q_ik - self._q_ik)))
-        detail['ik_jump'] = jump
-        if cfg.ik_jump > 0.0 and jump > cfg.ik_jump:
-            detail['message'] = 'the solution moved %.3f rad in one tick' % jump
-            return self._hold(HOLD_RANGE, 'IK_JUMP', detail)
+        if cfg.ik_jump > 0.0 and self._prev_msg_q is not None:
+            q_ik = self._prev_msg_q.copy()  # the solution of the last message
+        else:
+            try:
+                q_ik = fc.solve_target(cand_p, cand_r, self._q_ik, cfg)
+            except fc.TargetError as target_error:
+                detail['message'] = str(target_error)
+                return self._hold(HOLD_RANGE, target_error.reason, detail)
+        if not running and cfg.ik_jump > 0.0:
+            # a resume: the solution must be near the last accepted one (not another branch)
+            jump = float(np.max(np.abs(q_ik - self._q_ik)))
+            if jump >= cfg.ik_jump:
+                detail['message'] = 'the solution is %.3f rad from the last accepted one' % jump
+                return self._hold(HOLD_RANGE, 'IK_JUMP', detail)
         lag = float(np.linalg.norm(cand_p - fc.tip_position(q_cmd)))
         detail['lag_mm'] = lag * 1000.0
         limit = cfg.max_lag / 2.0 if was == HOLD_LAG else cfg.max_lag

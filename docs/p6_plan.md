@@ -60,7 +60,7 @@ R_fix は `input_rotation_rpy_deg`（既定 0 0 0。VR の軸を base_link に�
 - BUSY: ほかの goal が動いている（クラッチの押し直しが必要）。
 - BLOCKED（C3）: 測定と指令の差が 0.2 rad 超（クラッチの押し直しが必要）。
 
-追加の検査（ユーザーが承認。どれもパラメータで無効にできる。0 で無効）: C1 `ik_jump` 0.35 rad、C2 `max_lag` 0.15 m、C3 `max_tracking_error` 0.2 rad（C2・C3 は緩めの暫定）、C4 `joy_timeout_s` 1.0 s。
+追加の検査（ユーザーが承認。どれもパラメータで無効にできる。0 で無効）: C1 `ik_jump` 0.35 rad（**入力のメッセージごと**: 各メッセージの目標の IK の解を 1 つ前のメッセージの解と比べ、0.35 rad 以上なら IK_JUMP で止まる。解析 IK なので、1 周期の全メッセージを解く（上限 100）。再開の周期では、解が最後に受け付けた解から 0.35 rad 以上離れていないことも見る）、C2 `max_lag` 0.15 m、C3 `max_tracking_error` 0.2 rad（C2・C3 は緩めの暫定）、C4 `joy_timeout_s` 1.0 s。
 
 クラッチの前の検査（IDLE → 追従）: pose・joint_states・controller_state が新しい、動いている goal がない、指令と測定の差が `clutch_windup`（パラメータ。既定 0.06 rad。elbow で約 0.034 rad、lift で約 0.027 rad の追従の残りがあるため、今の値で余裕がある）以内、測定の先端 z が 0.045 m 以上、指令が関節の範囲（elbow は +91°）の中。
 
@@ -119,7 +119,7 @@ bringup.launch.py、controllers.yaml（update_rate 25 のまま）、URDF・SRDF
 - 送信周期と time_from_start は b0 の結果で決める。
 - 手の yaw は腕に伝わらない（pan が位置で決める）。
 - 1 周期より短いボタンの押しは取りこぼす。
-- C1 の 0.35 rad は、50 mm の目標の飛びが許されるため、腕を近くまで折ったとき、1 周期の正常な動きでも越える可能性がある（P6c で確認）。
+- C1 の 0.35 rad は、入力のメッセージごとの判定にした（解を 1 つ前のメッセージの解と比べる。速い手（1.5 m/s）でも当たらず、解の枝の入れ替わりは当たる）。値そのものは P6c の記録で決める。
 
 ## 7. b0 の結果（2026-11-17。モック、ROS_DOMAIN_ID=87、rmw_cyclonedds_cpp。update_rate は変更していない）
 
