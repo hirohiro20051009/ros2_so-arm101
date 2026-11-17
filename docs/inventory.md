@@ -3484,6 +3484,6 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - **カメラの launch**（`camera.launch.py use_apriltag:=true`。腕は読み取り専用の bringup）: `base_to_camera_link_tf` が起動した（`camera_launch.log` 7 行目 `Spinning until stopped - publishing transform`）。no_extrinsics の案内、`Unable to transform`、ERROR は出なかった（`camera_launch.log` で `Unable to transform`・`ERROR` は 0 件）。
 - **tf2_echo base_link camera_link**: Translation [0.450, 0.313, 0.640]、RPY（度）[-1.381, 56.791, -143.570]。yaml（translation_m [0.44973, 0.3128, 0.63983]、rpy [-1.38, 56.79, -143.57]）と一致。
 - **/tf_static**: `base_link → camera_link` は 1 回だけ、`world → base_link` も 1 回だけ（二重なし）。
-- **停止**: 終了コードと、ps・`ros2 node list --no-daemon` の空はユーザーの報告（終了コードの値は報告に書かれていない）。`camera_launch.log` の終わりは、realsense・apriltag・static_transform_publisher がすべて `process has finished cleanly`。
+- **停止**: 端末 2（カメラ）、端末 1（腕）とも exit=0、ps と `ros2 node list --no-daemon` は空（ユーザーの報告）。`camera_launch.log` の終わりは、realsense・apriltag・static_transform_publisher がすべて `process has finished cleanly`。
 - **腕側の ERROR（`arm_launch.log` 2 件。既知）**: octomap の `No 3D sensor plugin(s) defined`（74 行目）と、終了時の move_group の exit code -11（313 行目）。どちらも前に記録した既知の挙動（上の inventory の C4 などの節）で、カメラの TF とは無関係。
 - **結論**: yaml → install → `camera.launch.py` → TF の木の経路は、値が一致し二重もなく通った。タグ（`tag36h11_0`）の位置の FK との比較は C4-a で行う。値は暫定のまま（C4 で決着）。
