@@ -3510,3 +3510,9 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - 各メッセージの目標の IK の解を、1 つ前のメッセージの解と比べ、0.35 rad 以上（`>=`）なら HOLD_RANGE（理由 IK_JUMP）。周期ごとの比較では、速い手（150 mm/周期）が当たるが、メッセージごとなら当たらない。解けないメッセージ（床の下など）は比較せず、鎖を切る（範囲はその周期の目標で判定）。1 周期に 100 を超えるメッセージがあるときは、最後の 100 だけ解く。
 - 再開の周期は、解が最後に受け付けた解から 0.35 rad 以上離れていないことを見る（別の枝での再開を防ぐ）。
 - 試験: follow_machine 82 件（+8）、ik パッケージ 574 件、失敗 0。他のパッケージは省略。戻し方: 直前のコミット fedb019 から。
+
+## P6b b3: モックでのシナリオ確認（2026-11-17）
+
+- `src/so_arm101_ik/examples/vr_fake_input.py`（偽の Joy・PoseStamped と監視。モック専用: ROS_DOMAIN_ID=87 と --mock が必要）を追加。line・jump・stale・range・rotation・gripper・busy の 7 シナリオが合格（rotation は期待値を直して再実行）。結果は `docs/p6_mock_check.md`。C3（BLOCKED）はモックでは出なかった（見込みどおり）。
+- 手順どおり前景で bringup（mock:=true use_rviz:=false）→ vr_follow.launch.py → 偽入力。停止は kill -INT のみ。ps と `ros2 node list --no-daemon` は空。
+- ik パッケージの colcon test: 576 件、失敗 0（examples の lint を含む）。他のパッケージはコードを変えていないので省略。
