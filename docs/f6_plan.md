@@ -253,7 +253,7 @@ RViz の操作（`camera_c2_real_check.md` の W1 と同じ。OMPL、Scaling 0.1
 | 見るもの | 予測 | 止める条件 |
 |---|---|---|
 | Execute の前（RViz のアニメーション） | 先端が出発点より下がらない（経路の先端 z の最小は出発点。`joint_offset_plan.md` 7.1 の経緯） | 先端が机に近づく動きに見える → Execute しない |
-| 着いた後の関節の読み | 目標との差が 5 関節とも 0.0082 rad 以内（V8 の実績の最大。MoveIt の終点のずれ）。elbow は +30.0° ± 0.6° | **0.02 rad を超える差**／`clamp: '` の WARN |
+| 着いた後の関節の読み | **（2026-11-17 の実機の後に直した。`zero_offset_apply_real_check.md` の段 c が正）**: pan・lift・wrist_flex・wrist_roll は目標との差 0.0082 rad 以内、elbow は指令より大きい側が +0.045 rad 以内（追従の残り）、小さい側が 0.0082 rad 以内 | pan・lift・wrist_flex・wrist_roll は 0.02 rad 超／elbow の大きい側は +0.05 rad 超、小さい側は 0.02 rad 超／`clamp: '` の WARN |
 | T の一番低い点の物差し | **53.3 mm** ± **4 mm**（決定）。**差が 4〜6 mm は、elbow の不合格とは決めず、値を記録して報告** | **予測との差が 6 mm 超**、または**測った高さが 45 mm 未満**（決定）→ 動かさず、支えて報告 |
 
 ### 段 d. 大きな移動と DiffMode の小さな再確認（T から。`joint_offset_plan.md` 9.1 の項目 4）
