@@ -1,6 +1,8 @@
 # 実機確認手順: オフセットキャリブ（zero-offset calibration）— 先端を机に当てた 4 姿勢を記録して fit する
 
-**F5。実機は未実施。** 計画: `docs/zero_offset_calib_plan.md`（0.1 決定、5.2 記録の道具、5.4 当てはめの道具、4 章 合否の基準、7.5 骨組み）。道具: `tools/zero_offset_record_run.py`（記録）、`tools/zero_offset_fit_run.py`（当てはめ。表示だけ）。コード: コミット `66a0644`（F4b）までと、その前の F2〜F4。
+**2026-11-17 に実施、fit は不合格、結果は `docs/inventory.md`（「F5 の実機の結果とその後の検討」）。以下は実施前の手順書の文面（道具の変更案は inventory の「保留」）。**
+
+**F5。** 計画: `docs/zero_offset_calib_plan.md`（0.1 決定、5.2 記録の道具、5.4 当てはめの道具、4 章 合否の基準、7.5 骨組み）。道具: `tools/zero_offset_record_run.py`（記録）、`tools/zero_offset_fit_run.py`（当てはめ。表示だけ）。コード: コミット `66a0644`（F4b）までと、その前の F2〜F4。
 
 > **この手順書のコマンドは、Claude Code が一つも実行していない（未実行）。** 実機（腕）も launch も、Claude は動かしていない。**実行するのはユーザーだけ。**
 >
