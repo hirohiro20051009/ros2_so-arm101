@@ -242,9 +242,9 @@ def read_rows(csv_path):
     return rows[0], rows[1:]
 
 
-def read_meta(csv_path):
+def read_meta(csv_path, meta_path=None):
     """Return the meta of a CSV; SessionError when it is missing or is not a zero-offset one."""
-    meta_path = meta_path_for(csv_path)
+    meta_path = Path(meta_path) if meta_path else meta_path_for(csv_path)
     try:
         with open(meta_path, encoding='utf-8') as f:
             meta = yaml.safe_load(f)
@@ -256,7 +256,7 @@ def read_meta(csv_path):
     return meta
 
 
-def check_file(csv_path, identity):
+def check_file(csv_path, identity, meta_path=None):
     """
     Check the CSV and its meta file against the identity.  Return 'new' or 'append'.
 
@@ -265,7 +265,7 @@ def check_file(csv_path, identity):
     else raises SessionError; nothing is written.
     """
     csv_path = Path(csv_path)
-    meta_path = meta_path_for(csv_path)
+    meta_path = Path(meta_path) if meta_path else meta_path_for(csv_path)
     has_csv, has_meta = csv_path.exists(), meta_path.exists()
     if not has_csv and not has_meta:
         return 'new'
@@ -274,7 +274,7 @@ def check_file(csv_path, identity):
             f'{meta_path} exists but {csv_path} does not: a leftover of an older run')
     if not has_meta:
         raise SessionError(f'{csv_path} exists but {meta_path} does not')
-    meta = read_meta(csv_path)
+    meta = read_meta(csv_path, meta_path)
     differences = identity_mismatches(meta.get('identity'), identity)
     if differences:
         raise SessionError(
