@@ -13,6 +13,7 @@
 3. **クラッチの前の検査**（IDLE → 追従）は、測定の先端 z が床（既定 0.045 m）以上、`|reference − 測定| ≤ 0.06 rad`、elbow ≤ +91°、動いている goal がないこと。**折りたたみ姿勢の先端 z が 0.045 m 未満なら、クラッチは `REFUSED FLOOR` で始まらない**（状態に出る）。F6 の出発点の読みからの手計算では約 0.049 m（余裕 4 mm）で、たたみ方で変わる。
 4. **c0 は、腕を支えず、折りたたみ姿勢のまま行う**（トルク OFF の腕を長く支えると、手の揺れで測定が動き、0.06 rad の検査と 0.2 rad の判定がぶれるため）。まず既定の床で vr_follow を起動し、`REFUSED FLOOR` になったときだけ、**c0 に限り**床を `floor_z:=0.02` に下げて起動し直す（c0 は書き込まないので腕は動かない）。**ノードは、床が 0.045 m 未満のとき、`/robot_state_publisher` の robot_description が `read_only` true であることを確かめ、違えば起動しない**（モックで確認済み: exit 2）。**c1 以降は既定の床（`floor_z` を付けない）に戻す。**
 5. **c0 で BLOCKED が出る量**: 折りたたみでは先端が pan 軸に近く、y の動きで pan が大きく動くので、T より BLOCKED が出やすい見込み（pan 軸から先端までの距離は、読みから計算しない。出なければ下の手順）。BLOCKED は、指令（偽入力が出す点）が測定から 0.2 rad 離れたときに出る。
+6. **c0-1 の不具合（2026-11-17。直した）**: 実機の robot_description は `<param name="read_only">True</param>`（xacro が Python の bool を文字にするため、先頭が大文字）で、read_only の判定が小文字の `true` だけを認めていたため、偽入力が `refused: the robot_description does not say read_only` で止まった。判定を大文字小文字を区別しない形にした（`description_is_read_only`。偽入力とノードの床の守りは同じ関数。true・True・TRUE と前後の空白は read_only、false・False・それ以外・欠けは read_only でない。実機と同じ 1 行を試験に入れた）。ドライバ（`parse_bool`）とカメラの起動引数（`parse_bool_argument`）は、もともと大文字小文字を区別しない。
 
 ## 2. 共通の約束
 

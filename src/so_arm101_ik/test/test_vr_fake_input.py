@@ -272,16 +272,6 @@ def test_the_real_branch_does_not_prepare_the_arm():
     assert 'real_like = args.real or args.real_plans' in main
 
 
-def test_the_read_only_pattern(fake):
-    yes = '<param name="read_only">true</param>'
-    for text in (yes, '<param name="read_only"> true </param>',
-                 '<hardware><param name="serial_port">/dev/x</param>' + yes + '</hardware>'):
-        assert fake.description_is_read_only(text)
-    for text in ('<param name="read_only">false</param>', '<param name="mock">true</param>',
-                 '', 'read_only true'):
-        assert not fake.description_is_read_only(text)
-
-
 def test_real_plans_in_the_mock_follow_the_same_limits(fake):
     mock_plans = args(mock=True, real=False, real_plans=True)
     assert fake.check_args(mock_plans, '87') is None
@@ -291,3 +281,17 @@ def test_real_plans_in_the_mock_follow_the_same_limits(fake):
                            '87')
     assert fake.check_args(args(mock=True, real=False, real_plans=True), None)
     assert fake.check_args(args(real=True, real_plans=True), None)  # only for the mock
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('<param name="read_only">True</param>', True),  # the form of the real robot_description
+    ('<param name="read_only">true</param>', True),
+    ('<param name="read_only">TRUE</param>', True),
+    ('<param name="read_only"> True </param>', True),
+    ('<param name="read_only">False</param>', False),
+    ('<param name="read_only">false</param>', False),
+    ('<param name="mock">True</param>', False),
+    ('', False),
+])
+def test_the_read_only_check_of_the_fake_input(fake, text, expected):
+    assert fake.description_is_read_only(text) is expected

@@ -92,9 +92,19 @@ def quaternion_message_to_matrix(q):
     return fc.quaternion_to_matrix(q.x, q.y, q.z, q.w)
 
 
+READ_ONLY_PATTERN = re.compile(r'name=["\']read_only["\']\s*>\s*([^<]*?)\s*<', re.IGNORECASE)
+
+
 def description_is_read_only(text):
-    """Return True if a robot_description text says that the arm driver is read_only."""
-    return re.search(r'name="read_only"\s*>\s*true\s*<', text) is not None
+    """
+    Return True if a robot_description text says that the arm driver is read_only.
+
+    The value is read without regard to case (xacro writes a Python bool: True), spaces
+    around it are allowed, and every read_only parameter must say true. Any other value, or
+    no read_only parameter, is not read_only.
+    """
+    values = [v.lower() for v in READ_ONLY_PATTERN.findall(text)]
+    return bool(values) and all(v == 'true' for v in values)
 
 
 def format_status(output):

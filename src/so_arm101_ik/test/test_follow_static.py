@@ -243,7 +243,8 @@ def test_a_floor_under_the_safe_floor_needs_a_read_only_arm():
     follower = text.index('self.follower = fm.Follower(self.config)')
     assert guard < check < follower  # refused before the machine, the timers or any publisher
     assert 'raise RuntimeError(' in text[check:follower]
-    assert r'name="read_only"' in text and 'robot_state_publisher/get_parameters' in text
+    assert 'READ_ONLY_PATTERN' in text and 'read_only' in text
+    assert 'robot_state_publisher/get_parameters' in text and 're.IGNORECASE' in text
     assert fc.FLOOR_SAFE == 0.045 and fc.FLOOR_MIN == 0.01
 
 
@@ -257,10 +258,45 @@ def test_the_launch_overrides_of_c0_and_c2_exist():
         assert overrides[name] == 'float', name
 
 
-def test_the_read_only_pattern_of_the_node():
-    node = _node_module()
-    assert node.description_is_read_only('<param name="read_only">true</param>')
-    assert node.description_is_read_only('<param name="read_only"> true </param>')
-    assert not node.description_is_read_only('<param name="read_only">false</param>')
-    assert not node.description_is_read_only('')
-    assert not node.description_is_read_only('<param name="use_fake_hardware">true</param>')
+READ_ONLY_TRUE = [
+    '<param name="read_only">True</param>',  # the form of the real robot_description (xacro)
+    '<param name="read_only">true</param>',
+    '<param name="read_only">TRUE</param>',
+    '<param name="read_only"> true </param>',
+    '<param name="read_only">\n  True\n</param>',
+    '<hardware><param name="serial_port">/dev/ttyACM0</param><param name="read_only">True</param>'
+    '<param name="acceleration">50</param></hardware>',
+    "<param name='read_only'>True</param>",
+]
+READ_ONLY_FALSE = [
+    '<param name="read_only">False</param>',
+    '<param name="read_only">false</param>',
+    '<param name="read_only">FALSE</param>',
+    '<param name="read_only"> false </param>',
+    '<param name="read_only">yes</param>',
+    '<param name="read_only">1</param>',
+    '<param name="read_only"></param>',
+    '<param name="read_only">truee</param>',
+    '<param name="read_only">True</param><param name="read_only">False</param>',  # one is not
+    '<param name="read_only_x">True</param>',
+    '<param name="use_fake_hardware">True</param>',
+    'read_only True',
+    '',
+]
+
+
+@pytest.mark.parametrize('text', READ_ONLY_TRUE)
+def test_read_only_is_read_without_regard_to_case(text):
+    assert _node_module().description_is_read_only(text)
+
+
+@pytest.mark.parametrize('text', READ_ONLY_FALSE)
+def test_everything_else_is_not_read_only(text):
+    assert not _node_module().description_is_read_only(text)
+
+
+def test_the_fake_input_uses_the_same_function_as_the_node():
+    text = (PACKAGE / 'examples' / 'vr_fake_input.py').read_text()
+    assert 'from so_arm101_ik.vr_follow_node import description_is_read_only' in text
+    assert 'def description_is_read_only' not in text  # one function, one place
+    assert 're.search' not in text and 're.compile' not in text  # no pattern of its own

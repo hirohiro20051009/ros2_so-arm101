@@ -3525,3 +3525,10 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - 手順書 `docs/p6_real_check.md`（c0 は腕を支えず折りたたみのまま。`REFUSED FLOOR` のときだけ c0 に限り `floor_z:=0.02`。c1 以降は既定の床。c1 の `torque_limit:=500` と T の (0, −22, 30, 83, 0) 度は F6 の手順書の段 c と同じ値を確認）。コマンドは端末ごとに `cd` と source の 2 行つきで、フルパス。
 - モックの確認の材料: `~/so_arm101_check/p6/b4_*`（git 管理外）。sha256: `b4_mock_all.txt` `968bc9e76bea53502aecdc734575372b71d6e08e8b99d0c99ec4f13679b1d52b`、`b4_realplans.txt` `cca4765b56826ca9691dd9c0289110fb3ecc11bee7ec098e8c11ac8380b36f2c`、`b4_realplans_jump.txt` `58d948ca32b9586b293d12b23258b64dd750672f2bc8f1b2c58033ba289ea7e2`、`b4_guard_floor002.log` `df5c6da0f4ad58a2e4b9049c3e2a33425bc0752dd9c109c0b14c35c85062f414`、`b4_guard_floor0009.log` `605d0f06ba28a66a2b7f906a4867e1f28dcc02238dbc86f76f8f1da1aba4a077`、`b4_node.log` `960ce055a6b590c69ca997523644d478c8209b53170e5532a4017e8e5cc4b61f`、`b4_bringup.log` `7d910960d01c550f59b44493762bd2f1c7c37960bcd4c29e86d13f9def5d95da`。
 - 試験: ik パッケージ 642 件、失敗 0（follow_calc 94、follow_machine 82、follow_static 21、vr_fake_input 57）。他のパッケージはコードを変えていないので省略。戻し方: 直前のコミット b7a14e7 から取り出せる。
+
+## P6c: read_only の判定を大文字小文字を区別しない形に直した（2026-11-17。実機の c0-1 の不具合）
+
+- 事象: 実機の `robot_description` は `<param name="read_only">True</param>`（xacro が Python の bool を文字にするため大文字始まり）で、判定が小文字の `true` だけを認めていたため、`vr_fake_input.py --real --arm-read-only` が `refused: the robot_description does not say read_only`（exit 1）で止まった。実機は停止済み（A・B の exit、ps、`ros2 node list --no-daemon` は空）。
+- 直し: `vr_follow_node.py` の `description_is_read_only` を、値を大文字小文字を区別せず（true・True・TRUE）、前後の空白を許し、すべての read_only パラメータが true のときだけ true とする形にした。偽入力はこの関数を import して使う（1 か所）。ノードの床の守りも同じ関数。
+- ほかの読み: ドライバの `parse_bool`（`sts3215_system.cpp`）とカメラの `parse_bool_argument` は、もともと小文字化してから比べる。`tools/ik_model_check.py` は robot_description から bool を読まない。
+- 試験: ik パッケージ 669 件、失敗 0（実機と同じ 1 行の形を含む）。他のパッケージはコードを変えていないので省略。戻し方: 直前のコミット 47a0284 から。

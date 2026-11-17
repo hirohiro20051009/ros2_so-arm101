@@ -45,7 +45,6 @@ gripper action, and prints what it checked. The exit code is 0 only if every che
 import argparse
 import csv
 import os
-import re
 import sys
 import time
 
@@ -64,6 +63,7 @@ from sensor_msgs.msg import JointState, Joy
 from so_arm101_ik import analytic_ik as ik
 from so_arm101_ik import follow_calc as fc
 from so_arm101_ik.urdf_kinematics import rpy_matrix
+from so_arm101_ik.vr_follow_node import description_is_read_only
 from std_msgs.msg import Float64, String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
@@ -167,11 +167,6 @@ def make_plans():
         13.0, disp=[(1.0, (0, 0, 0)), (3.0, (0, 0.01, 0))],
         clutch=[(1.0, 9.0), (10.0, 12.0)], busy_at=3.0)
     return plans
-
-
-def description_is_read_only(text):
-    """Return True if a robot_description text says that the arm driver is read_only."""
-    return re.search(r'name="read_only"\s*>\s*true\s*<', text) is not None
 
 
 def check_args(args, domain):
