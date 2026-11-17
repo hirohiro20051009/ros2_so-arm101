@@ -5,7 +5,7 @@
 | 2 つのキャリブの違い | センターキャリブ（center calibration） | オフセットキャリブ（zero-offset calibration。本書） |
 |---|---|---|
 | 何を決めるか | 各関節の Min・Max・center（0 rad の位置の tick。center は Min と Max の中央）と、EEPROM の Homing_Offset | center から URDF の 0 までの角度のずれ zero_offset_deg（lift・elbow・wrist_flex。度） |
-| 使う道具 | `so_arm101_calib measure` と `apply`（C++。サーボの EEPROM を読み書きする） | `floor_touch_run.py`（記録）と `floor_touch_fit.py`（当てはめ）。読み取り専用で、サーボにもファイルにも書かない |
+| 使う道具 | `so_arm101_calib measure` と `apply`（C++。サーボの EEPROM を読み書きする） | `zero_offset_record_run.py`（記録）と `zero_offset_fit_run.py`（当てはめ）。読み取り専用で、サーボにもファイルにも書かない |
 | 決める方法 | 腕を手で中央の姿勢と可動範囲の両端に動かして測る | 先端を机に当てた 4 姿勢（各 2 回）の関節角から、当てはめる |
 | yaml での置き場所 | `center`・`min`・`max`・`eeprom`（`apply` が書く） | `zero_offset_deg`（J5 のコミットで手で貼る。`apply` は値を持ち越す） |
 | 実行の順番 | 1 番目 | 2 番目（センターキャリブの後、カメラのキャリブの前） |
@@ -31,7 +31,7 @@
 ### 0.2 呼び名と道具の名前
 
 - 呼び名を固定する: 日本語は「センターキャリブ」と「オフセットキャリブ」、英語は center calibration と zero-offset calibration。docs・ログ・CSV・yaml のコメントはこの呼び名にそろえる（「関節のキャリブ」「校正」とは書かない）。
-- 道具の名前（現在の名前は floor_touch。机当ての方法を表すが、何を決めるかが分からない）。**改名案（ユーザーの判断。9.2）**:
+- 道具の名前（現在の名前は floor_touch。机当ての方法を表すが、何を決めるかが分からない）。**改名（決定、ユーザー、2026-11-17。9.1）。実施は F1**:
 
 | 現在の名前（本書） | 改名案 | 理由 |
 |---|---|---|
@@ -40,29 +40,36 @@
 | `so_arm101_calibration/floor_touch.py` | `so_arm101_calibration/zero_offset.py`（と `zero_offset_record.py`） | モジュール名で zero_offset_deg と結びつく |
 | CSV `floor_touch_YYYYMMDD.csv`、材料の置き場 `~/so_arm101_check/floor_touch_YYYYMMDD/` | `zero_offset_YYYYMMDD.csv`、`~/so_arm101_check/zero_offset_YYYYMMDD/` | 同上 |
 
-  採用なら、実装の前に `git mv`（計画書）と本書の全置換を 1 回で行う（別の承認）。不採用なら floor_touch のまま。以降の本文は**現在の名前（floor_touch）**で書く。
-- 道具の最初の表示: 起動時の最初の行に `[zero-offset calibration] floor_touch_run: records touch poses for zero_offset_deg (NOT the center calibration: center/min/max are decided by so_arm101_calib measure/apply). Read-only: nothing is written.`。fit は最初の行に `[zero-offset calibration] floor_touch_fit: result for zero_offset_deg (display only; the yaml is not written)`。最後の判定の行にも `[zero-offset calibration]` を付ける。
+  決定: 改名する。F1 で `git mv docs/floor_touch_plan.md docs/zero_offset_calib_plan.md`（作業ツリーを変える git の操作。F1 の承認の項目）と本書の全置換を 1 回で行う。`docs/floor_touch_real_check.md`・`tools/`・モジュール・CSV はまだ無いので、新しい名前で作る（`git mv` は計画書の 1 件だけ）。**既存の材料 `~/so_arm101_check/floor_touch_20261117/`（git 管理外。3.4.6 の sha256）は動かさず、名前も変えない**（本書の 3 章に出る名前はそのまま）。新しい記録の置き場は `~/so_arm101_check/zero_offset_YYYYMMDD/`。F1 で本文を全置換した（この節の旧名の記述と、既存の材料のパスだけが floor_touch のまま）。
+- 道具の最初の表示: 起動時の最初の行に `[zero-offset calibration] zero_offset_record_run: records touch poses for zero_offset_deg (NOT the center calibration: center/min/max are decided by so_arm101_calib measure/apply). Read-only: nothing is written.`。fit は最初の行に `[zero-offset calibration] zero_offset_fit_run: result for zero_offset_deg (display only; the yaml is not written)`。最後の判定の行にも `[zero-offset calibration]` を付ける。
 - CSV の最初の行は `# zero-offset calibration (floor touch). Not the center calibration.`（`#` で始まる行は読み込みで飛ばす。試験 1 件）。meta に `calibration_kind: zero_offset`。fit は `calibration_kind` が違う meta を拒否する。
 - yaml のコメント案（J5 で手で入れるとき。`zero_offset_deg` を入れる関節の行の上、`joints:` の直前）:
 
 ```
-# zero_offset_deg (degrees, per joint) = result of the zero-offset calibration (floor touch; docs/floor_touch_plan.md).
+# zero_offset_deg (degrees, per joint) = result of the zero-offset calibration (floor touch; docs/zero_offset_calib_plan.md).
 #   true angle = direction*(raw-center)*360/angle_ticks + zero_offset_deg.
 #   NOT the center calibration (center/min/max are decided by so_arm101_calib measure/apply).
 #   Redo the zero-offset calibration whenever the center calibration is redone.
 ```
 
-  `so_arm101_calib apply` は yaml のコメントを固定の文面で作り直す（`apply.cpp:57-59`）ので、このコメントは次の apply で消える（値は J3 の持ち越しで残る）。コメントを残すには apply のヘッダの文面を変える（C++ の変更。別の承認。9.2）。それまでは `inventory.md` の J5 の節に同じ文面を控える。
-- 既存の docs の呼び名（`so_arm101_calibration_check.md`、`joint_offset_plan.md` など）: 実装の段 F5 で、各 docs の冒頭に「この文書の『キャリブ』『校正』『再校正』はセンターキャリブ（center calibration）を指す。オフセットキャリブは `floor_touch_plan.md`」という注記を足す案（本文は直さない。J4d と同じ注記のやり方）。別の承認。
+  `so_arm101_calib apply` は yaml のコメントを固定の文面で作り直す（`apply.cpp:57-59`）ので、上のコメントは次の apply で消える（値は J3 の持ち越しで残る）。**決定（ユーザー、9.1）**: apply が作る yaml の先頭のコメント（固定の文面）に、次の 2 行を足す（C++ の小さな変更。段 F1b）:
+
+```
+# zero_offset_deg は オフセットキャリブ（zero-offset calibration。docs/zero_offset_calib_plan.md）の値。
+# center・min・max・eeprom などは センターキャリブ（so_arm101_calib measure・apply）の値。
+```
+
+  足す場所は `apply.cpp:58-59` の 2 行目（`違うと起動を拒否する）。`）の直後、`schema_version:` の前。コメントだけで、yaml の中身（キー・値・順序）は変わらない。F6 で本番の yaml に手で入れるコメント（上の 4 行）の先頭にも、この 2 行を同じ文面で入れる（apply がやり直しても同じ文面になる）。`inventory.md` の J5 の節に控える。
+- 既存の docs の呼び名: **決定（ユーザー、9.1）** 実装の段 F5 で、`so_arm101_calibration_check.md` と `joint_offset_plan.md` の冒頭に用語の注記を足す（本文は直さない。J4d と同じ注記のやり方）。文面の案: 「この文書の『キャリブ』『校正』『再校正』はセンターキャリブ（center calibration）を指す。オフセットキャリブ（zero-offset calibration）は `docs/zero_offset_calib_plan.md`。」`camera_stage_plan.md` には 6.3 の注記（手順の順序）を足す。
 
 ### 0.3 要点
 
-1. 道具は 2 つ。`tools/floor_touch_run.py`（記録。`/joint_states` を購読するだけ。読み取り専用の起動で使う）と `tools/floor_touch_fit.py`（オフラインの当てはめ。CSV から δ を出し、yaml に貼る行を**表示するだけ**）。純粋な計算は `so_arm101_calibration` の Python モジュール（5.1）。
+1. 道具は 2 つ。`tools/zero_offset_record_run.py`（記録。`/joint_states` を購読するだけ。読み取り専用の起動で使う）と `tools/zero_offset_fit_run.py`（オフラインの当てはめ。CSV から δ を出し、yaml に貼る行を**表示するだけ**）。純粋な計算は `so_arm101_calibration` の Python モジュール（5.1）。
 2. モデル: 1 回の記録 = 「その姿勢で固定あごの一番低い頂点の z = 机の高さ h」という 1 本の式。未知数は δ_lift・δ_elbow・δ_wrist と h の 4 つ（h は事前分布つき）。pan は面内の回転なので式に効かず、roll は高さに効かない（記録だけする）。
 3. **最大の注意**: 先端の傾きが一定の点だけだと、wrist の列と h の列が同じになり、δ_wrist と h を分けられない。傾きを変えた点（3 種類）が要る。3 章の結果: 4 姿勢で sd は lift 0.32、elbow 0.51、wrist 0.69°（当て方 1 mm、σ_h 1 mm）。90° の点が 1 mm ずれると wrist に約 0.7° の偏りが出る。
 4. 4 姿勢 + h の事前分布 = 5 本の方程式 − 未知数 4 = 余り 1。3 姿勢は余り 0 で、残差の検査も 1 姿勢ずつ外す検査もできないので不採用（3.4.4）。
 5. 合否は 4 章。yaml は道具が書かない（6.1）。合格した関節の貼る行（0.1° 刻み）と現在の yaml との差を表示する。
-6. 試験は主な守りに絞り 60 件前後（7.1）。コミットは F0〜F6（7.4）。J5 は「δ = −6.3° で始めて物差しで確定」から「この道具で測った値を yaml に入れる」に変わる（6.3）。
+6. 試験は主な守りに絞り、pytest 約 82・gtest +2・lint 最大 +9（7.1）。コミットは F0〜F6（F1b を含む。7.4）。J5 は「δ = −6.3° で始めて物差しで確定」から「この道具で測った値を yaml に入れる」に変わる（6.3）。
 7. 実機のコマンドは私は実行しない。実機の手順書は 7.5 の骨組み（F5 で書く）。
 
 ## 1. 事実（読んだもの）
@@ -275,7 +282,7 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 
 - 余り 1（2.1）なので、「1 回外す」検査は記録の 1 回ずつ（同じ姿勢のもう 1 回が残る）。1 姿勢ずつ外す検査は、残りが 3 姿勢 + 事前分布で余り 0 になり、決まらない場合があるので行わない。
 - **wrist の貼る行の規則**: δ_wrist の絶対値が 1.5° 以上で、sd が 1.0° 以下のときだけ貼る行を出す。それ以外は貼る行を出さず、「wrist は 0 のまま（理由: 90° の当たり方の 1 mm で約 0.7° の偏りが出るため）」と表示する（1.5° は推測の値）。
-- wrist を 0 のままにするとき、lift と elbow の貼る行は、**δ_wrist = 0 に固定して当てはめ直した値**を出す案（推測。wrist を自由にした当てはめの elbow は wrist と −0.6 の相関があり、wrist を 0 にする貼り方とは整合しない）。両方の値を表示し、貼る行は後者。9.2 で確認する。
+- wrist を 0 のままにするとき、lift と elbow の貼る行は、**δ_wrist = 0 に固定して当てはめ直した値**にする（**決定（ユーザー、9.1）**。理由（推測）: wrist を自由にした当てはめの elbow は wrist と −0.6 の相関があり、wrist を 0 にする貼り方とは整合しない）。両方の値（自由にした当てはめと、wrist = 0 に固定した当てはめ）と、**固定した当てはめの sd（lift・elbow）**も表示し、貼る行は固定した方。固定した当てはめの合否（残差・sd・1 回外した変化）も 4 章の基準で判定する。wrist の規則で貼る行を出すとき（1.5° 以上かつ sd 1.0° 以下）は、3 関節を自由にした値を貼る。
 - 終了コード（camera の前例にそろえる）: 0 合格、2 不合格または拒否（貼る行を出さない）、1 引数・読み込みの誤り。何も書かない。表示は不合格でも全項目を出してから終了する。
 - 警告の扱いは J4d と同じ（合格のまま、「accepted (with N warning)」と表示し、meta に記録）。
 
@@ -285,28 +292,51 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 
 | 部品 | 置き場所 | 理由 |
 |---|---|---|
-| 純粋な計算（メッシュの読み、固定あごの最小の z、モデル、当てはめ、統計、姿勢の検査、合否、貼る行の文字列） | `src/so_arm101_calibration/so_arm101_calibration/floor_touch.py`（Python）。記録の形式と識別は `floor_touch_record.py` に分ける | センターキャリブと一緒に実行する道具で、`so_arm101_calib`（センターキャリブ）と同じパッケージに置く |
-| 記録の道具（購読、端末の表示、Enter、CSV と meta） | `tools/floor_touch_run.py` | camera_record_run.py と同じ作り。ROS に依存するのはこの道具だけ |
-| 当てはめの道具（CSV。表示だけ） | `tools/floor_touch_fit.py` | camera_extrinsics_run.py と同じ作り。ROS を使わない |
+| 純粋な計算（メッシュの読み、固定あごの最小の z、モデル、当てはめ、統計、姿勢の検査、合否、貼る行の文字列） | `src/so_arm101_calibration/so_arm101_calibration/zero_offset.py`（Python）。記録の形式と識別は `zero_offset_record.py` に分ける | センターキャリブと一緒に実行する道具で、`so_arm101_calib`（センターキャリブ）と同じパッケージに置く |
+| 記録の道具（購読、端末の表示、Enter、CSV と meta） | `tools/zero_offset_record_run.py` | camera_record_run.py と同じ作り。ROS に依存するのはこの道具だけ |
+| 当てはめの道具（CSV。表示だけ） | `tools/zero_offset_fit_run.py` | camera_extrinsics_run.py と同じ作り。ROS を使わない |
 
 - **`CMakeLists.txt` の変更点**（実装の範囲の報告に書いて承認を得てから。F2）:
   - `find_package(ament_cmake_python REQUIRED)` と `ament_python_install_package(${PROJECT_NAME})` を足す。パッケージ直下に `so_arm101_calibration/`（`__init__.py` と上の 2 モジュール）を作る。`include/so_arm101_calibration/`（C++ のヘッダ）とは別のディレクトリで、衝突しない（F2 のビルドで確認）。
   - `BUILD_TESTING` の中に `find_package(ament_cmake_pytest REQUIRED)` と、試験ごとの `ament_add_pytest_test`（camera と同じく `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`）。
-  - 既存の C++ のターゲットと gtest は変えない。lint（`ament_lint_auto`）は今の calibration に無いので足さない（試験の件数に lint は入らない）。
+  - 既存の C++ のターゲットと gtest は変えない。
+  - lint: `ament_lint_auto` は使わない（calibration の C++ に標準の著作権ヘッダーが無く、`ament_copyright` と C++ の lint が落ちるため。推測。変えるのは範囲外）。Python 用の `ament_flake8()` と `ament_pep257()` だけを明示で足す案（F2。承認の項目。9.2）。
+  - 具体（行の追加。F2 の時点。F3・F4 は `ament_add_pytest_test` の行だけが増える）:
+
+```
+find_package(ament_cmake_python REQUIRED)          # find_package(ament_cmake REQUIRED) の次の行
+ament_python_install_package(${PROJECT_NAME})      # install(DIRECTORY include/ ...) の次の行（コメント: Pure Python library）
+# BUILD_TESTING の中（find_package(ament_cmake_gtest REQUIRED) と gtest の登録は変えない。その後ろに足す）:
+find_package(ament_cmake_pytest REQUIRED)
+find_package(ament_cmake_flake8 REQUIRED)          # 9.2 の承認が出たときだけ
+find_package(ament_cmake_pep257 REQUIRED)          # 同上
+ament_flake8()                                     # 同上
+ament_pep257()                                     # 同上
+set(ENV{PYTEST_DISABLE_PLUGIN_AUTOLOAD} 1)
+ament_add_pytest_test(test_zero_offset test/test_zero_offset.py ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)                  # F2
+ament_add_pytest_test(test_zero_offset_static test/test_zero_offset_static.py ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)    # F2
+ament_add_pytest_test(test_zero_offset_record test/test_zero_offset_record.py ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)    # F3
+ament_add_pytest_test(test_zero_offset_record_static test/test_zero_offset_record_static.py ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)  # F3
+ament_add_pytest_test(test_zero_offset_fit_tool test/test_zero_offset_fit_tool.py ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)  # F4
+```
+
+  - C++ の変更（F1b。CMake は変えない）は 5.1 の外の `src/apply.cpp` だけ（0.2）。
 - **`package.xml` の変更点**（同じく承認を得てから）:
-  - `<buildtool_depend>ament_cmake_python</buildtool_depend>`。
-  - 実行時の依存: `<exec_depend>so_arm101_ik</exec_depend>`（`UrdfChain`）、`<exec_depend>so_arm101_description</exec_depend>`（URDF とメッシュ）、`<exec_depend>python3-numpy</exec_depend>`、`<exec_depend>python3-yaml</exec_depend>`、`<exec_depend>rclpy</exec_depend>`、`<exec_depend>sensor_msgs</exec_depend>`（記録の道具）。
-  - 試験の依存: `<test_depend>ament_cmake_pytest</test_depend>`、`<test_depend>ament_index_python</test_depend>`。
-  - `<description>` に、センターキャリブ（EEPROM の measure・apply）に加えてオフセットキャリブ（zero_offset_deg の記録と当てはめ）を持つことを書く。
+  - F2 で足す行（既存の `ament_cmake`・depend・`ament_cmake_gtest` の行は変えない）:
+    - `<buildtool_depend>ament_cmake_python</buildtool_depend>`（`<buildtool_depend>ament_cmake</buildtool_depend>` の次）。
+    - `<exec_depend>so_arm101_ik</exec_depend>`（`UrdfChain`）、`<exec_depend>so_arm101_description</exec_depend>`（URDF とメッシュ）、`<exec_depend>python3-numpy</exec_depend>`、`<exec_depend>python3-yaml</exec_depend>`。
+    - `<test_depend>ament_cmake_pytest</test_depend>`、`<test_depend>ament_index_python</test_depend>`。lint を採るとき（9.2）は `<test_depend>ament_cmake_flake8</test_depend>`、`<test_depend>ament_cmake_pep257</test_depend>`。
+  - F3 で足す行: `<exec_depend>rclpy</exec_depend>`、`<exec_depend>sensor_msgs</exec_depend>`（記録の道具）。F4 は変更なし。
+  - `<description>`（F2）に、センターキャリブ（EEPROM の measure・apply）に加えてオフセットキャリブ（zero_offset_deg の記録と当てはめ）を持つことを書く。
 - **依存の向き**: calibration → hardware（今のまま。ビルド時）、calibration → ik・description（新しい。実行時）。ik・description・hardware は calibration に依存していない（`package.xml` で確認）ので、循環しない。camera は calibration に依存せず、calibration も camera を import しない。
-- **記録の識別の関数**: camera の `record.py` の `make_identity`・`read_zero_offsets` は import しない（calibration が camera に依存するのを避ける）。`floor_touch_record.py` に同じ規則の小さな関数（sha256、`zero_offset_deg` の読み取り: 有限・10° 以内・gripper は不可、center の読み取り）を持つ。重複は約 30 行。規則の同一性は、同じ入力に対する出力を試験で確かめる（`read_zero_offsets` の入力と期待値を試験に写す）。重複をなくす（共通のライブラリに移す）のは、必要になったときに別の承認で。
-- **道具の起動の形**: `tools/` のスクリプトを `python3 tools/floor_touch_run.py ...` で動かす（両方の setup.bash を source）。`ros2 run so_arm101_calibration ...` にしない理由: ik・camera の道具がすべて `tools/` で、`ros2 run` にするには CMake に `install(PROGRAMS ...)` と ROS 用のスクリプトの形が要り、変更が増える。後で必要になれば別の承認で足す。センターキャリブ（`ros2 run so_arm101_calibration so_arm101_calib`）との違いは、起動の最初の行（0.2）で分かる。
+- **記録の識別の関数**（**決定（ユーザー、9.1）: calibration 側に重複して持つ**）: camera の `record.py` の `make_identity`・`read_zero_offsets` は import しない（calibration が camera に依存するのを避ける）。`zero_offset_record.py` に同じ規則の小さな関数（sha256、`zero_offset_deg` の読み取り: 有限・10° 以内・gripper は不可、center の読み取り）を持つ。重複は約 30 行。規則の同一性は、同じ入力に対する出力が camera と同じであることを、試験で確かめる（`test_record.py` の `read_zero_offsets` の入力と期待値を、calibration の試験に写す。camera は import しない）。重複をなくす（共通のライブラリに移す）のは、必要になったときに別の承認で。
+- **道具の起動の形**: `tools/` のスクリプトを `python3 tools/zero_offset_record_run.py ...` で動かす（両方の setup.bash を source）。`ros2 run so_arm101_calibration ...` にしない理由: ik・camera の道具がすべて `tools/` で、`ros2 run` にするには CMake に `install(PROGRAMS ...)` と ROS 用のスクリプトの形が要り、変更が増える。後で必要になれば別の承認で足す。センターキャリブ（`ros2 run so_arm101_calibration so_arm101_calib`）との違いは、起動の最初の行（0.2）で分かる。
 - 試験の見込みの変化: 試験は camera でなく **calibration の pytest** に入る（calibration は 82 → 約 137。camera は 370 のまま）。`colcon test` は calibration を対象にする（7.1）。
 - ik に置く案は、yaml と識別を読む結合が ik に入るので採らない。camera に置く案（前回の推奨）は、ユーザーの決定で採らない（センターキャリブと一緒に実行する道具なので）。
 
-### 5.2 記録の道具（`floor_touch_run.py`）
+### 5.2 記録の道具（`zero_offset_record_run.py`）
 
-- 起動: `python3 tools/floor_touch_run.py --csv PATH [--calibration-yaml ...] [--h-prior-mm -2.4] [--h-sigma-mm 1.0]`。購読は `/joint_states` だけ。トルクもサーボも書かない（`ros2 launch` は読み取り専用の起動をユーザーが行う）。最初の行は 0.2 のとおり。
+- 起動: `python3 tools/zero_offset_record_run.py --csv PATH [--calibration-yaml ...] [--h-prior-mm -2.4] [--h-sigma-mm 1.0]`。購読は `/joint_states` だけ。トルクもサーボも書かない（`ros2 launch` は読み取り専用の起動をユーザーが行う）。最初の行は 0.2 のとおり。
 - 目標の姿勢（姿勢ごと。x は mm、許容 ±10 mm、ε は ±5°）:
 
 | 姿勢 | 傾き ε | x | 記録 |
@@ -329,7 +359,7 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
   - 記録の時の `/joint_states` が yaml の δ_old のもとのものかは、道具からは確かめられない（ドライバが読んだ yaml と同じかは、起動のログの「δ ≠ 0 の関節の INFO」で**ユーザーが確認**）。識別には install の yaml の sha256 を使う（既定。camera_record_run と同じ）。
 - fit の入力は CSV と meta。meta が無い・`calibration_kind` が違う・識別が違う行がある・URDF の sha256 が今と違う、は拒否。
 
-### 5.4 当てはめの道具（`floor_touch_fit.py`）
+### 5.4 当てはめの道具（`zero_offset_fit_run.py`）
 
 - 引数: `CSV`、`--meta`、`--exclude LABEL`、`--sigma-contact MM`（既定 1.0）、`--sigma-90-extra MM`（既定 1.0。90° の記録だけ二乗和で上乗せ）、`--h-prior-mm`・`--h-sigma-mm`（meta の値が既定）、`--calibration-yaml`（識別の確認と δ_old の読み取り用。読むだけ）。**yaml を書く引数は無い**（6.1）。
 - 表示: 最初の行（0.2）、使った記録・外した記録、記録ごとの残差（mm）と ε と x、δ ± sd（絶対値と、現在の yaml との差）、h、相関（lift・elbow・wrist・h）、1 回ずつ外したときの δ の変化、同じ姿勢の 2 回の差、条件数、各項目の合否、最終の判定。合格した関節の「yaml に貼る行」（0.1° 刻み）と、合格しなかった関節の「書かない（理由）」。wrist の規則と δ_wrist = 0 の再当てはめ（4 章）。
@@ -339,7 +369,7 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 
 ### 6.1 yaml には書かない（ユーザーの決定、2026-11-17）
 
-- 道具（`floor_touch_fit.py`）は yaml を**書かない**。`--write`・`--output`・`--joints`・`--force` は設けない（読むだけ。yaml のパスは識別の確認のために読む `--calibration-yaml` だけ）。
+- 道具（`zero_offset_fit_run.py`）は yaml を**書かない**。`--write`・`--output`・`--joints`・`--force` は設けない（読むだけ。yaml のパスは識別の確認のために読む `--calibration-yaml` だけ）。
 - 道具が表示するもの（合格した関節だけ）: yaml に貼る行（関節名と `zero_offset_deg` を 0.1° 刻みに丸めた値。例: `elbow_flex: ... zero_offset_deg: -6.3` の差し込み部分だけ）と、現在の yaml の δ_old との差（絶対値と差）。合格しなかった関節（wrist の規則を含む）は、貼る行を**出さず**、「書かない（理由）」と明記する。
 - yaml は J5 のコミットで私が手で直す（承認を得てから）。0.2 のコメントを付ける。値は読み込みの検査（J1。有限・10° 以内・gripper は不可）と、起動の INFO（J2。δ ≠ 0 の関節だけ）で確かめる。元の yaml の内容（該当行と sha256）は J5 のとき `inventory.md` に控える。
 - 既存の δ との関係: 結果は絶対値で、現在の yaml の δ_old との差も出す。δ_old ≠ 0 の yaml で記録したデータも、同じ式で絶対値が出る。貼るのは絶対値（置き換え。足し算ではない）。差が 10° を超える・符号が逆で大きいなどは警告。
@@ -366,21 +396,50 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 
 ## 7. 試験の見込み、守りを外す確認、実機の手順書の骨組み、コミットの区切り
 
-### 7.1 試験の見込み（推測。展開後で 60 件前後。C3 と同じ方針で、主な守りに絞る）
+### 7.1 試験の見込み（推測。展開後。C3 と同じ方針で、主な守りに絞る。9.1 の回答を反映して見直した）
 
-事実: 今の件数は 1002（bringup 47、calibration 82、description 2、hardware 137、moveit_config 0、ik 364、camera 370）。calibration に Python の試験が加わる（5.1）。camera の過去の実績は見込みの数倍に出たので、守りを下の 5 つに限り、パラメータ化の展開を抑える。
+事実: 今の件数は 1002（bringup 47、calibration 82、description 2、hardware 137、moveit_config 0、ik 364、camera 370。ユーザーの報告）。注: `build/` の xml の testcase を数えると calibration は 80（gtest 27 + 53）、camera は 357（pytest 326 + lint 31）で、報告の 82・370 と一致しない（colcon の数え方の差と思う。未確認）。以下は**増える件数**で書き、実装のとき `colcon test-result` の増分で比べる。calibration に Python の試験と C++ の試験（F1b）が加わる。camera の過去の実績は見込みの数倍に出たので、守りを下の表に限り、パラメータ化の展開を抑える。
 
-| 守り | 内容（展開後） | 見込み（件） |
-|---|---|---|
-| モデルと当てはめの計算の正しさ | 合成データの戻り（δ の組 3 通り × 姿勢の組 2 通り = 6）、δ の符号（1）、h の符号（1）、q_raw0 の変換（δ_old ≠ 0 でも絶対値が同じ。2）、最小の頂点が固定あごのメッシュ全体の最小であること（合成の小さな STL。2）、90° の σ の上乗せ（1）、σ と 1 回外した変化が式と合う（2）、貼る行の丸め・書式・δ_old との差（3）、wrist 固定の再当てはめ（2） | 約 20 |
-| 記録の拒否 | 静止していない（1）、ε < ε_min（境目の両側。2）、識別の違いで追記を拒否（yaml の sha256、δ_old、URDF の sha256、`calibration_kind` の 4 通り。4）、CSV と meta の形式（コメント行を飛ばすことを含む。2）、元の CSV を書き換えない（1） | 約 10 |
-| fit の拒否 | meta が無い（1）、識別の違い（1）、URDF の sha256 の違い（1）、`calibration_kind` の違い（1）、除外した記録の扱い（1） | 約 5 |
-| 合否の判定 | 姿勢の数・記録の数（境目の両側。2）、傾き 3 群（2）、x の広がり 150 mm（2）、残差 RMS と最大（2）、1 回外した変化（1）、δ の絶対値 10°（1）、wrist の貼る行（出す、δ が 1.5° 未満、sd が 1.0° 超、境目。4）、終了コード 0 と 2（2） | 約 16 |
-| 道具の静的な試験（ROS を起動しない） | 記録の道具が `/joint_states` を購読するだけで、発行・サービス・書き込み系の import が無い（1）、fit に `--write`・`--output`・`--joints`・`--force` が無く、yaml を書く関数を呼ばない（2）、最初の行に `[zero-offset calibration]` が出る（1） | 約 4 |
-| 合計 | | 約 55（60 前後。calibration は 82 → 約 137、全体は 1002 → 約 1057。camera は 370 のまま） |
+**段ごとの増分（展開後。CTest は ctest の項目数、pytest・gtest・lint は testcase の数）**
 
+| 段 | pytest | gtest | lint（flake8 1 と pep257 は py ファイルごとに 1） | CTest の項目 |
+|---|---|---|---|---|
+| F1（docs） | 0 | 0 | 0 | 0 |
+| F1b（C++ のコメント 2 行） | 0 | +2 | 0 | 0（既存の `test_measure_apply` の中） |
+| F2（`zero_offset.py`） | 約 +40 | 0 | +5（flake8 1、pep257 4。lint を採るとき） | +4（pytest 2、flake8、pep257） |
+| F3（`zero_offset_record.py`・記録の道具） | 約 +27 | 0 | +3（pep257 3） | +2 |
+| F4（fit の道具） | 約 +15 | 0 | +1（pep257 1） | +1 |
+| 合計 | 約 +82（70〜95） | +2 | +9（lint を採らなければ 0） | +7（lint を採らなければ +5。今の 2 から 9 または 7） |
+
+- 全体の見込み: calibration は 82 → 約 175（lint なしで 約 166）、全体は 1002 → 約 1095（lint なしで 約 1086）。camera・ik・hardware・bringup・description・moveit_config は不変。
+- lint の内訳: ament_copyright は使わない（C++ の著作権の 1 行ヘッダーが標準に合わない。推測）。cpplint・uncrustify・cppcheck・lint_cmake・xmllint も使わない（C++ と CMake は今まで lint 対象外）。
+
+**pytest の内訳**（F2〜F4。守りごと）
+
+| 段 | 守り | 内容（展開後） | 見込み（件） |
+|---|---|---|---|
+| F2 | モデルと当てはめの計算の正しさ | 合成データの戻り（δ の組 3 通り × 姿勢の組 2 通り = 6）、δ の符号（1）、h の符号（1）、q_raw0 の変換（δ_old ≠ 0 でも絶対値が同じ。2）、最小の頂点が固定あごのメッシュ全体の最小であること（合成の小さな STL。2）、90° の σ の上乗せ（1）、σ と 1 回外した変化が式と合う（2）、貼る行の丸め・書式・δ_old との差（3）、wrist 固定の再当てはめ（値 2、sd の表示 1。3） | 約 21 |
+| F2 | 合否の判定 | 姿勢の数・記録の数（境目の両側。2）、傾き 3 群（2）、x の広がり 150 mm（2）、残差 RMS と最大（2）、1 回外した変化（1）、δ の絶対値 10°（1）、wrist の貼る行（出す、δ が 1.5° 未満、sd が 1.0° 超、境目。4）、終了コード 0 と 2 の判定（2） | 約 16 |
+| F2 | 静的な試験（ROS を起動しない） | 第三者の import がすべて package.xml に宣言されている（1）、行が 99 字以下（1）、純粋なモジュールが rclpy・serial を import しない（1） | 約 3 |
+| F3 | 記録の拒否 | 静止していない（1）、ε < ε_min（境目の両側。2）、識別の違いで追記を拒否（yaml の sha256、δ_old、URDF の sha256、`calibration_kind` の 4 通り。4）、CSV と meta の形式（コメント行を飛ばすことを含む。2）、元の CSV を書き換えない（1） | 約 10 |
+| F3 | 識別の関数が camera と同じ出力（item 5） | `test_record.py` の `read_zero_offsets` の入力と期待値を写す: 既定 0（1）、elbow −6.3（1）、上限 10 で通る（1）、上限超・非有限・bool・文字列の拒否（4）、gripper 0 は通り 1.0 は拒否（2）、ファイル無し・壊れた yaml・角度でない関節の拒否（3）。camera は import せず、期待値は試験に書き写す | 約 12 |
+| F3 | 記録の道具の静的な試験（ROS を起動しない） | `/joint_states` を購読するだけ（1）、発行・サービス・書き込み・プロセスを起動する名前が無い（1）、最初の行に `[zero-offset calibration]`（1）、引数がちょうど期待どおり（1）、ROS を使わない検査が `rclpy.init` の前（1） | 約 5 |
+| F4 | fit の拒否と表示 | meta が無い（1）、識別の違い（1）、URDF の sha256 の違い（1）、`calibration_kind` の違い（1）、除外した記録の扱い（1）、`--calibration-yaml` が識別と違うときの拒否（1）、終了コード 0・2・1（3）、不合格でも全項目を出す（1）、wrist の規則と固定の再当てはめの表示（2） | 約 12 |
+| F4 | fit の静的な試験 | `--write`・`--output`・`--joints`・`--force` が無い（1）、yaml を書く関数を呼ばない（1）、最初の行に `[zero-offset calibration]`（1） | 約 3 |
+| F1b（gtest） | apply のコメント 2 行 | apply が作る yaml の先頭に 2 行が有る（1）、コメントを除いた yaml の中身（キー・値・順序）は変わらない（1） | +2（C++。pytest でない） |
+| 合計 | | pytest 約 82（F2 40、F3 27、F4 15）、gtest +2、lint 最大 +9 | 約 93。calibration は 82 → 約 175、全体は 1002 → 約 1095 |
 - 変えないパッケージの件数は不変（bringup 47、description 2、hardware 137、moveit_config 0、ik 364、camera 370）。`git diff --stat` に出るのは calibration だけ（と tools/、docs）。
-- `colcon test` は calibration（と不変の確認に camera・ik・hardware）を、コミットの前に、両方の setup.bash を source して実行し、失敗があれば先に報告。docs だけの変更は省略して報告に書く。
+- **ビルドと colcon test の範囲**（各段。両方の setup.bash を source。失敗があればコミットの前に報告。docs だけの段は省略して報告に書く）:
+
+| 段 | colcon build | colcon test |
+|---|---|---|
+| F1 | 省略（docs と `git mv` だけ。コードは変わらない） | 省略 |
+| F1b | `--packages-select so_arm101_calibration` | calibration と hardware（gtest 2 本の増分。hardware は不変の確認） |
+| F2 | 同上（`ament_cmake_python` と lint の新しい設定が通るか。`so_arm101_calibration/` と `include/so_arm101_calibration/` が衝突しないことをここで確認） | calibration |
+| F3 | 同上 | calibration |
+| F4 | 同上 | 全パッケージ（1002 + 増分と一致するか。camera 370・ik 364・hardware 137・bringup 47・description 2 は不変） |
+| F5 | 省略（docs だけ） | 省略 |
+| F6 | 実機の後。yaml の変更のあと `--packages-select so_arm101_hardware so_arm101_calibration` | hardware と calibration（本番の yaml の検査） |
 - 試験に入れないもの（報告する）: 実機の挙動、メッシュと実物の差、表示の見た目（端末の整形）、購読の通信そのもの。
 
 ### 7.2 守りを外す確認（スクラッチのコピーで。別の build・install。tools/ もコピー。リポジトリは変えない。外す → 落ちる試験を確かめる）
@@ -405,6 +464,12 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 | 16 | wrist の規則を外す（1.5° 未満でも貼る行を出す） | 合否（wrist の貼る行） |
 | 17 | fit に yaml を書く引数・関数を足す（`--write` など） | 静的な試験（引数と呼び出しが無いこと） |
 | 18 | 記録の道具が `/joint_states` 以外に発行する（トルク・サーボの書き込み系を足す） | 静的な試験 |
+| 19 | apply のコメント 2 行を外す（F1b。C++ をスクラッチでビルド） | gtest（2 行の有無） |
+| 20 | apply のコメントを足すときに yaml の中身（キー・値・順序）まで変える | gtest（中身が同じ） |
+| 21 | 識別の関数の δ の上限 10° の検査を外す（F3） | 識別の同一性（上限超の拒否） |
+| 22 | 識別の関数の gripper の δ 不可の検査を外す（F3） | 識別の同一性（gripper） |
+| 23 | wrist を 0 のままにするとき、固定した再当てはめでなく自由にした値を貼る行にする（F2） | wrist 固定の再当てはめ |
+| 24 | py ファイルに 100 字の行を 1 行足す（lint を採るとき） | flake8、静的な試験の 99 字 |
 
 - 守りを外した結果、落ちる試験が無いものは、試験を足すか、その守りを試験の対象外と報告する。
 
@@ -416,23 +481,24 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 
 | 段 | 内容 | 試験 | 実機 |
 |---|---|---|---|
-| F0 | 本書（計画書）と 3 章の結果の記録。docs だけ | 省略 | 不要 |
-| F1 | 改名案（0.2）を採るときの `git mv` と全置換。docs だけ | 省略 | 不要 |
-| F2 | calibration: `CMakeLists.txt`・`package.xml`（5.1）、`floor_touch.py`（メッシュ・モデル・当てはめ・統計・姿勢の検査・合否・貼る行）。試験 | calibration | 不要 |
-| F3 | `floor_touch_record.py`（記録の形式・識別）と `tools/floor_touch_run.py`。試験 | calibration | 不要（ROS は起動しない試験） |
-| F4 | `tools/floor_touch_fit.py`（表示だけ。yaml は書かない）。試験 | calibration | 不要 |
-| F5 | docs: 実機の手順書 `docs/floor_touch_real_check.md`、`joint_offset_plan.md`・`camera_stage_plan.md`・`so_arm101_calibration_check.md` の注記（0.2・6.3）、`inventory.md` | docs のみ | 不要 |
+| F0 | 本書（計画書）と 3 章の結果の記録。docs だけ。**済み（c54930f）** | 省略 | 不要 |
+| F1 | 計画書の `git mv`（`floor_touch_plan.md` → `zero_offset_calib_plan.md`）と本書の全置換、9.2 の回答の反映（本書の今回の変更を含む）。docs だけ | 省略 | 不要 |
+| F1b | C++: `src/apply.cpp` の yaml ヘッダーのコメントに 2 行（0.2）。`test_measure_apply.cpp` に gtest 2 件。CMake は変えない | calibration・hardware | 不要（実機を開かない。偽サーボの試験だけ） |
+| F2 | calibration: `CMakeLists.txt`・`package.xml`（5.1）、`so_arm101_calibration/__init__.py`、`zero_offset.py`（メッシュ・モデル・当てはめ・統計・姿勢の検査・合否・貼る行）。試験 | calibration | 不要 |
+| F3 | `zero_offset_record.py`（記録の形式・識別。camera と同じ規則の重複）と `tools/zero_offset_record_run.py`。`package.xml` に rclpy・sensor_msgs。試験 | calibration | 不要（ROS は起動しない試験） |
+| F4 | `tools/zero_offset_fit_run.py`（表示だけ。yaml は書かない）。試験 | calibration（と全パッケージの不変の確認） | 不要 |
+| F5 | docs: 実機の手順書 `docs/zero_offset_calib_real_check.md`、`joint_offset_plan.md` と `so_arm101_calibration_check.md` の冒頭の用語の注記（0.2）、`camera_stage_plan.md` の順序の注記と `joint_offset_plan.md` の直す所（6.3）、`inventory.md` | docs のみ | 不要 |
 | F6（J5） | ユーザーが実機で記録 → オフラインで fit → 合格した関節の貼る行を、承認を得て私が yaml に手で入れる（0.2 のコメントつき。元の行と sha256 を inventory に控える）→ build → R0〜R3 と確認の実行 | hardware・calibration（本番の yaml の検査）。J1 の読み込みの検査と J2 の起動の INFO で確かめる | 要 |
 
-- F0〜F5 は yaml を変えないので実機の挙動は今と同じ。J5（F6）だけが挙動を変える。
+- F0〜F5 は yaml を変えないので実機の挙動は今と同じ（F1b は apply が作る yaml のコメントだけ。apply を実行しない限り何も起きない）。J5（F6）だけが挙動を変える。
 
-### 7.5 実機の手順書の骨組み（F5 で `docs/floor_touch_real_check.md` に書く。ユーザーが実施。私は実機を動かさない）
+### 7.5 実機の手順書の骨組み（F5 で `docs/zero_offset_calib_real_check.md` に書く。ユーザーが実施。私は実機を動かさない）
 
 1. 準備: センターキャリブが済んでいること。yaml の δ_old を確認（今は無し）。URDF・メッシュ・yaml の sha256 の控え。**机の高さの確認**: 腕の取り付け面と机が同じ面か。同じなら h の事前分布は平均 −2.4 mm、σ_h 1 mm（既定）。違う台なら高さの差を物差しで測り、`--h-prior-mm` を測った値に直す（σ_h 1 mm は測定の精度による。測れなければ 2 mm）。
 2. 読み取り専用の起動（`read_only:=true`。トルク OFF）。**安全**: トルク OFF なので腕は自重で落ちる。片手で腕を支える。机にそっと当てる（押し付けない。たわみが誤差になる）。グリッパーは開かない。起動のログの「δ ≠ 0 の関節の INFO」と yaml の δ_old の一致を確認。
-3. 記録: `floor_touch_run.py` を起動（最初の行に `[zero-offset calibration]`）。P1（90°、x 100）、P2（90°、x 300）、P3（70°、x 150）、P4（50°、x 250）を順に、各 2 回。各姿勢で、表示の Δx・Δε が範囲（±10 mm、±5°）に入るまで手で動かし、先端を机に当て、静止したら Enter。2 回目は一度離してもう一度当てる。**90° は、固定あごの先が机に当たっていることと、動くあごとの高さの差が 1 mm 以下であることを目で確認する**。
+3. 記録: `zero_offset_record_run.py` を起動（最初の行に `[zero-offset calibration]`）。P1（90°、x 100）、P2（90°、x 300）、P3（70°、x 150）、P4（50°、x 250）を順に、各 2 回。各姿勢で、表示の Δx・Δε が範囲（±10 mm、±5°）に入るまで手で動かし、先端を机に当て、静止したら Enter。2 回目は一度離してもう一度当てる。**90° は、固定あごの先が机に当たっていることと、動くあごとの高さの差が 1 mm 以下であることを目で確認する**。
 4. 終了: 止めるときは自分で起動したプロセスを PID で kill -INT（pkill 禁止）。ps と `ros2 node list --no-daemon` の両方で残りがないことを確認。
-5. オフラインの当てはめ: `floor_touch_fit.py CSV`（表示だけ）。結果をユーザーと私で確認。合格した関節の「貼る行」を、J5 のコミットで私が yaml に手で入れる（承認を得てから）。
+5. オフラインの当てはめ: `zero_offset_fit_run.py CSV`（表示だけ）。結果をユーザーと私で確認。合格した関節の「貼る行」を、J5 のコミットで私が yaml に手で入れる（承認を得てから）。
 6. 反映: colcon build → 起動のログで δ の INFO を確認 → 出発点の物差し（予測との比較。独立の確認）→ 確認の実行（6.2）→ R0〜R3（`joint_offset_plan.md` 7.4）。
 7. 記録: 材料を `~/so_arm101_check/` の新しいディレクトリに置き、sha256 を `inventory.md` に。
 
@@ -473,13 +539,18 @@ jaw_diff は傾きを浅くするほど大きくなる（動くあごが上が�
 | 物差し | 独立の確認として残す | 6.3 |
 | 呼び名 | センターキャリブ（center calibration）とオフセットキャリブ（zero-offset calibration） | 題名、0.2 |
 | `/tmp/claude-1000/ed.sh` | そのまま残してよい | なし |
+| 改名（9.2 の 1。2026-11-17） | `zero_offset_*` に改名する（docs・tools・モジュール・CSV・新しい材料のディレクトリ）。既存の材料 `~/so_arm101_check/floor_touch_20261117/` は動かさない | 0.2、7.4 の F1 |
+| wrist を 0 のままにするとき（9.2 の 2） | lift・elbow の貼る行は、wrist = 0 に固定して当てはめ直した値（その sd も表示） | 4、7.1 |
+| yaml のコメント（9.2 の 3） | apply が作る yaml の先頭のコメントに 2 行（zero_offset_deg はオフセットキャリブの値。center・min・max などはセンターキャリブの値）。C++ の小さな変更（段 F1b） | 0.2、7.4 |
+| 既存 docs の用語の注記（9.2 の 4） | `so_arm101_calibration_check.md` と `joint_offset_plan.md` の冒頭に足す（F5） | 0.2、7.4 |
+| 識別の関数（9.2 の 5） | calibration 側に重複して持つ。camera と同じ出力を試験で確かめる | 5.1、7.1 |
 
-### 9.2 確認したいこと（私の推奨つき）
+### 9.2 確認したいこと（実装の前の承認の項目）
 
 | 項目 | 私の推奨 | 理由 |
 |---|---|---|
-| 1. 道具・docs の改名（0.2 の表） | 改名する（`zero_offset_*`）。F1 で `git mv` と全置換 | 名前でオフセットキャリブと分かる。camera の命名と同じ形 |
-| 2. wrist を 0 のままにするとき、lift・elbow の貼る行は wrist を 0 に固定した再当てはめの値にするか | する（両方の値を表示し、貼る行は固定した方） | wrist を自由にした elbow は wrist と相関 −0.6 があり、wrist を 0 にする貼り方とは整合しない |
-| 3. yaml のコメントを `apply` の再作成で消さない（apply のヘッダの文面に足す） | 今は変えない。J5 で手で付け、消えたら inventory の控えを見る | C++ の変更が増える。値は持ち越されるので実害は小さい |
-| 4. 既存 docs の用語の注記（`so_arm101_calibration_check.md`、`joint_offset_plan.md`） | F5 で冒頭に注記を足す（本文は直さない） | 「キャリブ」「校正」がセンターキャリブを指すと分かる |
-| 5. 記録の識別の関数の重複（camera と calibration） | 今は約 30 行の重複を許し、試験で同じ出力を確かめる | calibration が camera に依存しないため |
+| 1. F1 の `git mv docs/floor_touch_plan.md docs/zero_offset_calib_plan.md`（作業ツリーとインデックスを変える git の操作） | 承認する（1 件だけ） | 改名は決定済み。実装前に 1 回で行う |
+| 2. F2 の `CMakeLists.txt`・`package.xml` の変更（5.1 の具体） | 承認する | camera・ik と同じ形 |
+| 3. lint: `ament_flake8()` と `ament_pep257()` だけを明示で足す（`ament_lint_auto` は使わない） | 足す（+9 件） | camera・ik と同じ水準を保てる。足さなければ CMake・package.xml の行が 4 行減り、件数は 9 減る |
+| 4. F1b の C++ の変更（`apply.cpp` のコメント 2 行と gtest 2 件） | 承認する | 決定済み。yaml の中身は変えない |
+| 5. 守りを外す確認をスクラッチで行うときの C++ のビルド（F1b の 19・20） | 承認する（別の build・install。ユーザーが実機を使っていない間に実行） | ユーザーが実機を使っている間は、ビルドとモックを実行しない |
