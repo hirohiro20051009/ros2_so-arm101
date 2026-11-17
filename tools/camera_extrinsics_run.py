@@ -101,7 +101,8 @@ def main(argv=None):
     except ex.WriteRefused as exc:
         print(f'refused: {exc}')
         return ex.EXIT_FAIL
-    print(f'written: {args.output} and {ex.sidecar_path_for(args.output)}')
+    print(f'written: {args.output} and {ex.sidecar_path_for(args.output)}' + (
+        f' with {len(solution.warnings)} warning(s)' if solution.warnings else ''))
     print('the install copy is made by: colcon build --packages-select so_arm101_camera '
           f'(or try it with extrinsics_file:={args.output}; default {cc.TF_PARENT_FRAME} to '
           f'{cc.TF_CHILD_FRAME})')

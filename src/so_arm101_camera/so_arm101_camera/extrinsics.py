@@ -55,7 +55,8 @@ GROUP_DISTANCE_M = 0.010  # m, rows this close are left out together in the leav
 MIN_POINTS = 6  # as the note of the old cal_to_tf.py:171
 RMS_MAX_M = 0.005  # the old warning of cal_to_tf.py:169 (推測)
 LOO_MAX_M = 0.008  # (推測)
-SCALE_TOLERANCE = 0.01  # |scale - 1| (推測)
+SCALE_WARN = 0.01  # |scale - 1| over this is a warning, the result is still accepted
+SCALE_FAIL = 0.05  # |scale - 1| over this fails (user decision of 2026-11-17)
 S_MIN_MIN_M = 0.025  # docs/camera_pose_study.md 3.3 (推測)
 
 EXIT_OK = 0
@@ -239,14 +240,23 @@ def judge(count, rms_m, loo_max_m, scale, s_min_m, flipped):
     elif loo_max_m > LOO_MAX_M:
         lines.append(f'the largest leave-one-out error {loo_max_m * 1000:.2f} mm is over '
                      f'{LOO_MAX_M * 1000:.1f} mm')
-    if not math.isfinite(scale) or abs(scale - 1.0) > SCALE_TOLERANCE:
-        lines.append(f'the scale {scale:.4f} is not within 1 +- {SCALE_TOLERANCE}')
+    if not math.isfinite(scale) or abs(scale - 1.0) > SCALE_FAIL:
+        lines.append(f'the scale {scale:.4f} is not within 1 +- {SCALE_FAIL}')
     if not math.isfinite(s_min_m) or s_min_m < S_MIN_MIN_M:
         lines.append(f'the smallest spread {s_min_m * 1000:.1f} mm is under '
                      f'{S_MIN_MIN_M * 1000:.1f} mm')
     if flipped:
         lines.append('the fit needed the correction of a reflection')
     return lines
+
+
+def scale_warning(scale):
+    """Return the warning line for a scale outside 1 +- SCALE_WARN but not beyond SCALE_FAIL."""
+    if not math.isfinite(scale) or not SCALE_WARN < abs(scale - 1.0) <= SCALE_FAIL:
+        return None
+    return (f'the scale {scale:.4f} is outside 1 +- {SCALE_WARN} (warning only; it is a failure '
+            f'outside 1 +- {SCALE_FAIL}): check the tag size, the intrinsics and the joint '
+            f'zero offsets')
 
 
 # ----------------------------------------------------------------------------- the input
@@ -561,6 +571,7 @@ class Solution:
     link_translation: object = None
     quaternion: object = None
     rpy_deg: object = None
+    warnings: tuple = ()  # lines that do not change the result
 
 
 def solve(points, optical, tag_size=None):
@@ -585,12 +596,13 @@ def solve(points, optical, tag_size=None):
     link_rotation, link_translation = camera_link_pose(
         rotation, translation, optical_rotation, np.asarray(optical.translation))
     failures = judge(len(points), rms(residual), loo_max, scale, float(spreads[2]), flipped)
+    warning = scale_warning(scale)
     return Solution(
         labels, tuple(failures), rotation, translation, flipped, residual, rms(residual),
         leave_out, tuple(tuple(g) for g in groups), loo_max, scale,
         tag_size * scale if tag_size else math.nan, spreads, float(spreads[2]),
         link_rotation, link_translation, matrix_to_quaternion(link_rotation),
-        matrix_to_rpy_deg(link_rotation))
+        matrix_to_rpy_deg(link_rotation), (warning,) if warning else ())
 
 
 def tag_size_of(meta):
@@ -625,8 +637,14 @@ def report_lines(solution, rejected):
         lines.append(f'base_link to camera_link: translation_m {np.round(t, 5).tolist()} '
                      f'quaternion_xyzw {np.round(q, 5).tolist()} rpy_deg '
                      f'{np.round(rpy, 2).tolist()}')
+    lines += [f'WARNING: {w}' for w in solution.warnings]
     lines += [f'FAILED: {f}' for f in solution.failures]
-    lines.append('result: ' + ('FAILED' if solution.failures else 'accepted'))
+    if solution.failures:
+        lines.append('result: FAILED')
+    elif solution.warnings:
+        lines.append(f'result: accepted (with {len(solution.warnings)} warning)')
+    else:
+        lines.append('result: accepted')
     return lines
 
 
@@ -679,7 +697,7 @@ def sidecar_text(solution, rejected, csv_path, meta_path, meta, optical, main_te
             'cam_n_min': CAM_N_MIN, 'incidence_max_deg': INCIDENCE_MAX_DEG,
             'cam_std_max_m': CAM_STD_MAX_M, 'group_distance_m': GROUP_DISTANCE_M,
             'min_points': MIN_POINTS, 'rms_max_m': RMS_MAX_M, 'loo_max_m': LOO_MAX_M,
-            'scale_tolerance': SCALE_TOLERANCE, 's_min_min_m': S_MIN_MIN_M},
+            'scale_warn': SCALE_WARN, 'scale_fail': SCALE_FAIL, 's_min_min_m': S_MIN_MIN_M},
         'result': {
             'rms_mm': float(solution.rms * mm),
             'residual_mm': {n: float(v * mm) for n, v in zip(labels, solution.residual)},
@@ -693,7 +711,8 @@ def sidecar_text(solution, rejected, csv_path, meta_path, meta, optical, main_te
             'spreads_mm': [float(v * mm) for v in solution.spreads],
             's_min_mm': float(solution.s_min * mm),
             'rpy_deg': [float(v) for v in solution.rpy_deg],
-            'reflection_corrected': bool(solution.flipped)},
+            'reflection_corrected': bool(solution.flipped),
+            'warnings': list(solution.warnings)},
         'camera_link_to_optical_frame': {
             'translation_m': list(optical.translation),
             'quaternion_xyzw': list(optical.quaternion)},

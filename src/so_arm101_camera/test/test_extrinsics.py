@@ -111,9 +111,10 @@ def write_meta(path, meta):
         yaml.safe_dump(meta, f, sort_keys=False)
 
 
-def dataset(tmp_path, truth=TRUTHS[0], bad_label=None, name='c2.csv'):
-    """Write a CSV and its meta file of a known camera_link; one row may be 20 mm off."""
+def dataset(tmp_path, truth=TRUTHS[0], bad_label=None, name='c2.csv', scale=1.0):
+    """Write a CSV and its meta file of a known camera_link (scale: the fit finds it)."""
     camera, base = world(truth)
+    camera = camera / scale
     if bad_label is not None:
         camera = camera.copy()
         camera[int(bad_label[1:]) - 1, 0] += 0.020
@@ -264,15 +265,87 @@ GOOD = dict(count=13, rms_m=0.003, loo_max_m=0.005, scale=1.0, s_min_m=0.03, fli
 
 def test_a_good_result_and_the_limits_themselves_are_accepted():
     assert ex.judge(**GOOD) == []
-    assert ex.judge(count=6, rms_m=0.005, loo_max_m=0.008, scale=1.0099, s_min_m=0.025,
+    assert ex.judge(count=6, rms_m=0.005, loo_max_m=0.008, scale=1.0499, s_min_m=0.025,
                     flipped=False) == []
+    assert ex.scale_warning(GOOD['scale']) is None
 
 
 @pytest.mark.parametrize('change', [
-    dict(count=5), dict(rms_m=0.0051), dict(loo_max_m=0.0081), dict(scale=1.0101),
+    dict(count=5), dict(rms_m=0.0051), dict(loo_max_m=0.0081), dict(scale=1.0501),
     dict(s_min_m=0.0249), dict(flipped=True), dict(loo_max_m=math.nan)])
 def test_each_gate_fails_by_itself(change):
     assert len(ex.judge(**dict(GOOD, **change))) == 1
+
+
+@pytest.mark.parametrize('scale,warned', [
+    (1.0, False), (1.0099, False), (0.9901, False),
+    (1.0101, True), (0.9899, True), (1.0499, True), (0.9501, True)])
+def test_the_scale_warning_starts_beyond_one_percent(scale, warned):
+    text = ex.scale_warning(scale)
+    assert (text is not None) is warned
+    if warned:
+        assert f'{scale:.4f}' in text and 'warning only' in text
+
+
+@pytest.mark.parametrize('scale', [1.0499, 0.9501])
+def test_a_scale_up_to_five_percent_is_not_a_failure(scale):
+    assert ex.judge(**dict(GOOD, scale=scale)) == []
+
+
+@pytest.mark.parametrize('scale', [1.0501, 0.9499, math.nan, math.inf])
+def test_a_scale_beyond_five_percent_or_not_finite_fails_without_a_warning(scale):
+    failures = ex.judge(**dict(GOOD, scale=scale))
+    assert len(failures) == 1 and 'scale' in failures[0]
+    assert ex.scale_warning(scale) is None
+
+
+@pytest.mark.parametrize('scale,warned,failed', [
+    (1.125, False, False), (1.1250001, True, False), (0.875, False, False),
+    (0.8749999, True, False), (1.25, True, False), (1.2500001, False, True),
+    (0.75, True, False), (0.7499999, False, True)])
+def test_the_limits_themselves_with_exact_constants(monkeypatch, scale, warned, failed):
+    monkeypatch.setattr(ex, 'SCALE_WARN', 0.125)
+    monkeypatch.setattr(ex, 'SCALE_FAIL', 0.25)
+    assert (ex.scale_warning(scale) is not None) is warned
+    assert bool(ex.judge(**dict(GOOD, scale=scale))) is failed
+
+
+def test_a_two_percent_scale_is_accepted_with_one_warning():
+    camera, base = world(TRUTHS[0])
+    solution = ex.solve(points_of(camera / 1.02, base), OPTICAL, 0.06)
+    assert not solution.failures and len(solution.warnings) == 1
+    assert not ex.solve(points_of(camera, base), OPTICAL, 0.06).warnings
+
+
+def test_a_six_percent_scale_fails_and_has_no_warning():
+    camera, base = world(TRUTHS[0])
+    solution = ex.solve(points_of(camera / 1.06, base), OPTICAL, 0.06)
+    assert any('scale' in f for f in solution.failures) and not solution.warnings
+
+
+def test_the_report_tells_a_warning_from_a_failure():
+    camera, base = world(TRUTHS[0])
+    for factor, last, shown in ((1.0, 'result: accepted', False),
+                                (1.02, 'result: accepted (with 1 warning)', True),
+                                (1.06, 'result: FAILED', False)):
+        lines = ex.report_lines(ex.solve(points_of(camera / factor, base), OPTICAL, 0.06), [])
+        assert lines[-1] == last
+        assert any(line.startswith('WARNING: ') for line in lines) is shown
+
+
+def test_the_record_has_the_thresholds_and_the_warning(tmp_path):
+    csv_path = dataset(tmp_path, scale=1.02)
+    rows = ex.read_csv_rows(csv_path)
+    meta, optical = ex.read_meta(str(csv_path) + '.meta.yaml')
+    points, rejected = ex.select_rows(rows)
+    solution = ex.solve(points, optical, ex.tag_size_of(meta))
+    record = yaml.safe_load(ex.sidecar_text(
+        solution, rejected, csv_path, str(csv_path) + '.meta.yaml', meta, optical, 'x',
+        '2026-11-17T00:00:00Z'))
+    assert record['thresholds']['scale_warn'] == 0.01
+    assert record['thresholds']['scale_fail'] == 0.05
+    assert 'scale_tolerance' not in record['thresholds']
+    assert len(record['result']['warnings']) == 1
 
 
 # ----------------------------------------------------------------------------- the selection

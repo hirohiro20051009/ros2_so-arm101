@@ -78,6 +78,27 @@ def test_write_makes_the_file_with_two_keys_and_its_record(tmp_path):
         ['c2.csv', 'c2.csv.meta.yaml', out.name, sidecar_of(out).name])
 
 
+def test_a_two_percent_scale_is_accepted_with_a_warning_and_can_be_written(tmp_path, capsys):
+    csv_path = dataset(tmp_path, scale=1.02)
+    out = tmp_path / 'camera_extrinsics.yaml'
+    assert run([csv_path, '--output', out]) == 0
+    text = capsys.readouterr().out
+    assert 'WARNING: ' in text and 'result: accepted (with 1 warning)' in text
+    assert 'not written' in text and not out.exists()
+    assert run([csv_path, '--output', out, '--write']) == 0
+    assert 'with 1 warning(s)' in capsys.readouterr().out
+    assert len(yaml.safe_load(sidecar_of(out).read_text())['result']['warnings']) == 1
+
+
+def test_a_six_percent_scale_fails_and_writes_nothing(tmp_path, capsys):
+    csv_path = dataset(tmp_path, scale=1.06)
+    out = tmp_path / 'camera_extrinsics.yaml'
+    assert run([csv_path, '--output', out, '--write']) == 2
+    text = capsys.readouterr().out
+    assert 'is not within 1 +- 0.05' in text and 'nothing is written' in text
+    assert not out.exists() and not sidecar_of(out).exists()
+
+
 def test_an_existing_file_is_not_replaced_without_force(tmp_path, capsys):
     out = tmp_path / 'camera_extrinsics.yaml'
     out.write_text(OLD)
