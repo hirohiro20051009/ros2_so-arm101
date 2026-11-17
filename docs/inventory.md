@@ -3532,3 +3532,68 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - 直し: `vr_follow_node.py` の `description_is_read_only` を、値を大文字小文字を区別せず（true・True・TRUE）、前後の空白を許し、すべての read_only パラメータが true のときだけ true とする形にした。偽入力はこの関数を import して使う（1 か所）。ノードの床の守りも同じ関数。
 - ほかの読み: ドライバの `parse_bool`（`sts3215_system.cpp`）とカメラの `parse_bool_argument` は、もともと小文字化してから比べる。`tools/ik_model_check.py` は robot_description から bool を読まない。
 - 試験: ik パッケージ 669 件、失敗 0（実機と同じ 1 行の形を含む）。他のパッケージはコードを変えていないので省略。戻し方: 直前のコミット 47a0284 から。
+
+## P6c の実機の結果（2026-11-17 23:12〜23:53。ユーザーが実施。全段合格。docs だけ）
+
+- 結果の詳細は `docs/p6_real_check.md` の 9 章。実機・launch・シリアルポートは Claude Code が動かしていない（ユーザーが実施）。材料は `~/so_arm101_check/p6_real_20261117/`（git 管理外、読むだけ）。
+- 要点: c0（c0-1 は 60 mm で BLOCKED `TRACKING_ERROR 0.203 rad`、c0-2 は 2 回目で合格）、c1（M・T `REACHED`、line 10・30 mm、stale、jump）、c2（closed 0.05・open 1.0 を確定。yaml は変えない）、終わり（RViz で折りたたみへ）。
+- c0-2 の 1 回目の `REFUSED_WINDUP windup=0.2032` は、BLOCKED の後に JTC が最後の点を指令として持ち続けたため（読み取り専用）。クラッチの前の検査が正しく働いた。A を起動し直して合格。
+- `rate_limited=38` は、グリッパーだけ（腕の `unexpected jump for an angle joint` の WARN は 0 件）。
+- jump の再開の瞬間に `ik_jump=0.3453`（C1 の 0.35 の手前）。次のコミットで比べ方を直す。
+- 材料の sha256（全桁）:
+
+| ファイル | sha256 |
+|---|---|
+| c0_arm_2.log | 1b39cd7e3884c0552dee9834f8b5fb98125e94181169ffb20747caa714e02764 |
+| c0_arm_3.log | db24d4dda59355c89ff52b122c864772d20f8922d2ed0da5f13e4ad4137eb1ef |
+| c0_arm.log | 48de8063acd71f18e0a5a1511e766e578152fad766f8e6eb66086b8122ee50c2 |
+| c0_node_2.log | f2e5115b709e1fc55682dbe1e90941662898887ec552e784ba8226950f846af5 |
+| c0_node.log | 7964b3d150df520ca0100100a2758da51c79193aeebd0223a440807fa5f8344f |
+| c0_node_noc3_2.log | 23b1a33621e041b63929b97d4b91bc2210d021db44e5e31d95fc7dc8dfcd5b9b |
+| c0_node_noc3.log | e3d0b682a5dc2755d2f5d88fd204fcd2cd667354dbe1e13ff2040ac93037c5b4 |
+| c1_arm.log | 14f40c4c85fae25d2e25e3d765b9055323ec7ceeba166012793f4ea8e12c2d9d |
+| c1_M_dry.log | 7b0ce300036dd6ad78e207600e5b0d86f9e0a998025cb5852e3c83906cfbfc60 |
+| c1_M.log | f36dfb90f4fafe88544e1e4dfc3fc4074d423773a90c5db70b6b68d763fb01c9 |
+| c1_node.log | 3b01eb8a3da107d29bfb1436fb4e8a666eca86b8d33f10c214cb88e417f732e0 |
+| c1_T_dry.log | edce1a2e7a0fa7138ab7817b67b1d5d82749c0570c319e8a2d9ec7975251835e |
+| c1_T.log | bee88510aacb812825aa8c48cd6472387f84c73697973c4c4fce825a3eafb757 |
+| c2a_node.log | 419a073173fca8339af12c31693f38e021d3e1efaf01509d2e10ae7e4c9c8dd6 |
+| c2b_node.log | 14af079de310bd0e93c042811ba9f969fb4b86d1ce600ac80bb182a8bf5e945b |
+| c5_fold_dry.log | 79a9a6d336a7eb89d01fce6308ab223091385fcae46a3691ba46480241fccb02 |
+| c5_M_dry.log | 0cea11e8cddb8598329a04c702ab3b4b8d73fb201a3e276db12dd2a9d5019fe8 |
+| c5_M.log | e3706c60216f21a0531f4a99c13ec499e64f881adf7ffdb1f31b948ffe9b3643 |
+| c0_line_2.txt | ab5251d6a07af8939a1a23b8c9fe5b9845b2f170e0d91a60003acbadac4bebba |
+| c0_line_60.txt | 3c400df919a7eec52f128d885f88deed8205b72b47ee6b8eff244820040b655c |
+| c0_line_noc3_2.txt | 80cbaa09108b560236d246235522db85d78326982e04a1ded26455a7b45e6500 |
+| c0_line_noc3.txt | 4a0762542b80ac61ef4b2948c761f6a312187dd837c9e538037f7fa06d4e05bf |
+| c0_line.txt | 81f8e6487a749049b31025e524b2feb921ebffa2ed27d93a3dcdabc0f7c3ac5e |
+| c0_start_pose.txt | b40d657554ec9dafb1a39cea594705bbeaa56fdd5a71906a07e3144bd303cb20 |
+| c1_jump_pose.txt | 31ac73b64a9a785ed084a1c6669d573afe88817c7b5cc8a1a0282ed4cff53db6 |
+| c1_jump.txt | 7dab8953db1ea3fcf6e440f88b165f57e01f4ebb0b46747c93a0c907ed3ab019 |
+| c1_line10_pose.txt | 05049d9067159cbdc934dcd3e3a699e6bef201715bc07cb35bfde928bfdd3e9a |
+| c1_line10.txt | 84dc2a0205ab54ebf9f85e1c0f734d2038c42d1b00f2114009cb65d47205c22e |
+| c1_line30_pose.txt | 69b39a11a409d2ca39ddd54d201c0350445022c16afa245435104419c6e8df23 |
+| c1_line30.txt | 9379dfa876508b0aafc0d0e83c551b3f33dcb236e4bf8796ce00102a1b31afb8 |
+| c1_stale_pose.txt | 93e29b025341c4243956c52e5f71930d56c0a0c91ec3fc5b6f90d8cfb6d39788 |
+| c1_stale.txt | b1ec1082e93a805c335974b1d2b12535583b2c0ed0b106ccccfd164d1777a8bc |
+| c1_start_pose.txt | 1e7d97e52fe3c59689cae46a6a550d2f788ca570fd9c37f6a4c3f6eea8542ee5 |
+| c1_T_pose.txt | 2dd809a4afa847363dcccadb2595c1e20851349ed0b06c3ce1cc7de882fec47a |
+| c2a_gripper_open.txt | 2eb327a0abbc436e4ce1fee9d816cff07c433eb7fcb9c4b3a4e6db42de4bb491 |
+| c2a_gripper.txt | edba6867a8c8681321f05b278543e66a7eea23d8f2d65e25ee4ba438c7c60d2a |
+| c2b_gripper_open.txt | 4973ecd17fe34b2bb4ebcebea3b6368c7c8259d7100216745322862b22e6e843 |
+| c2b_gripper.txt | 0bd1a99cfc953d97e82aba46ea99ea6b2e28e898a4e7b7f1ea320f4352e44b20 |
+| c5_fold_pose_2.txt | af4292fb9d6d26ad01d030caf3f7a2fbccf47179a8fdb5d42fcf8c04cd26ff9b |
+| c5_fold_pose.txt | 2df029a2ae8759070397c2adab096883667750bb5df36095cce0fe4b8139f239 |
+| c1_M.csv | 439b596402e92ec54dff04ff0474b0a9f4375bfec05cdc260c03774f4b9594e7 |
+| c1_T.csv | f98dabcf4e77ca462e4c0c4dad8c9120e358cc1c3b27f8dedd2892b6f4a279a2 |
+| c5_M.csv | 0b4845a88d447bb70524b3236e37d5fd15a5e6c57c9cbca85820eb1bd5b9d325 |
+| c0_line_2_csv/line.csv | f390aff53e01ad3139da448e2ecc850d868ca33bd35328d23de98ff37e55fd49 |
+| c0_line_60_csv/line.csv | 836db76b86cde4d3becd95589b97fe68f1c135ec2ad5a792623551a60e5132c5 |
+| c0_line_noc3_2_csv/line.csv | ea5d4403f03f01397d3f95b67017299648d0548038e163f597d3e1cb2609ee56 |
+| c0_line_noc3_csv/line.csv | 7ad4a91b10031f3ab7a6263f18a914758621627d6dae154106a81d24703685d6 |
+| c1_jump_csv/jump.csv | cc4ccb57aed4670839a3007fa93fbeb057b5015ea37f9c2b5f1e9fd2fa42ab72 |
+| c1_line10_csv/line.csv | d4e4561a4838a2f67405930a15caae1c2bc2541675de1c9125bc2a57968c6bd5 |
+| c1_line30_csv/line.csv | 87cf2e7069e726ec00f66ad746ef74c678781b5fde3fdba5f492b54ba49fe518 |
+| c1_stale_csv/stale.csv | 2a0ce65e44320852228d23148f1dc68da0a510617b88ba5407c94f2aa8b97aa3 |
+| c2a_gripper_csv/gripper.csv | 66f6904538200081b65e276ed121798da1ea2990efc30696143564141a632fce |
+| c2b_gripper_csv/gripper.csv | 40ce5aeac8ed0d47472982a81114fd00e978856bfbf030686bfdf114e83034c8 |

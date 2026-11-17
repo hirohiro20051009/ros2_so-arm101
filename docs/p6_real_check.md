@@ -471,3 +471,61 @@ ros2 node list --no-daemon
 ## 8. 記録に残すもの（`~/so_arm101_check/p6_real_20261117/`）
 
 A・B のログ、各偽入力の出力とタイムライン（CSV）、`*_pose.txt`、ik_move の CSV とログ、`c2*_gripper_*.txt`。材料の sha256 は `docs/inventory.md` の P6c の節に。
+
+## 9. 実機の結果（2026-11-17 23:12〜23:53。ユーザーが実施。全段合格）
+
+材料は `~/so_arm101_check/p6_real_20261117/`（git 管理外。sha256 は `docs/inventory.md` の「P6c の実機の結果」の節）。Claude Code は実機・launch・シリアルポートを動かしていない。ここに書くのは、ログとファイルを読んで確かめた事実。
+
+### c0（読み取り専用。腕は動かない）
+
+| 項目 | 結果 |
+|---|---|
+| c0-1 の 1 回目（`c0_arm.log`・`c0_node.log`・`c0_line.txt`） | 偽入力が `refused: the robot_description does not say read_only` で止まった。実機の値は `True`（大文字始まり）。d57734c で直した（1 章の 6）。腕は動いていない |
+| やり直し（`c0_arm_2.log`・`c0_node_2.log`） | A と B を起動し直した |
+| c0-1、30 mm（`c0_line_2.txt`） | IDLE → TRACKING → IDLE。BLOCKED は出なかった。読み − 指令の最大 0.1668 rad（C3 の 0.2 rad に届かない）。腕は動かず（先端 0.0 mm）。「TRACKING の後に BLOCKED」の項目は FAIL（予測どおりの手順の分岐） |
+| c0-1、60 mm（`c0_line_60.txt`、手順書どおりの 1 回） | TRACKING → BLOCKED（`TRACKING_ERROR_0.203_rad`）→ IDLE（RELEASED）。BLOCKED の後に点なし。腕は動かず（先端 0.0 mm）。読み − 指令の最大 0.2032 rad。全項目 PASS |
+| `REFUSED FLOOR` | 既定の床（0.045 m）で出なかった。`floor_z:=0.02` は使っていない |
+| c0-2 の 1 回目（`c0_node_noc3.log`・`c0_line_noc3.txt`） | `IDLE REFUSED_WINDUP windup=0.2032`（偽入力は FAIL。腕は動かず） |
+| 原因 | c0-1 の 60 mm の BLOCKED の後、JTC が、測定から 0.203 rad 離れた最後の点を指令として持ち続けた（読み取り専用なので腕は追いつかない）。次のクラッチの前の検査（`|reference − 測定| ≤ 0.06 rad`）が、正しく拒否した。コードの不具合ではない |
+| やり直し | A を起動し直し（`c0_arm_3.log`。指令が測定に戻る）、B は `max_tracking_error:=0.0`（`c0_node_noc3_2.log`）。`c0_line_noc3_2.txt`: IDLE → TRACKING → IDLE。BLOCKED なし。読み − 指令の最大 0.1680 rad（C3 がなければ指令は進み続ける）。腕は動かず。全項目 PASS |
+| A のログ | `READ-ONLY: command for 'shoulder_pan' differs … and is discarded` の WARN が起動ごとに 1 回（`c0_arm_2.log`・`c0_arm_3.log`。`c0_arm.log` では偽入力が起動しなかったので出ない）。`clamp: '` は 0 件。FAULT なし。`deactivated (no register was written)`、bus のカウンタはすべて 0 |
+| 出発点（`c0_start_pose.txt`） | 約 −5.2°、−86.9°、89.7°、34.3°、−2.7°（折りたたみ。elbow は +91° 以下） |
+
+### c1（書き込みモード。腕を支えた）
+
+| 項目 | 結果 |
+|---|---|
+| ik_move M（0, −55, 60, 40, 0 度） | dry-run 合格 → `REACHED` error 9.55 mm（基準 10 mm 以内）。`c1_M.log` |
+| ik_move T（0, −22, 30, 83, 0 度） | `REACHED` error 5.94 mm。経路の最低の z 0.0566 m。`c1_T.log` |
+| T の読み − 目標（`c1_T_pose.txt`、rad） | pan −0.0031、lift −0.0004、elbow +0.0331、wrist_flex −0.0094、wrist_roll −0.0084。基準内（elbow は大きい側の +0.045 rad 以内。ほかは 0.0082 rad の目安を wrist_flex・wrist_roll がわずかに超えるが、止める条件の 0.04 rad より小さい） |
+| line 10 mm | IDLE → TRACKING → IDLE。先端 10.6 mm。読み − 指令の最大 0.0354 rad。BLOCKED・HOLD なし |
+| line 30 mm | 先端 28.9 mm。最大 0.0413 rad（送った点との差は 0.0423 rad）。BLOCKED・HOLD なし |
+| stale | TRACKING → STALE（POSE）→ TRACKING → IDLE。STALE 中は点なし。最大 0.0270 rad |
+| jump | TRACKING → HOLD_JUMP（TARGET_JUMP、jump_mm 60）→ TRACKING → IDLE。**先端 0.0 mm（腕は階段の向きに動かず）**。最大 0.0270 rad |
+| BLOCKED・HOLD_RANGE・HOLD_LAG・BUSY | c1 のすべてで出なかった。C3 の余裕: 読み − 指令の最大は 0.0423 rad（0.2 rad の約 1/5） |
+| `rate_limited=38`（`c1_arm.log` の終わり） | **グリッパーの動きだけによる**と判断できる。根拠: ドライバは、関節ごとに 5 秒に 1 回、`step limit` の WARN を出す（`sts3215_system.cpp:1010-1016`）。腕の関節で上限に当たれば、最初の 1 回は必ず WARN が出て、理由は `unexpected jump for an angle joint` になる。ログに、この文は **0 件**。`step limit` の WARN は gripper の 3 行だけ（`gripper goal is a step: ramping toward it`、limited 1・5・24 times so far）。グリッパーの目標は階段で、ドライバが 1 周期の上限 51 ticks で追う（予測どおり） |
+| A のログ | `clamp: '` 0 件。FAULT・COMMUNICATION LOST・read failed なし |
+| jump の C1（`c1_node.log`） | 飛びの瞬間 `ik_jump=0.3911`（HOLD_JUMP）。**再開の瞬間 `ik_jump=0.3453`（C1 の 0.35 の手前）**。再開の判定の比べ相手が、受け付けなかった（飛んだ）メッセージの解になっている疑い。次の変更（2 つ目の依頼）の根拠 |
+
+### c2（グリッパー。腕は T に置いたまま）
+
+| 設定 | CLOSE の後 | OPEN の後 |
+|---|---|---|
+| open_rad 0.3（`c2a_*`） | 0.0469 rad | 0.2952 rad |
+| open_rad 1.0（`c2b_*`） | 0.0562 rad | 0.9886 rad |
+
+- `/vr_follow/gripper` は CLOSE で 1.0、OPEN で 0.0 を各 1 回。ゴールは 2 回。クラッチは使わず、状態は IDLE のまま。腕は動かず（c2a 0.0 mm、c2b 0.7 mm）。
+- **既定の closed_rad 0.05・open_rad 1.0 のまま確定する。`config/vr_follow.yaml` は変えない。**
+
+### 終わり
+
+- グリッパーを action で 0.05 rad に閉じた（ユーザーの操作）。
+- ik_move で T → M: `REACHED` error 5.54 mm（`c5_M.log`）。
+- M → 折りたたみ (−5, −87, 90, 34, −3) 度の ik_move は、dry-run が `START_REFUSED: GOAL_FLOOR`（目標の先端 z 0.0465 m < 床 0.048 m）で拒否した（`c5_fold_dry.log`）。手順書の予告どおり、**RViz（−5, −88, 90, 34, −3 度）で戻した**。
+- `c5_fold_pose.txt` は、`/joint_states` がまだ検出できなかった一時的な失敗で、警告だけが入っている。正しい読みは `c5_fold_pose_2.txt`（約 −4.4°、−86.9°、90.1°、34.7°、−2.8°、gripper 0.0574 rad）。
+- 停止: A の `exit=0`。`[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints`、`deactivated. reads=53127 … goal_writes=53127 … rate_limited=38 … bus` のカウンタはすべて 0。`move_group`・`rviz2` の終了時の exit code -11 は既知（`docs/feetech_write_check.md`）。
+
+### まとめ
+
+- 計画で決めた基準のすべてを満たした。実機で、クラッチ・状態・C3（BLOCKED）・stale・jump・グリッパーが予測どおりに動いた。
+- 見つかったこと: (1) read_only の判定が大文字小文字を区別していた（d57734c で修正）。(2) BLOCKED の後、読み取り専用では指令が測定に戻らないため、次のクラッチが `REFUSED_WINDUP` になる（正しい動作。書き込みモードの見込み。**実機では未確認**: 書き込みモードで BLOCKED が出るのは、腕が何かに当たって指令に追いつけないとき。腕が追いつけないままなら、次のクラッチは `REFUSED_WINDUP` になる見込み。当たっていた物が外れると、腕は JTC が持つ最後の点（測定から最大約 0.2 rad 先）へ、クラッチなしで動く見込み。**BLOCKED の後は、障害物を外す前に腕を支えること。** 戻すには、bringup の起動し直し、または RViz・ik_move で今の位置への goal を送る。`docs/vr_follow_quickstart.md` の (6) にも入れる）。(3) 再開時の `ik_jump` が 0.345 と、C1 の閾値の手前だった（修正は次のコミット）。(4) 折りたたみ姿勢へは ik_move の `GOAL_FLOOR`（0.048 m）に当たるので、RViz で戻す。
