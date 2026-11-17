@@ -38,7 +38,8 @@ import yaml
 
 MOUNT = tm.TagMount(0, 0.06, (0.0, 0.0, 0.0063), 'a test source', (-0.038, 0.0, -0.062),
                     'a test note', 'e' * 64)
-IDENTITY = rec.make_identity('a' * 64, 'b' * 64, 'c' * 64, 'd' * 64, 0)
+ZERO = {name: 0.0 for name in sr.JOINT_NAMES}
+IDENTITY = rec.make_identity('a' * 64, 'b' * 64, 'c' * 64, 'd' * 64, 0, 'f' * 64, ZERO)
 Q_T = np.radians([0.0, -22.0, 30.0, 83.0, 0.0])
 IDENTITY_QUATERNION = (0.0, 0.0, 0.0, 1.0)
 
@@ -355,7 +356,9 @@ def test_the_same_label_is_refused_and_nothing_changes(tmp_path):
 
 @pytest.mark.parametrize('key, value', [
     ('tag_mount_sha256', 'x' * 64), ('urdf_sha256', 'x' * 64), ('apriltag_yaml_sha256', 'x' * 64),
-    ('realsense_yaml_sha256', 'x' * 64), ('tag_id', 1)])
+    ('realsense_yaml_sha256', 'x' * 64), ('tag_id', 1),
+    ('follower_calibration_sha256', 'x' * 64),
+    ('zero_offset_deg', dict(ZERO, elbow_flex=-6.3))])
 def test_a_changed_identity_value_is_refused(tmp_path, key, value):
     path, row, meta = _first_point(tmp_path)
     rec.write_point(path, 'P01', IDENTITY, meta, row)
@@ -571,19 +574,36 @@ def test_load_chain_of_a_missing_file_raises():
         rec.load_chain('/nonexistent/robot.urdf')
 
 
-def test_the_identity_is_made_from_the_sha256_of_the_four_files(tmp_path):
+def _calibration(tmp_path, elbow=None, name='follower_calibration.yaml', gripper=None):
+    """Write a follower calibration yaml (the key of elbow_flex only if given)."""
+    joints = {n: {'id': i + 1, 'kind': 'angle', 'direction': 1, 'center': 2000.0}
+              for i, n in enumerate(sr.JOINT_NAMES)}
+    if elbow is not None:
+        joints['elbow_flex']['zero_offset_deg'] = elbow
+    joints['gripper'] = {'id': 6, 'kind': 'linear_percent', 'direction': 1}
+    if gripper is not None:
+        joints['gripper']['zero_offset_deg'] = gripper
+    path = tmp_path / name
+    path.write_text(yaml.safe_dump({'schema_version': 1, 'joints': joints}))
+    return path
+
+
+def test_the_identity_is_made_from_the_sha256_of_the_files(tmp_path):
     paths = []
     for name in ('tag_mount', 'urdf', 'apriltag', 'realsense'):
         path = tmp_path / (name + '.txt')
         path.write_text(name)
         paths.append(path)
-    identity = rec.identity_from_files(*paths, 0)
+    calibration = _calibration(tmp_path, elbow=-6.3)
+    identity = rec.identity_from_files(*paths, 0, calibration)
     assert identity == {
         'tag_mount_sha256': hashlib.sha256(b'tag_mount').hexdigest(),
         'urdf_sha256': hashlib.sha256(b'urdf').hexdigest(),
         'apriltag_yaml_sha256': hashlib.sha256(b'apriltag').hexdigest(),
         'realsense_yaml_sha256': hashlib.sha256(b'realsense').hexdigest(),
-        'tag_id': 0}
+        'tag_id': 0,
+        'follower_calibration_sha256': hashlib.sha256(calibration.read_bytes()).hexdigest(),
+        'zero_offset_deg': dict(ZERO, elbow_flex=-6.3)}
     assert tuple(identity) == rec.IDENTITY_KEYS
 
 
@@ -593,12 +613,63 @@ def test_the_identity_changes_with_the_file_it_comes_from(tmp_path):
         path = tmp_path / name
         path.write_text(name)
         paths.append(path)
-    before = rec.identity_from_files(*paths, 0)
+    calibration = _calibration(tmp_path)
+    before = rec.identity_from_files(*paths, 0, calibration)
     paths[3].write_text('changed')
-    after = rec.identity_from_files(*paths, 0)
+    after = rec.identity_from_files(*paths, 0, calibration)
     assert [k for k in before if before[k] != after[k]] == ['realsense_yaml_sha256']
     with pytest.raises(OSError):
-        rec.identity_from_files(*paths[:3], tmp_path / 'missing', 0)
+        rec.identity_from_files(*paths[:3], tmp_path / 'missing', 0, calibration)
+
+
+def test_a_changed_calibration_yaml_changes_the_sha256_and_the_offset(tmp_path):
+    paths = []
+    for name in ('a', 'b', 'c', 'd'):
+        path = tmp_path / name
+        path.write_text(name)
+        paths.append(path)
+    before = rec.identity_from_files(*paths, 0, _calibration(tmp_path))
+    after = rec.identity_from_files(*paths, 0, _calibration(tmp_path, elbow=-6.3, name='b.yaml'))
+    assert [k for k in before if before[k] != after[k]] == [
+        'follower_calibration_sha256', 'zero_offset_deg']
+
+
+def test_zero_offsets_are_zero_where_the_key_is_missing_and_read_where_it_is_given(tmp_path):
+    assert rec.read_zero_offsets(_calibration(tmp_path)) == ZERO
+    assert rec.read_zero_offsets(_calibration(tmp_path, elbow=-6.3, name='b.yaml')) == dict(
+        ZERO, elbow_flex=-6.3)
+    assert rec.read_zero_offsets(_calibration(tmp_path, elbow=10, name='c.yaml'))[
+        'elbow_flex'] == 10.0
+
+
+@pytest.mark.parametrize('elbow', [10.001, -10.001, float('nan'), float('inf'), 'x', True])
+def test_a_zero_offset_the_driver_would_refuse_is_refused(tmp_path, elbow):
+    with pytest.raises(ValueError, match='elbow_flex'):
+        rec.read_zero_offsets(_calibration(tmp_path, elbow=elbow))
+
+
+def test_the_gripper_may_have_no_zero_offset_other_than_0(tmp_path):
+    assert rec.read_zero_offsets(_calibration(tmp_path, gripper=0)) == ZERO
+    with pytest.raises(ValueError, match='gripper'):
+        rec.read_zero_offsets(_calibration(tmp_path, gripper=1.0, name='b.yaml'))
+
+
+def test_a_calibration_yaml_that_cannot_be_read_is_refused(tmp_path):
+    with pytest.raises(ValueError, match='cannot read'):
+        rec.read_zero_offsets(tmp_path / 'missing.yaml')
+    (tmp_path / 'bad.yaml').write_text('joints: 3\n')
+    with pytest.raises(ValueError, match='no joints'):
+        rec.read_zero_offsets(tmp_path / 'bad.yaml')
+
+
+def test_an_older_meta_file_without_the_new_identity_values_is_refused(tmp_path):
+    path, row, meta = _first_point(tmp_path)
+    rec.write_point(path, 'P01', IDENTITY, meta, row)
+    broken = yaml.safe_load(rec.meta_path_for(path).read_text())
+    del broken['identity']['zero_offset_deg'], broken['identity']['follower_calibration_sha256']
+    rec.meta_path_for(path).write_text(yaml.safe_dump(broken))
+    with pytest.raises(rec.SessionError, match='zero_offset_deg: missing'):
+        rec.check_session(path, 'P02', IDENTITY)
 
 
 def test_camera_extra_has_plain_values_that_yaml_can_write():

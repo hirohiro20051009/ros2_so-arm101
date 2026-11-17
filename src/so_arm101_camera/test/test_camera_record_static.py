@@ -54,7 +54,7 @@ OS_PATTERNS = {'system': r'system', 'popen': r'popen', 'exec': r'exec.*', 'spawn
 IK_VALUES = ('STOP_TOL', 'STOP_INTERVAL', 'SETTLE_MIN', 'SETTLE_TIMEOUT', 'MAX_AGE')
 TOPICS = {'/joint_states', '/detections', '/tf', '/camera/camera/color/camera_info'}
 ARGUMENTS = {'--csv', '--label', '--investigate', '--tag-mount', '--apriltag-yaml',
-             '--realsense-yaml', '--urdf'}
+             '--realsense-yaml', '--urdf', '--calibration-yaml'}
 IO_METHODS = {'now', 'wait', 'read_joints', 'flush', 'poll', 'say', 'confirm', 'wall_time',
               'date_text'}
 # Python module of each import and the package.xml name that provides it.
@@ -191,6 +191,10 @@ def test_every_third_party_import_is_one_of_the_mapped_modules():
         imported |= _imports(path)
     third_party = {m for m in imported if m not in sys.stdlib_module_names}
     assert third_party - {'so_arm101_camera'} <= set(PACKAGE_XML_NAMES), third_party
+
+
+def test_the_hardware_package_of_the_calibration_yaml_is_declared():
+    assert 'so_arm101_hardware' in _declared()
 
 
 def test_the_urdf_of_the_description_package_is_declared():

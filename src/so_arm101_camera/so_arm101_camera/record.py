@@ -61,7 +61,9 @@ EXIT_NO_INPUT = 5  # no fresh /joint_states
 
 LABEL_PATTERN = re.compile(r'[A-Za-z0-9_.-]+')  # used with fullmatch (a "$" would pass "P01\n")
 IDENTITY_KEYS = ('tag_mount_sha256', 'urdf_sha256', 'apriltag_yaml_sha256',
-                 'realsense_yaml_sha256', 'tag_id')
+                 'realsense_yaml_sha256', 'tag_id', 'follower_calibration_sha256',
+                 'zero_offset_deg')
+ZERO_OFFSET_MAX_DEG = 10.0  # the same upper limit as the driver (kMaxZeroOffsetDeg)
 
 COLUMNS = (
     ('idx', 'time', 'label')
@@ -273,11 +275,46 @@ def meta_path_for(csv_path):
 
 
 def make_identity(tag_mount_sha256, urdf_sha256, apriltag_yaml_sha256, realsense_yaml_sha256,
-                  tag_id):
+                  tag_id, follower_calibration_sha256, zero_offset_deg):
     """Return the values that must not change between the points of one CSV."""
     return {'tag_mount_sha256': tag_mount_sha256, 'urdf_sha256': urdf_sha256,
             'apriltag_yaml_sha256': apriltag_yaml_sha256,
-            'realsense_yaml_sha256': realsense_yaml_sha256, 'tag_id': tag_id}
+            'realsense_yaml_sha256': realsense_yaml_sha256, 'tag_id': tag_id,
+            'follower_calibration_sha256': follower_calibration_sha256,
+            'zero_offset_deg': dict(zero_offset_deg)}
+
+
+def read_zero_offsets(calibration_yaml):
+    """
+    Return {joint: degrees} of zero_offset_deg for the five angle joints (0 where there is none).
+
+    The checks are those of the driver (calibration.cpp): the value is a finite number within
+    +-ZERO_OFFSET_MAX_DEG, and the gripper may have none other than 0. ValueError otherwise.
+    """
+    try:
+        with open(calibration_yaml, encoding='utf-8') as f:
+            data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f'cannot read {calibration_yaml}: {exc}') from exc
+    joints = data.get('joints') if isinstance(data, dict) else None
+    if not isinstance(joints, dict):
+        raise ValueError(f'{calibration_yaml}: no joints')
+    for name, entry in joints.items():
+        value = entry.get('zero_offset_deg') if isinstance(entry, dict) else None
+        if name not in sr.JOINT_NAMES and value not in (None, 0, 0.0):
+            raise ValueError(f'{calibration_yaml}: {name} may not have a zero_offset_deg')
+    offsets = {}
+    for name in sr.JOINT_NAMES:
+        entry = joints.get(name)
+        if not isinstance(entry, dict) or entry.get('kind') != 'angle':
+            raise ValueError(f'{calibration_yaml}: {name} is not an angle joint')
+        value = entry.get('zero_offset_deg', 0.0)
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or abs(value) > ZERO_OFFSET_MAX_DEG):
+            raise ValueError(f'{calibration_yaml}: {name} zero_offset_deg must be a finite '
+                             f'number within +-{ZERO_OFFSET_MAX_DEG} deg')
+        offsets[name] = float(value)
+    return offsets
 
 
 def identity_mismatches(recorded, current):
@@ -353,10 +390,17 @@ def load_chain(urdf_path):
     return UrdfChain(Path(urdf_path).read_text(encoding='utf-8'))
 
 
-def identity_from_files(tag_mount_yaml, urdf, apriltag_yaml, realsense_yaml, tag_id):
-    """Return the identity of a session: the sha256 of the four files that were used and tag_id."""
+def identity_from_files(tag_mount_yaml, urdf, apriltag_yaml, realsense_yaml, tag_id,
+                        calibration_yaml):
+    """
+    Return the identity of a session.
+
+    The sha256 of the four files that were used, tag_id, and the sha256 and the zero_offset_deg of
+    the follower calibration yaml (the angles of the CSV are the ones the driver corrected by it).
+    """
     return make_identity(tm.sha256_file(tag_mount_yaml), tm.sha256_file(urdf),
-                         tm.sha256_file(apriltag_yaml), tm.sha256_file(realsense_yaml), tag_id)
+                         tm.sha256_file(apriltag_yaml), tm.sha256_file(realsense_yaml), tag_id,
+                         tm.sha256_file(calibration_yaml), read_zero_offsets(calibration_yaml))
 
 
 def camera_extra(k, d, width, height, optical_translation, optical_quaternion):

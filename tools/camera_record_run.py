@@ -185,6 +185,10 @@ def parse_args(argv):
     ap.add_argument('--apriltag-yaml', default=os.path.join(config, 'apriltag.yaml'))
     ap.add_argument('--realsense-yaml', default=os.path.join(config, 'realsense.yaml'))
     ap.add_argument('--urdf', default=urdf)
+    ap.add_argument('--calibration-yaml', default=os.path.join(
+        get_package_share_directory('so_arm101_hardware'), 'config',
+        'follower_calibration.yaml'),
+        help='ドライバが読むキャリブ yaml（sha256 と zero_offset_deg を識別に記録する）')
     args = ap.parse_args(argv)
     if not args.investigate and (not args.csv or not args.label):
         ap.error('--csv and --label are required unless --investigate is given')
@@ -198,7 +202,8 @@ def main(argv):
         frame = tm.tag_frame_name(args.apriltag_yaml, mount.tag_id)
         chain = rec.load_chain(args.urdf)
         identity = rec.identity_from_files(args.tag_mount, args.urdf, args.apriltag_yaml,
-                                           args.realsense_yaml, mount.tag_id)
+                                           args.realsense_yaml, mount.tag_id,
+                                           args.calibration_yaml)
         state = None
         if not args.investigate:
             state = rec.check_session(args.csv, args.label, identity)
