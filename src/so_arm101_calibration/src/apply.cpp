@@ -65,6 +65,8 @@ std::string render_calibration_yaml(
   o << "# so_arm101 サーボキャリブレーション（フォロワー）。スキーマと意味は docs/inventory.md「段階2b-1」。\n"
     << "# 段階2c の apply（so_arm101_calib）が生成。eeprom.* は変換に使わず、起動時診断用（書き込みモードは EEPROM と\n"
     << "# 違うと起動を拒否する）。\n"
+    << "# zero_offset_deg は オフセットキャリブ（zero-offset calibration。docs/zero_offset_calib_plan.md）の値。\n"
+    << "# center・min・max・eeprom などは センターキャリブ（so_arm101_calib measure・apply）の値。\n"
     << "schema_version: " << old["schema_version"].as<int>() << "\n"
     << "source:\n  kind: ros_calibrated\n  measure_file: " << measure_path << "\n  backup_file: " << backup_path
     << "\n  applied_at: " << applied_at << "\n  applied_by: " << tool_id() << "\n"

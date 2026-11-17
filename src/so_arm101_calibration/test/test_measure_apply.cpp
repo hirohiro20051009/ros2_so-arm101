@@ -1168,13 +1168,45 @@ TEST(ApplyZeroOffset, JointsWithoutTheKeyDoNotGainOne)
 {
   ApplyRig t;
   const std::string none = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
-  EXPECT_EQ(none.find("zero_offset_deg"), std::string::npos) << none;  // 補正の無い yaml の出力にキーは出ない
+  // キー（"zero_offset_deg:"）を数える。ヘッダーのコメントの "zero_offset_deg は" は数えない
+  EXPECT_EQ(none.find("zero_offset_deg:"), std::string::npos) << none;  // 補正の無い yaml の出力にキーは出ない
   add_offsets(t, "-6.3");
   const std::string some = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
   size_t n = 0;
-  for (size_t p = some.find("zero_offset_deg"); p != std::string::npos; p = some.find("zero_offset_deg", p + 1)) {++n;}
+  for (size_t p = some.find("zero_offset_deg:"); p != std::string::npos; p = some.find("zero_offset_deg:", p + 1)) {++n;}
   EXPECT_EQ(n, 1u) << some;  // elbow だけ
   EXPECT_NE(some.find("shoulder_lift: {id: 2, kind: angle, direction: 1, center: "), std::string::npos);
+}
+
+TEST(ApplyZeroOffset, TheHeaderCommentNamesBothCalibrations)
+{
+  ApplyRig t;
+  const std::string text = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  const std::string head = text.substr(0, text.find("schema_version:"));
+  EXPECT_NE(head.find("# zero_offset_deg は オフセットキャリブ（zero-offset calibration。docs/zero_offset_calib_plan.md）の値。\n"),
+    std::string::npos) << head;
+  EXPECT_NE(head.find("# center・min・max・eeprom などは センターキャリブ（so_arm101_calib measure・apply）の値。\n"),
+    std::string::npos) << head;
+}
+
+TEST(ApplyZeroOffset, TheHeaderCommentChangesNothingButComments)
+{
+  ApplyRig t;
+  add_offsets(t, "-6.30", "0");
+  const std::string text = render_calibration_yaml(t.yaml, t.m, "B.json", "M.json", "2026-11-16T00:00:00");
+  // コメント行を全部消した残りが、コメントの 2 行を足す前と同じ形（キーと順序）であること:
+  // 先頭のコメントは 5 行（元の 3 行と足した 2 行）で、その後に schema_version が来る
+  size_t comments = 0;
+  size_t pos = 0;
+  while (text.compare(pos, 1, "#") == 0) {pos = text.find('\n', pos) + 1; ++comments;}
+  EXPECT_EQ(comments, 5u) << text;
+  EXPECT_EQ(text.compare(pos, 15, "schema_version:"), 0) << text;
+  // 読み込みの結果（値）は足す前と同じ（add_offsets の値が見える）
+  const std::string path = t.dir + "/rendered_hdr.yaml";
+  {std::ofstream(path) << text;}
+  const auto cal = so_arm101_hardware::load_calibration(path);
+  EXPECT_EQ(cal.find("elbow_flex")->zero_offset_deg, -6.3);
+  EXPECT_EQ(cal.angle_ticks, 4095);
 }
 
 TEST(ApplyZeroOffset, ANonNumberInTheOldYamlIsRefused)
