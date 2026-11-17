@@ -4,8 +4,13 @@ project(so_arm101_ik)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 
-# Pure Python library (numpy only, no ROS dependency at run time).
+# The library (follow_calc, follow_machine and the IK modules) is numpy only, with no ROS; only
+# vr_follow_node.py (the VR follow node, P6) uses ROS.
 ament_python_install_package(${PROJECT_NAME})
+
+# The VR follow node, its launch file and parameters (P6; docs/p6_plan.md).
+install(PROGRAMS scripts/vr_follow DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch config DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
@@ -22,7 +27,7 @@ if(BUILD_TESTING)
           test_diff_mode test_diff_mode_safety
           test_step_runner test_step_loop test_diff_mode_run_static
           test_ik_move test_ik_move_loop test_ik_move_run_static
-          test_follow_calc test_follow_machine)
+          test_follow_calc test_follow_machine test_follow_static)
     ament_add_pytest_test(${test_name} test/${test_name}.py
                           ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   endforeach()

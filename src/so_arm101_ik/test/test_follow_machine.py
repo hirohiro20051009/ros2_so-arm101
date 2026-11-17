@@ -40,6 +40,7 @@ class Rig:
         # the test moves are larger than a real hand: the check of the solution (C1) is off unless
         # a test asks for it
         config.setdefault('ik_jump', 0.0)
+        config.setdefault('rate_hz', 20.0)  # the period of PERIOD below
         self.f = fm.Follower(fc.FollowConfig(**config))
         self.t = 100.0
         self.p = P_IN0.copy()
@@ -51,6 +52,7 @@ class Rig:
         self.busy = ()
         self.pose_age = self.joy_age = self.meas_age = self.desired_age = 0.0
         self.no_pose = False
+        self.msgs = None  # the pose messages of the next tick (None: one, the pose)
         self.out = None
 
     def tick(self, dt=PERIOD, **changes):
@@ -58,12 +60,13 @@ class Rig:
             setattr(self, name, value)
         self.t += dt
         inp = fm.Inputs(
-            pose=None if self.no_pose else (self.p.copy(), self.r.copy()),
+            pose=None if self.no_pose else (self.p.copy(), self.r.copy()), poses=self.msgs,
             pose_time=self.t - self.pose_age,
             joy=fm.JoyState(self.clutch, self.open, self.close), joy_time=self.t - self.joy_age,
             q_meas=self.q_meas.copy(), q_meas_time=self.t - self.meas_age,
             q_desired=self.q_desired.copy(), q_desired_time=self.t - self.desired_age,
             busy=self.busy)
+        self.msgs = None
         self.out = self.f.update(self.t, inp)
         if self.out.point is not None and self.follow_meas:
             self.q_meas = self.out.point.copy()
@@ -674,3 +677,94 @@ def test_the_input_rotation_turns_the_move_of_the_hand():
     rig.start()
     rig.run(40, p=P_IN0 + [0.02, 0.0, 0.0])  # the x of the VR is the y of base_link
     assert np.allclose(rig.tip, _p_ref() + [0.0, 0.02, 0.0], atol=1e-4)
+
+
+# --------------------------------------------------------------- the jump, per message
+
+def _line(count, step, start=P_IN0):
+    """Return count pose messages that move by step each (a hand that moves at a speed)."""
+    return [(start + step * (i + 1), np.eye(3)) for i in range(count)]
+
+
+def test_a_fast_hand_is_not_a_jump_when_every_message_is_close_to_the_one_before():
+    # 0.5 m/s at 100 Hz messages and a 10 Hz tick: 50 mm per tick, 5 mm per message
+    rig = Rig(rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    here = P_IN0.copy()
+    for _ in range(4):
+        msgs = _line(10, np.array([0.0, 0.0, 0.0]) + [0.0, 0.005, 0.0], here)
+        here = msgs[-1][0]
+        out = rig.tick(dt=0.1, p=here, msgs=msgs)
+        assert out.state == fm.TRACKING, out.reason
+
+
+def test_the_same_move_in_one_message_per_tick_is_a_jump():
+    rig = Rig(rate_hz=10.0, max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.049, 0.0]).state == fm.TRACKING
+    assert rig.tick(dt=0.1, p=P_IN0 + [0.0, 0.10, 0.0]).state == fm.HOLD_JUMP  # 51 mm
+
+
+def test_a_jump_inside_a_tick_is_found_even_if_the_hand_ends_near():
+    rig = Rig(max_lag=0.0)
+    rig.start()
+    rig.tick(p=P_IN0)
+    messages = [(P_IN0 + [0.0, 0.003, 0.0], np.eye(3)), (P_IN0 + [0.0, 0.08, 0.0], np.eye(3)),
+                (P_IN0 + [0.0, 0.004, 0.0], np.eye(3))]  # out and back within one tick
+    out = rig.tick(p=messages[-1][0], msgs=messages)
+    assert out.state == fm.HOLD_JUMP and out.point is None
+    assert out.detail['jump_mm'] > 70.0 and out.detail['messages'] == 3
+    out = rig.tick(p=P_IN0 + [0.0, 0.005, 0.0])  # the hand is near the stopped target: resume
+    assert out.state == fm.TRACKING and out.point is not None
+
+
+def test_the_jump_is_compared_with_the_message_before_not_with_the_last_tick():
+    rig = Rig(max_lag=0.0, max_tracking_error=0.0)
+    rig.start()
+    # 12 messages of 8 mm: 96 mm in one tick, every step small
+    msgs = _line(12, np.array([0.0, 0.008, 0.0]))
+    assert rig.tick(p=msgs[-1][0], msgs=msgs).state == fm.TRACKING
+    # one message of 60 mm in the middle of small ones
+    base = msgs[-1][0]
+    msgs = [(base + [0.0, 0.004, 0.0], np.eye(3)), (base + [0.0, 0.064, 0.0], np.eye(3)),
+            (base + [0.0, 0.068, 0.0], np.eye(3))]
+    assert rig.tick(p=msgs[-1][0], msgs=msgs).state == fm.HOLD_JUMP
+
+
+def test_an_angular_jump_between_two_messages_is_found():
+    rig = Rig(max_lag=0.0)
+    rig.start()
+    msgs = [(P_IN0.copy(), fc.rot_x(math.radians(20.0))),
+            (P_IN0.copy(), fc.rot_x(math.radians(55.0)))]  # 35 deg in one message
+    assert rig.tick(msgs=msgs, p=P_IN0).state == fm.HOLD_JUMP
+
+
+def test_the_scale_applies_to_the_jump_of_a_message():
+    rig = Rig(scale=0.5, max_lag=0.0)
+    rig.start()
+    msgs = [(P_IN0 + [0.0, 0.09, 0.0], np.eye(3))]  # 45 mm of the target
+    assert rig.tick(p=msgs[0][0], msgs=msgs).state == fm.TRACKING
+    msgs = [(P_IN0 + [0.0, 0.20, 0.0], np.eye(3))]  # 55 mm of the target
+    assert rig.tick(p=msgs[0][0], msgs=msgs).state == fm.HOLD_JUMP
+
+
+def test_after_a_jump_the_hand_that_goes_on_smoothly_far_away_stays_stopped():
+    rig = Rig(max_lag=0.0)
+    rig.start()
+    rig.tick(p=P_IN0 + [0.0, 0.07, 0.0])  # a jump
+    for i in range(6):  # the hand moves on smoothly from the new place: no resume, no new jump
+        out = rig.tick(p=P_IN0 + [0.0, 0.07 + 0.01 * i, 0.0])
+        assert out.state == fm.HOLD_JUMP and out.point is None
+
+
+def test_the_messages_are_the_latest_pose_when_the_caller_gives_no_list():
+    rig = Rig(max_lag=0.0)
+    rig.start()
+    out = rig.tick(p=P_IN0 + [0.0, 0.02, 0.0])
+    assert out.detail['messages'] == 1 and out.state == fm.TRACKING
+
+
+def test_the_default_rate_and_point_time():
+    f = fm.Follower()
+    assert f.config.rate_hz == 10.0 and f.config.point_time_s == 0.08
+    assert f.config.period == pytest.approx(0.1)

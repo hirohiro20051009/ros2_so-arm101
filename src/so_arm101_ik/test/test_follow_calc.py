@@ -297,13 +297,13 @@ def test_limit_step_does_not_modify_its_arguments():
 
 def test_config_defaults_are_the_values_of_the_plan():
     c = fc.FollowConfig()
-    assert (c.scale, c.rate_hz, c.max_joint_speed) == (1.0, 20.0, 0.5)
+    assert (c.scale, c.rate_hz, c.point_time_s, c.max_joint_speed) == (1.0, 10.0, 0.08, 0.5)
     assert (c.jump_pos, c.jump_ang_deg, c.resume_pos, c.resume_ang_deg) == (0.05, 30.0, 0.02, 10.0)
     assert (c.stale_s, c.joy_timeout_s, c.floor_z, c.elbow_max_deg) == (0.5, 1.0, 0.045, 91.0)
     assert (c.clutch_windup, c.ik_jump, c.max_lag, c.max_tracking_error) == (0.06, 0.35, 0.15, 0.2)
     assert c.clutch_mode == 'hold' and not c.gripper_requires_clutch
     assert (c.gripper_open_rad, c.gripper_closed_rad) == (1.0, 0.05)
-    assert c.period == pytest.approx(0.05)
+    assert c.period == pytest.approx(0.1)
 
 
 def test_config_q_max_cuts_only_the_elbow():
@@ -316,6 +316,7 @@ def test_config_q_max_cuts_only_the_elbow():
 @pytest.mark.parametrize('change', [
     {'scale': 0.0}, {'scale': -1.0}, {'scale': 3.1}, {'scale': math.nan}, {'scale': True},
     {'rate_hz': 0.5}, {'rate_hz': 101.0}, {'max_joint_speed': 0.0}, {'max_joint_speed': 1.1},
+    {'point_time_s': 0.0}, {'point_time_s': 0.6}, {'point_time_s': math.nan},
     {'jump_pos': 0.01}, {'jump_pos': 0.3}, {'resume_pos': 0.0}, {'resume_ang_deg': 40.0},
     {'jump_ang_deg': 100.0}, {'stale_s': 0.0}, {'stale_s': 6.0}, {'joy_timeout_s': -1.0},
     {'floor_z': 0.044}, {'elbow_max_deg': 0.0}, {'elbow_max_deg': 97.0},

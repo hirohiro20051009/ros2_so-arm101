@@ -1,0 +1,37 @@
+# VR 追従ノード（vr_follow）のパラメータ。値はすべて暫定（docs/p6_plan.md）。
+# 実行中に変えられるのは scale だけ（ros2 param set /vr_follow scale 0.5）。ほかは起動し直す。
+# 値の範囲は follow_calc.FollowConfig が検査する（範囲外ならノードは起動しない）。
+# 0 で無効にできるもの: ik_jump（C1）、max_lag（C2）、max_tracking_error（C3）、joy_timeout_s（C4）。
+vr_follow:
+  ros__parameters:
+    # --- 動き
+    scale: 1.0                 # 腕の目標の位置 = 腕の基準 + scale × (入力 − 入力の基準)。(0, 3]
+    rate_hz: 10.0              # 1 点を送る周期。20 Hz は不可（docs/p6_plan.md 7）
+    point_time_s: 0.08         # 1 点の time_from_start [s]
+    max_joint_speed: 0.5       # 各関節の速さの上限 [rad/s]（ドライバの 1 周期の上限は安全網）
+    input_rotation_rpy_deg: [0.0, 0.0, 0.0]   # VR の軸を base_link に合わせる回転 [度]（roll pitch yaw）
+    # --- 止まる条件（判定は、倍率をかけた後の腕の目標の空間 base_link で行う）
+    jump_pos: 0.05             # 入力メッセージごとの目標の飛び [m]
+    jump_ang_deg: 30.0         # 同 [度]
+    resume_pos: 0.02           # 再開: 止まった目標からの距離 [m]
+    resume_ang_deg: 10.0       # 再開: 止まった目標からの角度 [度]
+    stale_s: 0.5               # pose と joint_states の途切れ [s]
+    joy_timeout_s: 1.0         # C4: Joy の途切れ [s]（0 で無効）
+    floor_z: 0.045             # 先端の z の下限 [m]（0.045 以上）
+    elbow_max_deg: 91.0        # elbow の上限 [度]
+    clutch_windup: 0.06        # クラッチの前の |指令 − 測定| の上限 [rad]
+    ik_jump: 0.35              # C1: 1 周期の IK の解の飛び [rad]（0 で無効）
+    max_lag: 0.15              # C2: 目標と指令の先端の距離 [m]（0 で無効）
+    max_tracking_error: 0.2    # C3: 測定と指令の差 [rad]（0 で無効）
+    # --- クラッチとボタン（Joy.buttons の番号。VR の機器に合わせて変える）
+    clutch_mode: hold          # hold（押している間だけ）または toggle
+    button_clutch: 0
+    button_open: 1
+    button_close: 2
+    gripper_requires_clutch: false
+    # --- グリッパー（量 0 全開 〜 1 全閉を、この 2 つの関節の値に直線で対応させる）
+    gripper_open_rad: 1.0      # 暫定
+    gripper_closed_rad: 0.05   # 暫定
+    # --- トピック（launch で remap してもよい）
+    joy_topic: /vr/right/joy
+    pose_topic: /vr/right/pose

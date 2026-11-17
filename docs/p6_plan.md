@@ -53,7 +53,7 @@ R_fix は `input_rotation_rpy_deg`（既定 0 0 0。VR の軸を base_link に�
 
 - IDLE: 何も送らない。理由 START_WAIT・RELEASED・JOY_TIMEOUT・REFUSED（WINDUP・FLOOR・RANGE・POSE・JOINT_STATE・CONTROLLER_STATE・BUSY）。
 - TRACKING: 毎周期 1 点。理由 OK・SPEED_LIMITED。
-- HOLD_JUMP: 新しい目標が最後に受け付けた目標から 50 mm または 30° 以上。再開は、目標が止まった目標から 20 mm かつ 10° 以内（基準は保ったまま）。
+- HOLD_JUMP: **入力のメッセージごとに**、目標（倍率後・base_link）が 1 つ前のメッセージの目標から 50 mm または 30° 以上（1 周期に複数のメッセージが入っても、飛びと戻りを見逃さない。周期ごとの比較だと、10 Hz・倍率 1 で 0.5 m/s の手が飛びになるため、b1 で直した）。再開は、目標が止まった（最後に受け付けた）目標から 20 mm かつ 10° 以内（基準は保ったまま）。
 - HOLD_RANGE: UNREACHABLE・JOINT_RANGE・ELBOW_LIMIT・FLOOR（z < 0.045 m）・ORIENT・IK_JUMP（C1）。エラーのログも出す。再開は HOLD_JUMP と同じ。
 - HOLD_LAG（C2）: 目標が指令の先端から 0.15 m 以上先。受け付けた目標は手に追従し、遅れが半分（0.075 m）以下に戻ると再開。
 - STALE: pose または joint_states が 0.5 s 途切れた。再開は HOLD_JUMP と同じ（遠くへ戻ったら、クラッチの押し直し）。

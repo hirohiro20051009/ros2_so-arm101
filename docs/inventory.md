@@ -3495,3 +3495,12 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - 回転行列と (pitch, roll) の対応（`tip_rotation`）は URDF の origin から手で導き、URDF の鎖（UrdfChain）と 1e-9 で一致した。
 - so_arm101_ik の colcon test: 364 → 527 件、失敗 0。他のパッケージはコードを変えていないので省略。
 - 戻し方: この段のコミットの直前（HEAD 30a6a7a）から取り出せる。
+
+## P6b b0・b1: JTC の実測、VR 追従ノード・launch・パラメータ（2026-11-17）
+
+- **b0**（コミット 47b70c5）: モックで JTC に 1 点の軌道の列を送って測った（`examples/jtc_probe.py`）。20 Hz では reference が 200 ms に 1 回、0.1 rad 飛ぶ（新しい軌道の最初の更新は進まない）。update_rate の変更は要らない。既定 `rate_hz` 10、`point_time_s` 0.08。表は `docs/p6_plan.md` 7 章。材料 `~/so_arm101_check/p6/`（git 管理外）。
+- **b1**: `so_arm101_ik` に `vr_follow_node.py`、`scripts/vr_follow`、`launch/vr_follow.launch.py`、`config/vr_follow.yaml` を追加。`CMakeLists.txt`（`install(PROGRAMS …)`、`install(DIRECTORY launch config …)`、試験の登録）と `package.xml`（exec_depend 13 件）を変更。bringup・controllers.yaml・URDF・MoveIt の設定・ドライバは変えていない。
+- ずれの判定を、周期ごとから**入力のメッセージごと**に直した（10 Hz・倍率 1 で 0.5 m/s の手が飛びになるのを避けるため）。`point_time_s` を `FollowConfig` に追加し、`rate_hz` の既定を 10 にした。
+- 試験: ik パッケージ 566 件（follow_calc 91、follow_machine 74、follow_static 18）、失敗 0。他のパッケージはコードを変えていないので省略。
+- ノード単体（bringup なし）の起動確認: 状態 `IDLE START_WAIT`、`scale:=0.5` の反映、実行中の scale の変更（範囲外は拒否）、ほかのパラメータの変更は拒否、kill -INT で clean に停止、ps と `ros2 node list --no-daemon` は空。
+- 戻し方: b1 のコミットの直前（47b70c5）から取り出せる。

@@ -27,8 +27,10 @@ time and the latest inputs, and sends what the returned Output says. The machine
 States (Output.state) and their reasons:
   IDLE       nothing is sent. reason: START_WAIT, RELEASED, JOY_TIMEOUT, REFUSED a,b,...
   TRACKING   one point per tick. reason: OK, SPEED_LIMITED
-  HOLD_JUMP  the new target is 50 mm / 30 deg or more from the last accepted one (nothing is
-             sent). Resumes when the target is back within 20 mm and 10 deg of it.
+  HOLD_JUMP  a pose message whose target is 50 mm / 30 deg or more from the target of the message
+             before it (judged for every message, not once per tick; nothing is
+             sent). Resumes when the target is back within 20 mm and 10 deg of the last accepted
+             target.
   HOLD_RANGE the target cannot be made: UNREACHABLE, JOINT_RANGE, ELBOW_LIMIT, FLOOR, ORIENT,
              IK_JUMP. Resumes like HOLD_JUMP.
   HOLD_LAG   the target is too far ahead of the commanded tip (C2). The accepted target follows
@@ -78,6 +80,7 @@ class Inputs:
 
     pose: Optional[Tuple[np.ndarray, np.ndarray]] = None  # (position, rotation), base_link
     pose_time: Optional[float] = None
+    poses: Optional[list] = None  # all pose messages since the last tick [(p, R), ...]
     joy: Optional[JoyState] = None
     joy_time: Optional[float] = None
     q_meas: Optional[np.ndarray] = None
@@ -125,6 +128,7 @@ class Follower:
     def _clear(self):
         self._p_ref = self._r_ref = self._p_in0 = self._r_in0 = None
         self._acc_p = self._acc_r = None
+        self._prev_msg = None  # the target of the previous pose message
         self._q_cmd = self._q_ik = None
 
     @property
@@ -248,6 +252,7 @@ class Follower:
         self._p_in0 = np.asarray(inp.pose[0], dtype=float)
         self._r_in0 = np.asarray(inp.pose[1], dtype=float)
         self._acc_p, self._acc_r = self._p_ref.copy(), self._r_ref.copy()
+        self._prev_msg = (self._p_ref.copy(), self._r_ref.copy())
         self._q_cmd = q_desired.copy()
         self._q_ik = q_desired.copy()
         self._rebase = False
@@ -260,24 +265,44 @@ class Follower:
         self._set(state, reason)
         return self._out(detail=detail)
 
+    def _messages(self, inp):
+        """Return the pose messages of this tick (the latest one if the caller gave no list)."""
+        if inp.poses:
+            return [(np.asarray(p, dtype=float), np.asarray(r, dtype=float))
+                    for p, r in inp.poses]
+        return [(np.asarray(inp.pose[0], dtype=float), np.asarray(inp.pose[1], dtype=float))]
+
     def _follow(self, dt, inp):
         cfg = self.config
-        p_in = np.asarray(inp.pose[0], dtype=float)
-        r_in = np.asarray(inp.pose[1], dtype=float)
+        messages = self._messages(inp)
         if self._rebase:
+            p_in, r_in = messages[-1]
             self._p_ref, self._r_ref = self._acc_p.copy(), self._acc_r.copy()
             self._p_in0, self._r_in0 = p_in.copy(), r_in.copy()
+            self._prev_msg = (self._acc_p.copy(), self._acc_r.copy())
             self._rebase = False
-        cand_p, cand_r = fc.relative_target(self._p_ref, self._r_ref, self._p_in0, self._r_in0,
-                                            p_in, r_in, cfg.scale, cfg.r_fix)
+            messages = messages[-1:]
+        was = self.state
+        # The jump is judged for every message of the input (not once per tick): a message
+        # whose target is 50 mm / 30 deg or more from the target of the message before it.
+        jumped = None
+        for p_in, r_in in messages:
+            msg_p, msg_r = fc.relative_target(self._p_ref, self._r_ref, self._p_in0, self._r_in0,
+                                              p_in, r_in, cfg.scale, cfg.r_fix)
+            if was in (TRACKING, HOLD_LAG) and jumped is None:
+                d, a = fc.target_difference(self._prev_msg[0], self._prev_msg[1], msg_p, msg_r)
+                if fc.is_jump(d, a, cfg):
+                    jumped = (d, a)
+            self._prev_msg = (msg_p, msg_r)
+        cand_p, cand_r = self._prev_msg
         distance, angle = fc.target_difference(self._acc_p, self._acc_r, cand_p, cand_r)
         detail = {'dist_mm': distance * 1000.0, 'angle_deg': float(np.degrees(angle)),
-                  'scale': cfg.scale}
-        was = self.state
-        if was in (TRACKING, HOLD_LAG):
-            if fc.is_jump(distance, angle, cfg):
-                return self._hold(HOLD_JUMP, 'TARGET_JUMP', detail)
-        elif not fc.is_near(distance, angle, cfg):
+                  'scale': cfg.scale, 'messages': len(messages)}
+        if jumped is not None:
+            detail['jump_mm'] = jumped[0] * 1000.0
+            detail['jump_deg'] = float(np.degrees(jumped[1]))
+            return self._hold(HOLD_JUMP, 'TARGET_JUMP', detail)
+        if was not in (TRACKING, HOLD_LAG) and not fc.is_near(distance, angle, cfg):
             # keep waiting for the hand to return
             return self._hold(was, 'WAIT_RETURN' if was == STALE else self.reason, detail)
         q_cmd = self._q_cmd

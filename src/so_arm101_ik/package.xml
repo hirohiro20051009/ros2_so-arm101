@@ -3,7 +3,7 @@
 <package format="3">
   <name>so_arm101_ik</name>
   <version>0.1.0</version>
-  <description>Analytic forward/inverse kinematics of the SO-ARM101 arm and the URDF kinematic chain used to check it (pure Python, numpy only)</description>
+  <description>Analytic forward/inverse kinematics of the SO-ARM101 arm and the URDF kinematic chain used to check it (pure Python, numpy only), and the VR follow node (vr_follow: Joy and PoseStamped in, one-point trajectories to the arm_controller out)</description>
   <maintainer email="hirohiro20051009@gmail.com">hiro</maintainer>
   <license>MIT</license>
 
@@ -11,8 +11,21 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
+  <exec_depend>control_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
 
-  <test_depend>ament_index_python</test_depend>
+  <test_depend>python3-yaml</test_depend>
   <test_depend>so_arm101_description</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_lint_auto</test_depend>

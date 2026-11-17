@@ -194,7 +194,8 @@ class FollowConfig:
     """Values of the follower (every value is provisional; the checks of the constructor)."""
 
     scale: float = 1.0
-    rate_hz: float = 20.0
+    rate_hz: float = 10.0  # b0: 20 Hz makes 0.1 rad jumps of the controller (docs/p6_plan.md 7)
+    point_time_s: float = 0.08  # time_from_start of the one point (b0)
     max_joint_speed: float = 0.5  # rad/s of the tick (the real limit; the driver cap is a net)
     jump_pos: float = 0.05  # m, in the space of the target
     jump_ang_deg: float = 30.0
@@ -219,7 +220,8 @@ class FollowConfig:
             if not condition:
                 raise ValueError(message)
 
-        numbers = (self.scale, self.rate_hz, self.max_joint_speed, self.jump_pos,
+        numbers = (self.scale, self.rate_hz, self.point_time_s, self.max_joint_speed,
+                   self.jump_pos,
                    self.jump_ang_deg, self.resume_pos, self.resume_ang_deg, self.stale_s,
                    self.joy_timeout_s, self.floor_z, self.elbow_max_deg, self.clutch_windup,
                    self.ik_jump, self.max_lag, self.max_tracking_error, self.gripper_open_rad,
@@ -228,6 +230,7 @@ class FollowConfig:
                  for v in numbers), 'every value must be a finite number')
         need(0.0 < self.scale <= SCALE_MAX, 'scale must be in (0, %g]' % SCALE_MAX)
         need(1.0 <= self.rate_hz <= 100.0, 'rate_hz must be in [1, 100]')
+        need(0.0 < self.point_time_s <= 0.5, 'point_time_s must be in (0, 0.5] s')
         need(0.0 < self.max_joint_speed <= 1.0, 'max_joint_speed must be in (0, 1] rad/s')
         need(0.0 < self.resume_pos < self.jump_pos <= 0.2, 'need 0 < resume_pos < jump_pos <= 0.2')
         need(0.0 < self.resume_ang_deg < self.jump_ang_deg <= 90.0,
