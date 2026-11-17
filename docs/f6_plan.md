@@ -1,0 +1,300 @@
+# F6 の計画: yaml に elbow_flex の zero_offset_deg = −6.3 を入れる（床当ては保留の前提）
+
+2026-11-17。**計画だけ**。yaml・コード・手順書・既存の計画書は、この文書を書く以外は触っていない（読み取りだけ。Python・実機・launch・モック・ビルドは使っていない）。実装は承認後。HEAD は 4f5beb8。コミットは承認を得てから。docs だけの変更なので colcon test は省略。
+
+- 前提（読んだもの）: `docs/inventory.md` の J1〜J4d、F1〜F5、「F5 の実機の結果とその後の検討」。`docs/joint_offset_plan.md`（7 章、8.4 の J5・J6、9.1）。`docs/zero_offset_calib_plan.md`（6 章、7.4 の F6 の行、7.5、9.1）。
+- 書き方: **事実**（ファイル・ログで確かめたもの）と **推測・計算**を分ける。表のセルに縦線は使わない。
+- 記号: δ = `zero_offset_deg`（度。真の角度 = 読んだ角度 + δ）。
+- **決定（2026-11-17、ユーザー。F6 の計画への回答）**: 1 本書に置き、既存は注記だけ。2 lift・wrist は書かない（コメントに未測定と書く）。3 試験 1 件（帯の値）を足す。4 古い手順書は 3 つだけ直す。5 戻し先の上限は +91°。7 docs だけでコミット（A〜D を反映したあと）。6（T の許容）は保留で、F6a の FK の結果のあとに決める。A〜D の直し（段 a の上限、Python 2 回を F6a の中へ、symlink の書き方、δ の符号と low・high の根拠）を反映した（本書の A・B・C・D の印の所）。
+- **補正が効く時点（C。手順書の冒頭と inventory にも書く）**: `install/so_arm101_hardware/share/so_arm101_hardware/config/follower_calibration.yaml` は src の yaml への symlink（確かめ方と出力は 1.1）。**F6a で src の yaml を編集すると、ビルドをしなくても、次の実機の launch から補正が効く**（ドライバは on_init で 1 回読む。走っている launch には効かない）。**したがって F6a のコミットのあとは、その作業ツリーのまま launch すると、すぐ補正つきの実機になる。**
+
+## 0. 要約
+
+1. `src/so_arm101_hardware/config/follower_calibration.yaml` の elbow_flex の行に `zero_offset_deg: -6.3` を足し、根拠をコメントに書く。lift・wrist_flex・ほかの関節は**書かない**（既定 0。案。1.2）。
+2. hardware のビルドと colcon test。件数の予測は **1165 → 1166**（hardware 137 → 138。範囲 1166〜1168）。ほかのパッケージは不変の見込み（3 章）。
+3. 実機の確認は a〜f の 6 段（4 章）。各段に予測値と、止める条件（出力・値・閾値）を書いた。
+4. 床当て（オフセットキャリブの再実施）の段は入れない（5 章）。
+5. 元に戻すのは「yaml の行（とコメント）を消す」だけ。試験は δ = 0 でも通る作りにする（6 章）。
+6. 既存の計画書は書き換えず、元の記述を残して注記を足す案（J4d・F5 と同じやり方）。本書を新しい節の置き場にする（2 章）。
+
+## 1. yaml の変更（項目 1）
+
+### 1.1 変える行（事実: 今の行は `follower_calibration.yaml:17`）
+
+今:
+
+```
+  elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, min: 849, max: 3090, eeprom: {homing_offset: 119, min_limit: 849, max_limit: 3090}}
+```
+
+後（`zero_offset_deg` は center の直後。`joint_offset_plan.md` 2.1 の例と同じ位置。J3 の apply の持ち越しもこの位置に書く）:
+
+```
+  # zero_offset_deg: elbow_flex = -6.3 deg（暫定。2026-11-17 の決定。F6）。根拠: カメラ C2 の当てはめ -6.31 ± 0.38 と、R1 の物差し（出発点の机との間隔 29 ± 3 mm。予測 31.3 mm）。オフセットキャリブ（床当て）は 2026-11-17 に不合格で保留。C4 で机の ID 1 を使って決着させる。lift・wrist_flex は未測定なので書かない（既定 0）。詳細は docs/f6_plan.md と docs/inventory.md の F6。
+  elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, zero_offset_deg: -6.3, min: 849, max: 3090, eeprom: {homing_offset: 119, min_limit: 849, max_limit: 3090}}
+```
+
+- 事実: yaml の `#` の行は、`joints:` の中の行と行の間に置ける（YAML の文法。`load_calibration` は yaml-cpp で読む）。**未確認**: 実際に読めること（ビルドと colcon test の 1 回目で確かめる。読めなければ試験の `ProductionYaml.LoadsAndIsStructurallyConsistent` が落ちる）。
+- 注意（事実）: コメントは `so_arm101_calib apply` が yaml を作り直すと消える（`joint_offset_plan.md` 2.2。δ の値は持ち越される）。根拠は yaml のコメントだけに頼らず、`inventory.md` の F6 の節にも書く。
+- 事実: yaml は git 管理。**元の内容**は、直前のコミット 4f5beb8 の sha256 `442c0d9ab0fe2fb69cbed40bb724b6a29c547200f7dbd0b47be4e6f0aa35fd86`（F5 の控えと同じ。install 側は src への symlink で同じファイル）と、上の「今」の行で戻せる。`inventory.md` の F6 の節に、直前のコミット・元の行・新しい sha256 を書く（CLAUDE.md の規則）。
+- 事実（C。確かめ方）: `ls -l install/so_arm101_hardware/share/so_arm101_hardware/config/`（2 回実行。同じ結果）の出力:
+  `lrwxrwxrwx 1 hirok hirok 82 Nov 12 15:01 follower_calibration.yaml -> /home/hirok/ros2_so-arm101/src/so_arm101_hardware/config/follower_calibration.yaml`
+  行頭の `l` が symlink で、指す先が src の yaml。**yaml の編集は、再ビルドなしで次の launch から効く**。ドライバは on_init で 1 回だけ読む（走っている launch には効かない）。ライブラリも `install/so_arm101_hardware/lib/libso_arm101_sts3215.so` が build 側への symlink（`ls -l`）。手順書の冒頭と `inventory.md` の F6 の節にも、同じ 2 点（symlink であること、F6a の後は次の launch から効くこと）を書く。
+
+### 1.2 lift・wrist_flex の書き方（案）
+
+| 案 | 内容 | 良い点 | 悪い点 |
+|---|---|---|---|
+| A（推奨） | 書かない（既定 0）。コメントに「未測定なので書かない」と書く | 「測って 0 だった」と読まれない。起動の INFO は δ = 0 の関節を出さない（`sts3215_system.cpp:118`）ので、INFO の行は elbow の 1 行だけで、a 段の判定が単純 | 「0 に決めた」ことが yaml の行からは見えない（コメントで補う） |
+| B | `zero_offset_deg: 0` を明示 | 全関節の値が一目で分かる | 測っていない値を 0 と書くと、測った 0 に見える。apply が持ち越すので、後でキーを消す手間。INFO・挙動は A と同じ（δ = 0 は出さない・式は同じ） |
+
+- 推奨 A の理由: 床当ては不合格で、lift・wrist は測っていない（`zero_offset_calib_plan.md` 4 章の wrist の規則とも合う）。0 を書くのは、測ってからにする。
+- pan・wrist_roll・gripper も書かない（gripper は 0 以外を書くと読み込みが拒否する。J1）。
+
+## 2. 既存の計画書の直し方（案。決めてほしい）
+
+| 案 | 内容 | 良い点 | 悪い点 |
+|---|---|---|---|
+| 1（推奨） | 本書（`docs/f6_plan.md`）に F6 の計画を全部置く。既存の 2 つの計画書には、元の記述を残したまま**注記だけ**足す（J4d・F5 と同じやり方） | 元の記述が消えない。「保留になった前提」の文脈が 1 か所にまとまる。直す所が少なく、差分が読みやすい | 読む人が本書へ飛ぶ必要がある |
+| 2 | `joint_offset_plan.md` の 7.4・8.4 と、`zero_offset_calib_plan.md` の 6 章を、本文ごと書き直す | 1 つの文書で完結 | 当時の決定の経緯（床当てが主役だった計画）が本文から消える。J4d で採った「元の記述は残す」に反する |
+
+案 1 の注記の置き場所（実装のときに足す。1 行ずつ）:
+
+- `joint_offset_plan.md`: 冒頭の用語の注記の下に「F6 の計画は `docs/f6_plan.md`」、7.2 の「elbow +96°」の行、7.4（R0〜R3 は本書 4 章の a〜f に置き換わる）、8.4 の J5・J6 の行（J5 = 本書の F6a・F6b、J6 = C3-b の別の計画）、9.1 の項目 3。
+- `zero_offset_calib_plan.md`: 6.1・6.3（「この道具で測った値を yaml に入れる」→ 床当ては保留で、暫定の −6.3 を入れる）、7.4 の F6 の行、7.5 の 6。
+- `inventory.md`: 末尾に F6 の節（戻すためのコミット、元の行、sha256、試験の件数、守りを外す確認）。
+
+## 3. hardware のビルドと colcon test（項目 2）
+
+### 3.1 手順（実機・launch・モックが動いていないことをユーザーが確かめてから）
+
+```
+source /opt/ros/humble/setup.bash
+source ~/ros2_so-arm101/install/setup.bash
+cd ~/ros2_so-arm101
+colcon build --packages-select so_arm101_hardware      （build/ と install/ は消さない）
+colcon test --packages-select so_arm101_hardware so_arm101_calibration
+colcon test-result --verbose
+```
+
+最後に全体の件数を確かめる（`colcon test` を全パッケージで。J 系と同じ）。コミットの前に結果を報告し、失敗があれば先に報告する。
+
+- 事実: ビルド済みのライブラリ（`build/so_arm101_hardware/libso_arm101_sts3215.so`。2026-11-16 21:43）に、J2 の INFO の文面（`reported position = measured position + this`、`clamp tolerance low=%d high=%d ticks`）が入っている（`grep -a -o`）。ただし F6 のビルドで念のため作り直す（変更が無ければ何もしない）。
+- 事実: 起動の INFO の出力形式は `zero_offset_deg: %s %.2f deg (reported position = measured position + this); clamp tolerance low=%d high=%d ticks (default %d)`（`sts3215_system.cpp:119-122`）。
+
+### 3.2 件数の予測（推測。実測は実装後。過去は少なめに出る傾向）
+
+- 新しい試験は **1 件**（hardware の gtest。`test_conversion.cpp`。CMake は変えない）: `ProductionYaml.OffsetsAreZeroExceptAnElbowInTheDecidedBand`（pan・lift・wrist_flex・wrist_roll・gripper は 0。elbow_flex は 0、または −7.0 以上 −5.5 以下）。値を固定せず帯にする理由: 6 章の「行を消せば戻せる」を試験が壊さないため。F6 の値を C4 で見直すときも帯の内側なら試験の変更は要らない。
+- 既存の試験への影響（読んだ範囲。**走らせて確かめるのは実装のとき**）:
+  - `ZeroOffset.DefaultIsBitIdenticalToTheOldFormula`、`ClampTolerance.IsExactlyTheBaseWhenTheOffsetIsZero`: 本番 yaml を読むが、`zero_offset_deg` を 0 に戻してから比べる（`test_conversion.cpp:419-425,529-538`）。影響なし。
+  - `ProductionYaml.LoadsAndIsStructurallyConsistent`（`:150`）: δ を見ない。コメントの行と新しいキーが読めること、中心が範囲の内側であること。
+  - calibration の `ProductionYaml.MatchesTheEepromReadAfterC3`: eeprom 欄だけ。影響なし。
+  - hardware のほかの本番 yaml を読む試験は無い（grep: `PRODUCTION_YAML` は `test_conversion.cpp` の 3 か所だけ）。bringup のモックの試験・ik・camera は yaml を読まない見込み（**未確認**。全体の colcon test で確かめる）。
+
+| パッケージ | 今 | 予測 | 増減 |
+|---|---|---|---|
+| hardware | 137 | 138 | +1 |
+| calibration | 245 | 245 | 0 |
+| ik | 364 | 364 | 0 |
+| camera | 370 | 370 | 0 |
+| bringup | 47 | 47 | 0 |
+| description | 2 | 2 | 0 |
+| moveit_config | 0 | 0 | 0 |
+| 合計 | 1165 | 1166 | +1（範囲 1166〜1168。失敗 0 の見込み） |
+
+- 守りを外す確認（スクラッチのコピー。別の build・install。リポジトリは変えない）: ① elbow を `+6.3`（符号を逆）→ 新しい試験が落ちる。② elbow を `-0.63` → 落ちる。③ lift に `-2` → 落ちる。④ キーを消す → 通る（戻し方の確認）。スクラッチでは `ProductionYaml.MatchesTheEepromReadAfterC3` が環境の差で落ちる既知の件（J3）がある。
+
+## 4. 実機の手順書（補正後の確認。項目 3）
+
+**実機はユーザーだけが動かす。Claude は動かさない。** 手順書の本体は F6b で `docs/zero_offset_apply_real_check.md` に書く（今は書かない）。ここは骨組みと、各段の予測値・止める条件。共通は `camera_c2_real_check.md` の「端末の準備」「止め方」「中止・相談の基準」を使う（同じ端末 A・D、`ROS_DOMAIN_ID`・cyclonedds の設定、`tee -i` と `exit=`）。保存先は `~/so_arm101_check/zero_offset_apply_<日付>/`。同名のファイルを書く前に `ls`。
+
+共通の止める条件（どの段でも）: A のログに `FAULT:`・`COMMUNICATION LOST`・`read failed`・`step limit`・**`clamp: '`**（J2 の WARN。`sts3215_system.cpp` の文面は `clamp: 'elbow_flex' command maps to raw …`）が出たら、その場で止めて、腕を支えて Ctrl-C。原因を報告してから再開する。異音・腕の予期しない動きも同じ。
+
+### 段 a. 読み取り専用で起動（腕は動かさない。トルク OFF。出発点の折りたたみ姿勢）
+
+```
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=true 2>&1 \
+  | tee -i ~/so_arm101_check/zero_offset_apply_<日付>/a_arm_launch.log; echo "exit=${PIPESTATUS[0]}"
+```
+
+端末 D で 10 秒ほど待ってから `grep -n "zero_offset_deg\|\[diag\]" ` で A のログを見る。`ros2 topic echo --once --no-daemon --field position /joint_states` を `a_start_pose.txt` に控える（`ls` で同名が無いことを先に）。
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| INFO 行（A のログ。`zero_offset_deg:` を含む行の数） | **ちょうど 1 行**（elbow_flex だけ）。`zero_offset_deg: elbow_flex -6.30 deg (reported position = measured position + this); clamp tolerance low=50 high=122 ticks (default 50)` | 行が無い（古いバイナリか、yaml が読まれていない）／2 行以上（ほかの関節に δ が入っている）／関節名が elbow_flex でない／値が `-6.30` でない／**`low=50` でない／`high=122` でない**。どれでも中止して報告（Ctrl-C。トルク OFF なので腕を支える） |
+| high の予測の根拠（D。計算とコード） | 6.3 × 4095 / 360 = 71.66 → 切り上げて 72 → 50 + 72 = **122**。式は `calibration.cpp:183-188`（下の「δ の符号と low・high」）。試験 `test_sts3215_system.cpp:966` も `low=50 high=122` を確かめている | 上に同じ |
+| `[diag]` | 2 行とも `6/6 joints match`（EEPROM は書いていない） | 6/6 でない行がある |
+| elbow_flex の読み（`a_start_pose.txt` の 3 番目の値） | **約 +89.7°（+1.565 rad）**。根拠（計算）: R1 の出発点 +1.67475 rad（95.95°）− 6.3° = 89.65°。補正前の手でたたんだ出発点は毎回 1〜2° ばらつく（過去: 1.6747、1.6901、1.7054 rad。補正後に直すと 89.65°、90.53°、91.42°）。**許容: +88.0° 以上 +92.20° 以下（1.6093 rad）**。上端は補正後の真の上限（raw_max = 3090 の読み）。 | 88.0° 未満（補正が効きすぎ・たたみ方が大きく違う）／**92.20° 超**（A。下の「読みが 92.20° を超えたとき」）。どちらも書き込みへ進まず、中止して報告 |
+| gripper の読み | 約 0.028（F5 の閉じた値 0.0281。変動 ±0.0012）。δ は gripper に効かない | 0.0281 から 0.005 rad 以上ずれる |
+| 停止後 | 段 f と同じ | 段 f |
+
+**δ の符号と low・high（D。コードの該当箇所。事実）**
+
+- `calibration.cpp:183`: `s = −direction × zero_offset_deg × angle_ticks / 360`。elbow は direction = +1（yaml:17）、δ = −6.3 なので、s = −(+1) × (−6.3) × 4095 / 360 = **+71.66（> 0）**。
+- `calibration.cpp:184-185`: `s > 0` なら `t.high = base + ceil(s)` = 50 + 72 = **122**。`:186-187`: `s < 0` なら `t.low` を広げる（今回は通らない）。`:181`: 初期値は両側 base（= 50）なので **low = 50**。
+- 向きの理由（式 `calibration.cpp:166` の `rad_to_raw_continuous`）: raw = direction × (度 − δ) × angle_ticks / 360 + center。δ が負だと、同じ rad の指令が raw で +71.66 tick 大きくなる。つまり URDF の上限 +96.83° への指令は raw_max（3090）を 52.7 tick 超える。広げるのは**その側（high）**。
+- その許容の使われ方: 異常（fault）の判定 `sts3215_system.cpp:991`（`want > raw_max + tol_hi` で異常。122 以内なら異常にならない）。`:994`（`over_hi = tol_hi > 50 && want > raw_max`）で `clamp:` の WARN。`:1005` で raw の範囲に切る（Goal は raw_max まで）。許容は起動時に `:103` で計算し、INFO を `:119-122` で出す。
+- 注意: direction = −1 の関節では広がる側が逆（`calibration.cpp:183` の `−direction`）。elbow には関係しない。
+
+**読みが 92.20° を超えたとき（A。コードで確かめた事実と、そこからの推測）**
+
+- 読みは切らない: `sts3215_system.cpp:526` が `raw_to_rad` を呼び、`calibration.cpp` の `raw_to_rad` は範囲で切らない（コメント「clamp しない」）。raw が raw_max（3090）を超えれば、読みは 92.20° を超えて、そのまま `/joint_states` に出る。読みの上端 92.20° は「範囲の端」であって、読みの上限ではない。
+- MoveIt の start state: 位置の範囲は URDF の上限 +1.69 rad（96.83°。`joint_offset_plan.md` 4.1）。`joint_limits.yaml` に位置の範囲の記述は無い（事実: 速度・加速度だけ）。したがって **92.20° 超〜96.83° 以下の読みは範囲の内側で、start state out of bounds にはならない**。96.83° 超（raw で 3090 + 約 53 tick。物理的にはほぼ起きない）で初めて範囲の外になる（出発点が上限を 0.0001 rad 超えたときの前例は `feetech_write_check.md:68`。RViz の見え方は未確認のまま）。
+- ドライバの許容が吸収するか: **吸収はするが、動く**。有効化で `hw_commands_ = hw_positions_`（`:854`）。最初の write で want = `rad_to_raw(読み)` = 読んだ raw（往復で恒等）。raw_max を n tick 超えているとき、n ≤ 122 なら異常にならず（`:991`）、`clamp:` の WARN が 1 回出て（`:994`）、Goal は raw_max に切られる（`:1005`）。**腕は有効化の直後に n tick（n × 0.088°）内側へ動く**。n > 122（読みが約 102.9° 超）なら異常で、`anomaly_cycles_` 回続くと fault（Goal の送信停止。トルクはそのまま）。
+- 結論: 読み取り専用の a 段では何も起きない（書かない）。ただし 92.20° 超のまま書き込みへ進むと、(i) 段 c の「有効化で動かない」（差 0.005 rad 以内）と「`clamp: '` の WARN なし」の予測が崩れる、(ii) 共通の止める条件に当たる。そこで a 段の上端を **92.20° に下げ、超えたら書き込みへ進まない**ことにした（上の表）。
+- 超えたときの扱い（止める条件）: 読み取り専用の launch を止め（段 f）、腕を手で少し開いて（elbow を緩めて）たたみ直し、a 段をやり直す。n が 1〜3 tick（92.2〜92.5°）程度なら、たたみ直しで解消する見込み（推測。ユーザーの手で毎回 1〜2° ばらつくため）。2 回やり直しても超えるなら、報告して指示を待つ（δ・center の見直しの材料。その場で値を変えない）。
+
+オフライン（Python。承認を得て 1 回。F6a のあと）: `tools/pose_margin.py --pose a=<a_start_pose の 6 値>`。**予測**（J3 の実行 3 回目と同じ。計算）: elbow_flex の `calib_min −1.8292`、`calib_max 1.6093`、`lower_margin −0.1392 OUT`、`upper_margin +0.0807 ok`。ほかの関節は今の値と同じ。
+
+### 段 b. 出発点で物差しを当てる（独立の確認。腕は動かさない）
+
+固定あごの一番低い点の、机（腕の取り付け面）からの高さを、前回（`inventory.md` の C3 の節の 3）と同じ測り方で、**2 回**測る（2 回の差が 3 mm を超えたら測り直す）。
+
+| 見るもの | 予測 | 判定 |
+|---|---|---|
+| 一番低い点の高さ（R1 の姿勢の予測） | **31.3 mm**（elbow −6.31° の値。0.01° の差は 0.04 mm。`joint_offset_plan.md` 5.2 の 1 と 5.4。1° あたり約 4.3 mm） | **28.3〜34.3 mm なら確定**（予測 ± 3 mm = ±0.7°。決定済み）。外れたら止めて報告（δ の見直しの材料。その場で値を変えない） |
+| 予測が使える条件 | 今日の a 段の読みが、R1 を補正した値（pan −0.0690、lift −1.4983、elbow **+1.5648**、wrist_flex +0.6690 rad）に、**4 関節とも 0.01 rad 以内**（elbow の 0.01 rad は先端で約 2.5 mm） | 離れていたら 31.3 は使えない。今日の読みで `lowest_point.py` を計算し直す（スクラッチの 1 回。承認を得る。`~/so_arm101_check/camera_20261116_C3/lowest_point.py` はそのまま、コピーをスクラッチで実行）。その値 ± 3 mm で判定 |
+
+- 注意（事実）: 前回の物差し（29 ± 3）と今回は同じ道具の測り直しで、δ の根拠の一部（物差し −5.77）の再測定。カメラ（−6.31 ± 0.38）とは独立。床当ては数えない（inventory の「F5 の実機の結果」の 5）。
+
+### 段 c. 書き込みモードで起動し、RViz から T へ（トルク ON）
+
+A を止める（段 f の確認は、ここでは ps と `ros2 node list --no-daemon` が空まで）。腕を折りたたみ姿勢で支え、`read_only:=false torque_limit:=500` で起動（`camera_c2_real_check.md` の W0 と同じ。`c_arm_launch.log`）。10 秒待って、端末 D で `ros2 control list_controllers`（`--no-daemon` は付けない）と、`/joint_states` の読み（`c_start_pose.txt`）。
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| 有効化の瞬間 | **動かない**。`rad_to_raw(raw_to_rad(raw)) == raw`（J1 の試験）。`c_start_pose` と `a_start_pose` の差は 0〜1 tick（0.0015 rad） | **どの関節でも差が 0.005 rad（約 3 tick）を超える**／目で見て動く。支えたまま Ctrl-C |
+| INFO 行 | 段 a と同じ 1 行 | 段 a の条件 |
+| `arm_controller`・コマンド A | active／`STOPPED`。WARN なし | 違う |
+
+T への移動の前の予測（**B。F6a の中で、実機の前に、Python 2 回で出す。実行は、この計画の承認のあとに、範囲（実行するファイル・引数・出力先）を改めて報告して承認を得てから**。結果を本書のこの表と、F6b の手順書の表に書く）:
+
+- Python 2 回の中身（スクラッチのコピーで実行。`~/so_arm101_check/` の元のファイルは読むだけで、書かない。`/opt/ros/humble/setup.bash` と `install/setup.bash` の両方を source してから。出力はスクラッチへ）:
+  1. `lowest_point.py` で、(i) R1 を補正した姿勢（段 b の 31.3 mm の確認。elbow +1.5648）と、(ii) T の関節値（0、−22°、+30°、+83°、0）の、固定あごの一番低い点の高さ。補正前（elbow 23.7° = 30 − 6.3）と補正後の 2 通り。
+  2. `urdf_kinematics` の FK で、T の関節値の先端 (x, z)。補正前の物理姿勢（elbow 23.7°）と補正後（30°）の差（向きつき）。
+- **T の許容と中止の値は、この 2 回の結果から決めて、ここに書く**（ユーザーの決定: 項目 6 は保留で、結果のあとに決める）。決め方の案（値は結果が出てから）: 許容 = 物差しの ±3 mm と、δ の不確かさ ±0.7° が T で先端に出す量（FK の感度 [mm/°] × 0.7）を二乗和で合わせた値。中止 = 許容の約 1.6 倍、かつ「測った一番低い点が、FK の予測より 15 mm 以上低い」を絶対の条件に足す（床の規則 `GOAL_FLOOR` の 0.045 m との関係は、結果の値で確かめる）。今の仮の値（±5 mm、8 mm、30 mm）は、結果が出たら置き換える。
+
+| 項目 | 予測（今分かっているもの） | 値の出し方 |
+|---|---|---|
+| T の関節値 | pan 0、lift −22、elbow +30、wrist_flex +83、roll 0（整数の度。`camera_c2_real_check.md:312`） | 既存の値のまま（`joint_offset_plan.md` 9.1 の項目 5） |
+| T の先端（FK） | (0.177, 0, 0.059) m 付近（`inventory.md` の記録）。**補正後は物理的な姿勢が FK と一致する**ので、物差しで測る先端はこの値のはず | `urdf_kinematics` で T を計算し直して確定 |
+| 補正前の物理姿勢との差 | elbow が 6.3° 余計に曲がる。先端の移動の大きさは x 約 20 mm・z 約 16 mm（`joint_offset_plan.md` 7.1。大きさだけ。**向きは未確認**。先端は約 16 mm 低くなるという私の読み） | FK で補正前後（elbow 23.7° と 30°）を計算して確定 |
+| T の一番低い点の高さ | **約 50 mm**（概算: FK の z 0.059 m − 指先の下端 6.5 mm − 余り。確定は `lowest_point.py`） | `lowest_point.py` |
+
+RViz の操作（`camera_c2_real_check.md` の W1 と同じ。OMPL、Scaling 0.1、Start と Goal を `<current>` に選び直す、Plan して見てから Execute、片手は 12 V の近く・もう片手で腕を支える）。止まったら `/joint_states` を `c_T_pose.txt` に控え、物差しで T の一番低い点を測る。
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| Execute の前（RViz のアニメーション） | 先端が出発点より下がらない（経路の先端 z の最小は出発点。`joint_offset_plan.md` 7.1 の経緯） | 先端が机に近づく動きに見える → Execute しない |
+| 着いた後の関節の読み | 目標との差が 5 関節とも 0.0082 rad 以内（V8 の実績の最大。MoveIt の終点のずれ）。elbow は +30.0° ± 0.6° | **0.02 rad を超える差**／`clamp: '` の WARN |
+| T の一番低い点の物差し | FK の予測（上の Python の結果）± **許容（Python の結果から決める。保留）**。仮の値: ± 5 mm | **許容の約 1.6 倍を超えてずれる**、または**予測より 15 mm 以上低い**。仮の値: 8 mm 超、または測った高さが 30 mm 未満 → 動かさず、支えて報告。**値は Python の結果で置き換える** |
+
+### 段 d. 大きな移動と DiffMode の小さな再確認（T から。`joint_offset_plan.md` 9.1 の項目 4）
+
+`large_move_real_check.md` の M1（T への dry-run）→ M2（`--goal 0.200 0.000 0.060`）→ M3'（`--goal 0.230 0.060 0.060`）。`diff_mode_real_check.md` の V3（+x 5 mm、`--max-steps 1`）。各実行の前に `--dry-run` を見る。
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| dry-run の目標の elbow_flex | **1.58 rad（+90.5°）以下**。理由（計算）: 補正後の真の上限 1.6093 rad から 0.03 rad（クランプの WARN と SHORT を避ける余裕）を引いた値 | 1.58 rad 超 → 送らない（`n`）。目標を変えるか、報告 |
+| M2・M3' の `Outcome` | `REACHED`（先端の誤差 10 mm 以内。`REACHED_MM`。終了コード 0）。誤差は補正前の実績（inventory の M2・M3' の節）より悪くならない見込み（**実績の値は手順書を書くときに引く**） | `SHORT`（終了コード 4）・`NOT_SETTLED`・`PLAN_REFUSED`・タイムアウト・`FIRST_DESIRED`・`GOAL_FLOOR` |
+| 先端の高さ（道具の表示） | z ≥ 0.045 m | z < 0.045 m |
+| 指令と測定の差（`stuck`） | 0.02 rad 以内（上限は `max_windup` 0.06 rad） | 0.04 rad 超 |
+| V3 の `Outcome` | `LIMITED`（`MAX_STEPS`）または `CONVERGED`、終了コード 0。1 歩目の δ は約 2.3 mm（lift +0.0199・elbow −0.0199 rad の前回の実績と同じ程度） | `REFUSED`・`NOT_SETTLED`・`DESIRED_MISMATCH`・`SPIN`・タイムアウト |
+| V3 の `windup_after` | 0.06 rad 以下（記録だけ。`tip_move_over_delta` も記録だけで合否に使わない） | 0.06 超 |
+| ドライバのログ | WARN なし | 共通の止める条件 |
+
+### 段 e. 出発点へ戻す（RViz。`camera_c2_real_check.md` の W4 と同じ）
+
+- 戻し先: 段 a の `a_start_pose.txt` の 5 関節を、度に直して四捨五入した整数。**elbow_flex は約 +90°（予測）。ただし +91° を超えない**。理由（計算）: 補正後の真の上限は +92.20°（1.6093 rad）。+91° = 1.5882 rad で、上限まで 1.2°（約 14 tick）。**+96° は使えない**（上限を 3.8°（約 43 tick）超える。許容 122 tick の内側なので黙ってクランプではなく WARN つきで、腕は約 +92.2° で止まり、戻し先より 2.5° 先に曲がる）。
+- pan・lift・wrist_flex・wrist_roll: 今日の読み（R1 の補正後の値は約 pan −3.96°、lift −85.8°、wrist_flex +38.3°、roll −2.77°。たたみ方でばらつく）。2026-11-15 の V8 の目標（pan −4、lift −85、wrist_flex +25、roll −3）は補正前の座標の実績で、今日の読みと違えば使わない。
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| Goal の elbow_flex（Joints タブの値） | **+90°**（a 段の読みが 89.7° のとき） | **+91° 超** → Plan しない |
+| 実行の開始位置と実測の差 | 5 関節とも 0.01 rad 以内（`allowed_start_tolerance`。超えると実行が拒否される） | 拒否された → 実測を読み直して計画し直す（再試行は 1 回まで。2 回目も拒否なら報告） |
+| 着いた後の読み（`e_end_pose.txt`）と `a_start_pose.txt` の差 | 最大 0.02 rad 以内（V8 の実績は最大 0.0184 rad）。elbow の差は 0.01 rad 以内 | 0.03 rad 超 |
+| A のログ | `clamp: '` の WARN が **0 行** | 1 行でもあれば報告（目標が上限を超えた印） |
+
+更新する 3 か所（F6b。元の文は、補正前の座標の実績だと分かる形で残す案）:
+
+| 場所 | 今の記述 | 案 |
+|---|---|---|
+| `large_move_real_check.md:202`（V8 の実績の目標） | 「2026-11-15 の V8 の実績の目標: pan −4、lift −85、elbow_flex +96、wrist_flex +25、wrist_roll −3 度」 | 「…（補正前の座標の実績。**F6 の補正後は使わない**。elbow +96° は補正後の真の上限 +92.2° を超える）。補正後の戻し先は、起動直後（段 a）の読みを四捨五入した整数の度（elbow_flex は約 +90°）」 |
+| `large_move_real_check.md:205`（手順 2） | 「elbow_flex は +1.69009 rad を超える値には戻さない（`servo_real_check.md:341`）」 | 「elbow_flex は **+91°（+1.588 rad）を超える値には戻さない**（補正後の真の上限は +92.2° = +1.6093 rad。+1.69009 は補正前の座標の値）」 |
+| `diff_mode_real_check.md:142`（V8 の注意）と `:144`（V8 の実績） | 「elbow_flex は +1.69009 を超える値には戻さない」と、実績の目標（elbow +96 など） | 142 は上と同じ書き換え。144 は「補正前の座標の実績」と注記し、補正後の目標は a 段の読みに従う |
+| `camera_c2_real_check.md:472`（W4 の 3） | 「2026-11-15 の V8 の目標（…elbow +96…）は参考で…。elbow_flex は +1.69009 rad を超える値にしない」 | 「…は補正前の座標の参考で、補正後は使わない。elbow_flex は +91°（+1.588 rad）を超える値にしない」 |
+
+同じ注意が古い手順書にもある（grep の事実）: `servo_real_check.md:341`、`feetech_write_check.md:226,243,263,270`、`analytic_diff_plan.md:1223`（「+1.69009 を超える値には戻さない」）。これらは**当時の記録**なので、書き換えずに、先頭か該当行に「補正後は +91°（+1.588 rad）」と 1 行の注記を足すか、触らないかを、決めてほしい（8 章の表）。
+
+### 段 f. 後始末
+
+1. **腕を折りたたみ姿勢で支える。** 端末 A で **Ctrl-C を 1 回**押す。
+2. A に出る最後の行 `exit=…` を貼る（`exit=0` が期待）。**貼ってから、ps を実行する**（順序は崩さない）。
+3. A のログの確認: `[deactivate] torque OFF and Lock=1 confirmed (read back) on all joints` と `deactivated. reads=…` の 2 行。bus のカウンタ（`retried`・`failed_cycles` など）がすべて 0。`grep -c "clamp: '" f_*.log` が **0**。
+4. 数秒待ってから、端末 D で（`camera_c2_real_check.md` の W5 の 4 と同じ。`--no-daemon` を付ける）:
+
+```
+ps aux | grep -E "realsense2_camera_node|apriltag_node|static_transform_publisher|ros2_control_node|move_group|robot_state_pub|rviz2|spawner|ik_move_run|camera_record_run" | grep -v -E "grep|gvfsd"
+ros2 node list --no-daemon
+```
+
+| 見るもの | 予測 | 止める条件 |
+|---|---|---|
+| `exit=` | 0 | 0 以外（`move_group`・`rviz2` の −11 は `deactivated.` の後なら無視） |
+| 2 行（`torque OFF and Lock=1 confirmed`・`deactivated`） | 両方ある | 無い → 腕を支えて 12 V を切る（S6）。報告 |
+| bus のカウンタ | すべて 0 | 0 でない |
+| ps | 空 | プロセスが残る → `kill -9`・`pkill`・`killall` はしない。報告して指示を待つ |
+| `ros2 node list --no-daemon` | 空 | `--no-daemon` にだけ残り ps が空なら、数秒待ってもう一度。それでも残るなら報告して指示を待つ。ros2 daemon には触らない（stop・start をしない） |
+
+## 5. 外すもの（項目 5）
+
+- 床当て（オフセットキャリブ。`zero_offset_record_run.py` と `zero_offset_fit_run.py` の実行）をもう一度行う段は、**入れない**（保留。`inventory.md` の F5 の結果の 5・6）。
+- 道具の変更案 C の①〜⑦（保留）、`--expected-offset`（F6 の後は渡さない仕様のまま）、`zero_offset_calib_real_check.md`（実施済みの手順書）は変えない。
+- `zero_offset_calib_plan.md` 6.2 の「当てはめ後の確認の実行（閉ループ）」は、床当てが前提なので**やらない**。代わりに段 b（物差し）と段 c の T の物差しが確認の役目で、決着は C4（机の ID 1）。
+- lift・wrist_flex の δ は決めない（床当ての結果は (b)(c) を支持するが物差しと両立しない。未解決のまま）。
+
+## 6. 元に戻す手順（項目 6）
+
+1. yaml の `zero_offset_deg: -6.3, ` と、その上のコメント 1 行を消す（`inventory.md` の F6 の節に控えた「元の行」に戻す。直前のコミット 4f5beb8 の sha256 は `442c0d9a…`）。
+2. `colcon build --packages-select so_arm101_hardware`（install の yaml は symlink なので再ビルドは必須ではないが、「ビルドが通る」の確認として行う）。
+3. 次の launch の A のログに `zero_offset_deg:` の行が**出ない**ことを確かめる（出ないのが、補正が無い印）。
+4. 試験は δ = 0 でも通る（新しい試験は 0 を許す）。elbow の δ だけが無くなり、サーボ（EEPROM）は書いていないので、ほかの戻しは要らない。
+5. コードごと戻す場合は F6a のコミットを戻す（`git revert` は承認を得てから）。F6a は yaml と試験 1 件だけなので、ほかに波及しない。
+
+## 7. 段の区切りと承認の範囲（案）
+
+| 段 | 内容 | 試験 | 実機 |
+|---|---|---|---|
+| F6-0 | 本書（docs だけ）。**今回** | 省略 | 不要 |
+| F6a | **Python 2 回（FK と一番低い点。上の B）**、yaml の 1 行とコメント、`test_conversion.cpp` の試験 1 件。`inventory.md` の F6 の節（戻し方・元の行・sha256）。launch・xacro・URDF・SRDF・CMakeLists・package.xml は変えない | hardware・calibration と全体 | 不要 |
+| F6b | 手順書 `zero_offset_apply_real_check.md`（新規）、3 か所の更新（4 章の段 e）、2 章の注記 | 省略（docs） | 不要 |
+| 実機 | 段 a〜f（ユーザー）。結果を inventory に（F6c） | — | 要 |
+| 後 | C3-b（C2 のデータ + `--joint-offset elbow_flex=-6.3` で `--write`）→ P6 → C4 | 別の計画 | 別 |
+
+- **Python は F6a の中で 2 回**（B。実機の前。この計画の承認のあとに、範囲を報告して承認を得てから実行）: ① `lowest_point.py`（段 b の補正後の出発点、段 c の T の補正前後の一番低い点）、② `urdf_kinematics` の FK（T の先端の補正前後。向きつき）。結果から段 c の T の許容と中止の値を決めて、本書と手順書に書く。**`tools/pose_margin.py`（段 a の予測の確認）は別の 1 回**で、yaml の編集の後（これも範囲を報告して承認を得る）。つまり Python は合計 3 回の見込み。2 回に収めるなら、pose_margin の確認を省く（elbow の calib_max 1.6093 は J3 の実行 3 回目で確認済み）。
+- 実機の確認の結果で δ を見直す場合は、別の承認（yaml を変える）。
+
+## 8. 決めてほしいこと
+
+| 項目 | 私の推奨 | 理由 |
+|---|---|---|
+| 1. 既存の計画書の直し方 | 案 1（本書に置き、元の記述は残して注記） | J4d・F5 と同じ。経緯が残る（2 章） |
+| 2. lift・wrist_flex の書き方 | A（書かない。コメントで未測定と書く） | 測っていない 0 を書かない（1.2） |
+| 3. 新しい試験 1 件（値の帯） | 足す（+1。1166 件） | 打ち間違い（符号・桁）を止める。行を消せば戻せる |
+| 4. 古い手順書の +1.69009 の注意（`servo_real_check.md:341` ほか 3 か所） | 触らず、`large_move_real_check.md` などの 3 か所だけ直す | 古いものは当時の記録。使うのは 3 か所の手順書（段 e） |
+| 5. 戻し先の elbow の上限 | +91°（+1.588 rad） | 真の上限 +92.20° から 1.2°（約 14 tick）。+92° は 0.2° しかなく、MoveIt の終点のずれ（最大 0.0082 rad = 0.47°）で超えうる |
+| 6. T の許容と中止の値（段 c） | **保留**。F6a の Python 2 回の結果のあとに決める（決め方の案は段 c） | 結果から決める（ユーザーの決定）。段 b は ±3 mm で決定済み |
+| 7. コミットの区切り | F6-0（本書）→ F6a → F6b。**決定済み（承認）** | F6a だけがビルド・試験を伴う |
+| 8. 本書のコミット | **承認済み**。A〜D を反映したあとに、docs だけでコミット（試験は省略） | |
+
+**残っている決めてほしいこと**: ① 項目 6（保留）。② Python の回数: 3 回（FK・一番低い点・pose_margin）か、pose_margin を省いて 2 回か（7 章）。③ 段 a で読みが 92.20° を超えたときの扱い（腕を開いてたたみ直し、2 回までやり直し、超えるなら報告）で良いか（A）。
+
+## 9. 未確認・保留（事実でないもの）
+
+- yaml の `#` の行が `joints:` の中で読めること（F6a の試験で確かめる）。
+- 新しい試験 1 件で足りること、および bringup・ik・camera が本番 yaml を読まないこと（全体の colcon test で確かめる）。
+- T の先端の移動の**向き**（`joint_offset_plan.md` 10 章の未確認のまま）と、T の一番低い点の予測（約 50 mm は概算）。段 c の前に FK で確定する。
+- M2・M3' の補正前の先端の誤差の実績（段 d の予測に引く。手順書を書くときに inventory から）。
+- 物差しの 31.3 mm は R1 の姿勢の値で、今日の出発点が離れると使えない（段 b の条件）。
+- 補正前の出発点の elbow が 1.6747〜1.7054 rad と幅があることから、補正後の読みは 89.7〜91.4° の幅で動く（事実: 過去 3 回の読み）。段 a の許容 88.0〜92.5° は推測の値。
+- δ の根拠のうち、床当て（押し込み）と物差し（自重）の食い違いは未解決（C4 で決着）。F6 の −6.3 は暫定。
