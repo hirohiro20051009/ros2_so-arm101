@@ -23,7 +23,8 @@
 import importlib.util
 from pathlib import Path
 
-from ament_index_python.packages import get_package_prefix, PackageNotFoundError
+from ament_index_python.packages import (
+    get_package_prefix, get_package_share_directory, PackageNotFoundError)
 from launch import LaunchContext
 from launch.actions import LogInfo, OpaqueFunction
 from launch_ros.actions import Node
@@ -206,7 +207,7 @@ def _words(node):
     return [getattr(s, 'text', '') for part in node.cmd for s in part]
 
 
-def test_launch_publishes_exactly_one_tf_with_child_camera_link(tmp_path):
+def test_launch_publishes_exactly_one_tf_with_child_camera_link(tmp_path, monkeypatch):
     module = _load_launch()
     ld = module.generate_launch_description()
     start = [e for e in ld.entities if isinstance(e, OpaqueFunction)][0]
@@ -217,17 +218,50 @@ def test_launch_publishes_exactly_one_tf_with_child_camera_link(tmp_path):
         words = _words(nodes[0])
         assert words[words.index('--child-frame-id') + 1] == 'camera_link'
         assert words[words.index('--frame-id') + 1] == 'base_link'
-    # No file at the default path: no TF and one log line. A file that is not valid, or a
-    # missing file at an explicit path: error before any action is returned.
-    default = [a for a in ld.get_launch_arguments() if a.name == 'extrinsics_file'][0]
-    default_path = default.default_value[0].text
-    actions = start.execute(_context(default_path))
-    assert _tf_nodes(actions) == []
-    assert len([a for a in actions if isinstance(a, LogInfo)]) == 1
+    # A file that is not valid, or a missing file at an explicit path: error before any action
+    # is returned.
     with pytest.raises(cc.ExtrinsicsError):
         start.execute(_context(_write(tmp_path, {'translation_m': 1}, 'bad.yaml')))
     with pytest.raises(cc.ExtrinsicsError):
         start.execute(_context(tmp_path / 'typo.yaml'))
+    # The default argument and the "no file" case, whether the installed file exists or not.
+    _check_default_argument_points_at_the_installed_file()
+    _check_no_file_at_default_means_no_tf_and_one_log_line(tmp_path, monkeypatch)
+
+
+def _check_default_argument_points_at_the_installed_file():
+    # Whether the installed file exists or not does not matter here: only the path is checked.
+    ld = _load_launch().generate_launch_description()
+    default = [a for a in ld.get_launch_arguments() if a.name == 'extrinsics_file'][0]
+    expected = (Path(get_package_share_directory('so_arm101_camera'))
+                / 'config' / 'camera_extrinsics.yaml')
+    assert Path(default.default_value[0].text) == expected
+
+
+def _check_no_file_at_default_means_no_tf_and_one_log_line(tmp_path, monkeypatch):
+    # The share directory of this package is replaced by an empty one, so the result does not
+    # depend on whether the real install has a camera_extrinsics.yaml.
+    module = _load_launch()
+    real = module.get_package_share_directory
+    empty_share = tmp_path / 'share'
+    (empty_share / 'config').mkdir(parents=True)
+    # Every other config file of the package is kept; only camera_extrinsics.yaml is absent.
+    for name in ('realsense.yaml', 'apriltag.yaml'):
+        (empty_share / 'config' / name).write_bytes(
+            (Path(real('so_arm101_camera')) / 'config' / name).read_bytes())
+    monkeypatch.setattr(
+        module, 'get_package_share_directory',
+        lambda name: str(empty_share) if name == 'so_arm101_camera' else real(name))
+    ld = module.generate_launch_description()
+    start = [e for e in ld.entities if isinstance(e, OpaqueFunction)][0]
+    default = [a for a in ld.get_launch_arguments() if a.name == 'extrinsics_file'][0]
+    default_path = default.default_value[0].text
+    assert default_path == str(empty_share / 'config' / 'camera_extrinsics.yaml')
+    assert not Path(default_path).exists()
+    for use_apriltag in ('false', 'true'):
+        actions = start.execute(_context(default_path, use_apriltag))
+        assert _tf_nodes(actions) == []
+        assert len([a for a in actions if isinstance(a, LogInfo)]) == 1
 
 
 def test_launch_declares_only_the_two_arguments_and_calls_the_check():

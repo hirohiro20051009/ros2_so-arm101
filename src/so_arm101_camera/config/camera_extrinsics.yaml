@@ -1,0 +1,11 @@
+# Read by: camera.launch.py (static_transform_publisher, base_link to camera_link). Written by tools/camera_extrinsics_run.py. Do not edit by hand.
+# The record of the run (inputs, residuals, sha256) is camera_extrinsics.yaml.meta.yaml.
+translation_m:
+- 0.4497253699526248
+- 0.31279792658564876
+- 0.6398287997476616
+quaternion_xyzw:
+- 0.4483789979572946
+- 0.15871228888090635
+- -0.8337527400017957
+- 0.2803980244019105

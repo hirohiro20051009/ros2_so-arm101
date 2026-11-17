@@ -1,0 +1,128 @@
+schema: 1
+created: '2026-11-17T11:34:22Z'
+tool: tools/camera_extrinsics_run.py
+extrinsics_sha256: 8ab9aec707b01c54e202cd23c39ba7a2dd222b51c83fbca714ce3befde7f89ef
+input:
+  csv: c2_points.csv
+  csv_sha256: 8a4fc4b80bd3192ecd7e0bc9fc10f4da9dba5462457175769e238a201d30a229
+  meta_sha256: 34a12eacc5cf7ca702c08ce770fe02d9b512869b98caf529105b0bf3164a8e8a
+identity:
+  tag_mount_sha256: 51fc015e476340de33a3a3c1577059aaed0145959c9abaa54273bb296c1044fa
+  urdf_sha256: 279b8e7dfa210e5d9d59b0147b6d70e596444139dbc6ea4c3157960ae31aac18
+  apriltag_yaml_sha256: 3573ac9d94204e9b76e55b558cb10fb728dfb4a86041df8169702fac01fa3efe
+  realsense_yaml_sha256: 268081b2c9473f92bbf8e54a81f3e359d69bb0a47b52ec2252d4f97c70afb0ed
+  tag_id: 0
+joint_offsets:
+  sign: q_true = q_meas + delta (degrees, added to the q_ columns before the FK)
+  source: command_line
+  applied_deg:
+    elbow_flex: -6.3
+  fk_tag_source: recomputed
+  meta_zero_offset_deg: absent
+  meta_follower_calibration_sha256: absent
+  urdf_sha256: 279b8e7dfa210e5d9d59b0147b6d70e596444139dbc6ea4c3157960ae31aac18
+  tag_offset_gripper_frame_m:
+  - -0.038
+  - 0.0
+  - -0.0557
+  baseline_check_max_um: 0.7272485092552631
+rows:
+  used:
+  - P01
+  - P02
+  - P03
+  - P04
+  - P05
+  - P06
+  - P07
+  - P08
+  - P09
+  - P10
+  - P11
+  - P12
+  - P13
+  not_used: {}
+  excluded: []
+thresholds:
+  cam_n_min: 10
+  incidence_max_deg: 60.0
+  cam_std_max_m: 0.001
+  group_distance_m: 0.01
+  min_points: 6
+  rms_max_m: 0.005
+  loo_max_m: 0.008
+  scale_warn: 0.01
+  scale_fail: 0.05
+  s_min_min_m: 0.025
+result:
+  rms_mm: 1.554857694464841
+  residual_mm:
+    P01: 2.283357765229478
+    P02: 2.510888722555659
+    P03: 1.0295073946734503
+    P04: 1.7297107904109692
+    P05: 1.5178722248269725
+    P06: 1.5591134252368077
+    P07: 1.0297523155611084
+    P08: 2.204734608758969
+    P09: 1.7798739502836913
+    P10: 0.7251374392127546
+    P11: 0.7304626762875036
+    P12: 0.7915824508844644
+    P13: 0.5903666000635952
+  residual_max_mm: 2.510888722555659
+  leave_out_mm:
+    P01: 2.6985542246697003
+    P02: 2.729377037402524
+    P03: 1.2027301610258314
+    P04: 2.0580331594856247
+    P05: 1.8788395733451027
+    P06: 1.795211052884523
+    P07: 1.1765503539622775
+    P08: 2.664735654844589
+    P09: 1.9313525388013164
+    P10: 0.8605345646445992
+    P11: 0.912385248543202
+    P12: 0.9327188049976979
+    P13: 1.0737234358094818
+  leave_out_max_mm: 2.729377037402524
+  leave_out_groups:
+  - - P01
+    - P13
+  - - P02
+  - - P03
+  - - P04
+  - - P05
+  - - P06
+  - - P07
+  - - P08
+  - - P09
+  - - P10
+  - - P11
+  - - P12
+  scale: 0.9878037771686434
+  implied_tag_size_m: 0.0592682266301186
+  spreads_mm:
+  - 47.17429440713751
+  - 39.88836900009995
+  - 31.765921006492906
+  s_min_mm: 31.765921006492906
+  rpy_deg:
+  - -1.3814904605107199
+  - 56.791143173874474
+  - -143.57041080119336
+  reflection_corrected: false
+  warnings:
+  - 'the scale 0.9878 is outside 1 +- 0.01 (warning only; it is a failure outside
+    1 +- 0.05): check the tag size, the intrinsics and the joint zero offsets'
+camera_link_to_optical_frame:
+  translation_m:
+  - -4.823565177503042e-05
+  - 0.014808941632509232
+  - 4.587378862197511e-05
+  quaternion_xyzw:
+  - -0.49982130563682625
+  - 0.49899555591371714
+  - -0.5004952769026707
+  - 0.5006861046683616
+provisional_note: 'PROVISIONAL (C3-b, 2026-11-17). The C2 data was recorded on 2026-11-16 with the wrist_roll screw loose (repaired afterwards). The elbow_flex zero offset -6.3 deg is provisional too (camera fit -6.31 +- 0.38 and a ruler measurement, both before the repair). Decide at C4 with tag ID 1 on the desk; if delta changes, recompute with --joint-offset and --force. This note was added by hand after the tool wrote the file (the body sha256 above is unchanged).'
