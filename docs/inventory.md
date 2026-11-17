@@ -3322,3 +3322,16 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - wrist_roll の軸のねじの緩み（**今回判明した事実に基づく候補**）。床当て（押し込みの状態）では、机に当てると先端が押し上げられて値が押す強さで変わった（F5 の結果の 1）。物差しは自重の状態（出発点）で、先端は下がった側。両者は、がたの上下の別の端を見ている可能性がある。これで床当てと物差しの差が説明できるかは、量の見積りをしていない（F5 の結果の 5 では、軸方向 0.1° 前後/mm 以下、傾きで elbow に約 0.5 × α と見て、先端 5〜9 mm の上下が要るので小さすぎると見ていた。ねじの緩みの量が分かれば見直せる）。
 - 既出の候補（変わらず）: あごのメッシュと実物の差、当てる面と台座面の差、物差しの誤差。
 - 影響: 床当てのデータを使わないので、「(b)(c) を支持する根拠」は無くなる。暫定の (a)（elbow −6.3、lift 0、wrist 0）の根拠は、カメラ（C2。緩んだ状態）と物差し（R1。2026-11-16 の緩んだ状態）の 2 つで、**どちらも修理前**。決着は修理後の状態での C4（机の ID 1）。F6 の段 b（物差し）と段 c（T の物差し）は、修理後の最初の独立の確認になる。
+
+### F6a（2026-11-17。yaml の 1 行・試験 1 件・Python 2 回。**このコミット以降、実機の launch で elbow の補正が効く**）
+
+- 戻し方: F6a の直前のコミット `0f54b0f` から取り出せる（`git revert` は承認を得てから）。yaml だけ戻すなら、elbow の行の `zero_offset_deg: -6.3, ` と直前のコメント 1 行を消す（試験は 0 でも通る）。
+- **元の行**（`follower_calibration.yaml:17`。元の yaml の sha256 は `442c0d9ab0fe2fb69cbed40bb724b6a29c547200f7dbd0b47be4e6f0aa35fd86`）: `  elbow_flex: {id: 3, kind: angle, direction: 1, center: 1969.5, min: 849, max: 3090, eeprom: {homing_offset: 119, min_limit: 849, max_limit: 3090}}`。新しい yaml の sha256: `4b1322142b86a9fdf193d5b3ef403304e61b11e3b35f1c600e220d754c26bf6e`。
+- **補正が効く時点**: `install/so_arm101_hardware/share/so_arm101_hardware/config/follower_calibration.yaml` は src の yaml への symlink（`ls -l`: `follower_calibration.yaml -> /home/hirok/ros2_so-arm101/src/so_arm101_hardware/config/follower_calibration.yaml`）。ライブラリも build 側への symlink。**このコミット以降の次の実機の launch から補正が効く**（再ビルド不要。ドライバは on_init で 1 回読む。走っている launch には効かない）。起動の INFO `zero_offset_deg: elbow_flex -6.30 deg (…); clamp tolerance low=50 high=122 ticks (default 50)` が 1 行出ることが、補正が読まれた印。
+- 試験: `ProductionYaml.OffsetsAreZeroExceptAnElbowInTheDecidedBand`（`test_conversion.cpp`。elbow 以外は 0、elbow は 0 か −7.0〜−5.5）を 1 件足した。colcon test は全体で **1165 → 1166、失敗 0**（hardware 138、calibration 245、ik 364、camera 370、bringup 47、description 2、moveit_config 0。予測どおり）。build は `colcon build --packages-select so_arm101_hardware`（通った）。実行の前に ps で ROS のプロセスが 0 を確認。bringup 等は ROS_DOMAIN_ID=87・rmw_cyclonedds_cpp で実行。
+- 守りを外す確認（スクラッチのコピー `…/scratchpad/mut/`。別の build・install。リポジトリの build・install は使わない。baseline は通る）: elbow を `+6.3` → 新しい試験が落ちた。`-0.63` → 落ちた。lift に `-2` → 落ちた。キーを消す → 通った（戻し方の確認）。
+- **Python 2 回**（スクラッチ `…/scratchpad/f6/`。ROS・実機・launch・シリアル・カメラは使っていない。元の `lowest_point.py` の import に旧ワークスペース `~/ros2_so101` は無い（grep）。両方の setup.bash を source し、`PYTHONDONTWRITEBYTECODE=1`）。
+  - 1 回目 `lowest_point_f6.py`（sha256 `94a0bd38…`、ログ `647ca931…`）: **R1 の補正後の一番低い点 31.28 mm**（予測 31.3 mm。差 −0.02 mm。補正前 4.77 mm）。R1 の感度 −4.33 mm/°。T の一番低い点: 補正後 **53.28 mm**（動くあご。固定あごの先端の点は 54.9 mm）、補正前 69.23 mm。T の感度 −2.49 mm/°。
+  - 2 回目 `t_fk_f6.py`（sha256 `d142a052…`、ログ `3ed1c299…`）: T の先端 gripper_frame_link は補正後 (176.66, −0.01, 58.77) mm、補正前 (194.86, −0.01, 73.38) mm。**差（後 − 前）dx −18.20、dz −14.61 mm（大きさ 23.3 mm）。補正後は約 18.2 mm 手前、約 14.6 mm 低い**。感度 dx −3.01、dz −2.16 mm/°。
+  - 全桁の sha256: `94a0bd38824fa00b3d03d483c8eee2cad671b28845fa033253e05bad2b8779ae lowest_point_f6.py`、`647ca931dac5070925ab6065f784060ed90d149e7a02e16244074d02baa94f5d lowest_point_f6.log`、`d142a052f7e6fa90cf4ab768c5bbbe87d1066c38b5837098012891d30e9d776a t_fk_f6.py`、`3ed1c29957c6cf4caa65bdee25ad63392bd09686f24ecacdfb7fc3f29e910e7f t_fk_f6.log`。
+- 項目 6（T の許容と中止の値）の案は `docs/f6_plan.md` の段 c（±4 mm、差 6 mm 超または 45 mm 未満で中止）。**決定はユーザーの確認のあと**。

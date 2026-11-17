@@ -177,6 +177,20 @@ TEST(ProductionYaml, LoadsAndIsStructurallyConsistent)
   EXPECT_EQ(cal.find("shoulder_pan")->kind, JointKind::Angle);
 }
 
+// F6: 本番の補正値は elbow_flex だけ。0 か、決めた帯（-7.0〜-5.5）。値は固定しない（C4 で見直しうる。行を消せば 0 で通る）
+TEST(ProductionYaml, OffsetsAreZeroExceptAnElbowInTheDecidedBand)
+{
+  const Calibration cal = load_calibration(PRODUCTION_YAML);
+  for (const auto & j : cal.joints) {
+    if (j.name == "elbow_flex") {
+      EXPECT_TRUE(j.zero_offset_deg == 0.0 || (j.zero_offset_deg >= -7.0 && j.zero_offset_deg <= -5.5))
+        << j.zero_offset_deg;
+    } else {
+      EXPECT_EQ(j.zero_offset_deg, 0.0) << j.name;
+    }
+  }
+}
+
 // ---- 起動ログの出所の表示（`calibration.source`）。本番の yaml には依存しない（一時ファイルを書く） ----
 namespace
 {
