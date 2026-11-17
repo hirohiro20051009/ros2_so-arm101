@@ -3415,3 +3415,50 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - **T の止める条件（0.02 rad 超）の扱い（案）**: 手順書の段 c の「着いた後の関節の読みと目標の差」を、**elbow だけ、既知の追従の残りを入れた基準**に直す: elbow は「目標との差 +0.045 rad 以内を予測、+0.05 rad 超で止める」（補正前の +0.028〜+0.039 と今日の +0.0377 を含む。ik_move の手前止まりの基準 0.05 rad と同じ）。ほかの 4 関節は「目標との差 0.0082 rad 以内を予測、0.02 rad 超で止める」のまま（今日の最大は wrist_flex の 0.0125）。今回の T は、止める条件に当たったが、原因が補正でなく既知の追従の残りと分かったので、**止めた原因は解消済みとして d へ進む案**。
 - 手順書の更新: 済み（`zero_offset_apply_real_check.md` の段 c の表と冒頭の「次の実機の前に」。`f6_plan.md` の段 c の行は「手順書が正」と注記）。**T の物差しは、動くあごと固定あごの両方を、それぞれ 2 回測る形にした**（ユーザーの決定。手順書の段 c）。予測は目標の値（動くあご 53.3 mm、固定あご 54.89 mm）で、判定と止める条件は項目 6 と同じ幅をあごごとに当てはめる（±4 mm で合格、4〜6 mm は記録して報告、6 mm 超または 45 mm 未満で止める）。表に参考値として A（読みの側: 47.76 / 49.91 mm）と B（reference の側: 52.29 / 53.86 mm）を並べた。
 - 材料の sha256（全桁）: `a_start_pose.txt` `a72163b9fd07980032da12d368fb1c9b3c0efab89d9efc8762e3b10f9820030b`、`a_start_pose_2.txt` `7ee1272cbd244e85622f9cee9e8b2b005e897d7a28381ca31d4952e5b4622c25`、`c_T_pose.txt` `c964d2cbbd4289ae0dbdfd03ac679dd527fff5cc1f9c5dc7e595594ff1e9e7ce`、`c_T_pose2.txt` `efbc250894b7dad4bebf2fc8d2d9e904790675e14edfd562997f498d66655416`、`c_T_ctrl_state.txt` `4b47c8ff32e70ebed03bb9a5cb56df70b871e460ba5d24a27e047b2a11eed245`、`c_start_pose_b.txt` `8a555500fe5a936e8ba948700bb096dafbf25923883d65d20c097b7ab546856e`、`c_start_pose_b2.txt` `e60c1aa7861a0603a38a4c6b1b76c2f12de5e95858f6fcfb196b449e765748e1`、`c_start_pose.txt` と `e_end_pose.txt` `2df029ae…`（失敗の文面。上）、`a_arm_launch.log` `e9f334459ff7bf3087c8d2674c1dc573df81e6006c456b20eea31b47ee86788b`、`c_arm_launch.log` `6451c7afa6dfe8fd0cca892860b52d652d5794d8284a63d4d1fd677a7f79d3b7`、`c_arm_launch_2.log` `75983b3095d23c0b84f9521be5e7e2ce70f70d684dc2d0685523dc4a8f976fe6`。段 b のスクリプト `lowest_point_b.py` `fa9dc395424040693c51226d9e25ae4c498c0e46b1755531703cbc1a21bc35ce`、ログ `9725f87e1a1cfbefb0b74db0e2c38e036ae7b8a368152bf7df90068189fd23ef`。
+
+## F6 の実機の残り（2026-11-17 夜。ユーザーが実施。手順書 `docs/zero_offset_apply_real_check.md` の a・c・T・d・e・f。実機・launch・ビルド・Python は Claude が使っていない）
+
+材料は `~/so_arm101_check/zero_offset_apply_20261117b/`（git 管理外。読むだけ。ls・cat・sha256sum だけ）。HEAD は 963ef65。手順書を直す前の判定（0.02 rad、gripper ±0.005、物差しは両あご）で見ると、T の読み − 目標の最大 0.0270（elbow の大きい側。予測 +0.045 以内）と e の lift +0.0192 が限度に近く、a の lift の外れ 0.0291 も限度 0.03 の近く、というのが次の基準の見直しの背景。
+
+### 1. 結果（ユーザーの報告と材料。事実）
+
+| 段 | 結果 | 判定 |
+|---|---|---|
+| a | INFO 1 行（`zero_offset_deg: elbow_flex -6.30 deg …; clamp tolerance low=50 high=122 ticks`。`c_arm_launch.log:30`）、`[diag]` 6/6（`c_arm_launch.log:50`）、elbow 1.56940（89.92°）、gripper 0.02343、wrist_roll −0.04680（修理前の範囲の内。ユーザーがねじをロックタイトで固定した後）、lift −1.53512（範囲の外へ 0.0291）、wrist_flex 0.59533（外へ 0.0675） | 合格 |
+| c | 有効化で動かない（`c_start_pose.txt` と `c_start_pose2.txt` は同一ファイル。差 0）、コマンド A は STOPPED、clamp なし | 合格 |
+| T | 読み − 目標: pan +0.0077、lift +0.0027、elbow +0.0270（読み − reference +0.0344）、wrist_flex −0.0109、roll +0.0008。物差し: 固定あご 53 mm・53 mm（予測 54.89 mm、差 −1.9 mm）、動くあご 54 mm・54 mm（予測 53.3 mm、差 +0.7 mm。記録だけ）。`c_T_ruler.txt` あり | 合格（固定あごで判定） |
+| d | M2 REACHED 6.40 mm、M2 の戻し REACHED 3.76 mm（1 回目）、M3' REACHED 6.27 mm（手前止まり最大 elbow 0.0311、先端 z 約 0.0557）、M3' の戻し REACHED 3.73 mm、V3 は LIMITED（MAX_STEPS）、exit 0 | 合格（V3 は `LIMITED` か `CONVERGED` の条件の内） |
+| e | 読み − 目標: pan +0.0014、lift +0.0192、elbow −0.0045、wrist_flex +0.0050、roll +0.0056。clamp 0 | 合格 |
+| f | exit=0、2 行あり、bus カウンタすべて 0 | 合格 |
+
+材料の読みの確認（事実）:
+- `a_start_pose.txt`: pan −0.08286、lift −1.53512、elbow 1.56940、wrist_flex 0.59533、wrist_roll −0.04680、gripper 0.02343。
+- `c_T_pose.txt`: pan 0.00767、lift −0.38129、elbow 0.55058、wrist_flex 1.43769、roll 0.00077、gripper 0.02343（先頭に `A message was lost!!!` の 3 行。読みには影響なし）。
+- `e_end_pose.txt`: pan −0.08592、lift −1.51671、elbow 1.56633、wrist_flex 0.59840、roll −0.04680、gripper 0.02343（先頭に同じ 3 行）。戻し先（−5、−88、+90、+33、−3 度）との差は、報告の値と一致（lift −88° = −1.53589 rad に対し +0.0192）。
+- **d の戻しが 2 回実行された**（指示の誤り）。`d_M2_return.log`・`.csv` は 2 回目（T の近くから 3.8 mm の移動、REACHED 4.69 mm）で上書きされた。1 回目は `d_M2_return_1st.txt`（端末の出力の控え。REACHED 3.76 mm）。
+- **ik_move で T へ戻すと、3 回とも lift が目標より大きい側に残った**: `q_meas − q_goal` の lift は +0.02417（M2 の戻し 1 回目）、+0.02723（同 2 回目）、+0.02570（M3' の戻し）。elbow は +0.004〜+0.009 で小さい。
+- **V3（`d_V3.log`）**: `OUTCOME LIMITED residual=5.00 mm reason=MAX_STEPS steps=1 holds=0`、exit 0。dq は lift +0.0201、elbow −0.0179（最大 0.0201 rad）。指令が小さく、`q_meas_after = q_meas_before`（動かなかった）。windup_after 0.0173 はユーザーの報告で、`d_V3_px.csv` を材料としてあるが、ここでは値を読み直していない。
+- d の `lowest z of the path` は 0.0548〜0.0559 m（床の 0.045 m の上）。
+
+### 2. 判断（ユーザーの決定、2026-11-17 夜）
+
+商業用アームほどの精度は求めない。サーボの遊びと自重の影響が大きく、最終的には差分 IK や学習で詰める。進捗を優先し、判定の範囲を広げる。手順書の直し（`zero_offset_apply_real_check.md`、`f6_plan.md`。コミットは下の記録）:
+
+1. RViz の終点の差（T、段 e）の止める条件: 0.02 → 0.04 rad（0.0082 は目安として残す）。elbow の小さい側も 0.04（ほかの関節にそろえる）。elbow の大きい側の +0.05 は変えない。
+2. gripper の許容: ±0.005 → ±0.01。
+3. 出発点の比較の pan・lift: 0.03 → 0.05 rad。
+4. T の物差しは固定あごだけ（±4 mm）。動くあごは取り付けで変わるので判定に使わない。接触などの異常はユーザーが報告する。
+5. 変えない: wrist_roll の判定（0.02 / 0.052 rad）、elbow の上限 +92.20°（戻し先は +91° 以下）、elbow の大きい側 +0.05、wrist_flex の 0.10。
+
+- 他の手順書（`camera_c2_real_check.md`、`large_move_real_check.md`、`diff_mode_real_check.md` など）の同じ判定は、今回は直さない。C3-b 以降で使うときに合わせる（残課題。下）。
+- 戻し方（git 管理下の docs の変更）: 変更の直前のコミット 963ef65 から取り出せる（`git show 963ef65:docs/zero_offset_apply_real_check.md`、`docs/f6_plan.md`）。
+
+### 3. 残課題
+
+- ほかの手順書の同じ判定（RViz の終点の差 0.02、gripper ±0.005、出発点の pan・lift 0.03、物差しを両あごで判定）を、C3-b 以降で使うときに、上の新しい基準へ合わせる。
+- lift の残り（ik_move で T へ戻すと lift が目標より +0.024〜+0.027 rad）の原因は未確認（自重・遊びの候補。これまでの候補 A〜E と合わせて、差分 IK で詰める方針）。
+- 段 d の V3 は指令が小さく動かなかった（`q_meas_after = q_meas_before`）。DiffMode の小さい指令の不感帯の目安として記録（推測: サーボの不感帯・摩擦）。
+
+### 4. 材料の sha256（全桁）
+
+`a_arm_launch.log` `b8fb1c462599e6e67d1230cb251c1abaebd4764c18e39c34756b10f2ad02b3a6`、`a_start_pose.txt` `c7035e9d21794e67635cefcbf117b9821b43af30aaf195503fc47524ee2b3ecc`、`c_arm_launch.log` `47b2432cc6389ef353e3948fd515ceb6cb5c6cfdd523f0d8dbf7dd35e357edc2`、`c_start_pose.txt` と `c_start_pose2.txt` `c7035e9d21794e67635cefcbf117b9821b43af30aaf195503fc47524ee2b3ecc`、`c_T_pose.txt` `35559d2a17cd6def0d5ddbf6ab4b40b8a821590656fc2e2fa32a895eed86adb1`、`c_T_ruler.txt` `6460d7a8922677ef156b7ff5e0b7c019316dcf3f907970613925a1277dcf68c6`、`c_T_state.txt` `e0ef9157b3ba1034827e9af68300a4137b9547ce1da0e35a5375fa97a40a4b4d`、`d_M2.csv` `64500d129364dc9e5e3491b9e7c8af13e4f1af2be8df05d5dca9ba41e207d2d6`、`d_M2dry.log` `7232b9aa2351d9cb0deefa50c7834177a9c6cc529c187c8cb8215375bf6ae486`、`d_M2.log` `b61a2bdea362c11e87e616146ad50857c000f210009bd49f01b9b26226064845`、`d_M2_return_1st.txt` `bedd9cc489c7437be96ea376bdebe7a14d4f3956d705ab4f33243c398a96aaec`、`d_M2_return.csv` `3de244217dcf733e814835fb6d71c42e0a88b4ad6ab61f1e98b5a38d97dc2e1b`、`d_M2_return.log` `a60032b76ed94374d5df97a5ad760e70d80fae70ae4354856122548264010573`、`d_M3p.csv` `c2e5ffb0445a8cb2e771ba6b966e8a9032e06064de4e354b84ad331f527947a8`、`d_M3pdry.log` `efdf48d25bb7e186a58979cfb8daddeb4fa19e1da0f4c431be2232431ac419c7`、`d_M3p.log` `b637184fb90818a5269407574c32475a0c43cc2b4e89dca3031ebe9d33e03878`、`d_M3p_return.csv` `65ec5795c68c0f263508db815c174ac16970741707d1765a140cf81e851f0188`、`d_M3p_return.log` `64f89de55f1e7038d4694234a022ca20c30ddc0092ac73aece037ae212475c7c`、`d_V3.log` `96f6985513db09760877b91cd9ea67609c81abc849024ee331ba115cab505786`、`d_V3_px.csv` `a98c24ce1fa4984b2504f5f41a8cdac04fc58cd5e9fd6ab9f4f28ef5ced3c66c`、`e_end_pose.txt` `b3588e7982281e1cc4611d1190376dc4d062eedb9c6ae5ef65091ccc6a7292ce`。
