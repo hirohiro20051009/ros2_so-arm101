@@ -1,5 +1,7 @@
 # 実機確認手順: サーボキャリブ（段階2c）— C0〜C3
 
+> **用語の注記（2026-11-17、F5。本文は直さない）**: この文書の「キャリブ」「校正」「再校正」は**センターキャリブ（center calibration）**を指す（`so_arm101_calib measure`・`apply` が決める center・min・max・EEPROM）。オフセットキャリブ（zero-offset calibration。`zero_offset_deg` を先端を机に当てた姿勢から決める）は別物で、`docs/zero_offset_calib_plan.md` と `docs/zero_offset_calib_real_check.md`。
+
 対象: `so_arm101_calib`（`so_arm101_calibration` パッケージ）。計画は `docs/stage2c_plan.md`。
 **実行するのはユーザーだけ**（Claude は実機を動かさない。EEPROM の読み出しもシリアルポートを開くので、実行しない）。
 C0（バックアップ）→ C0.5（復元経路と待ち時間）→ C1（測定 2 回。旧版は実施済み。改善したツールで C1c としてやり直す）→ 判断 → C2（gripper に適用して戻す）→ C3（全関節に適用）。**C0.6**（読み戻しを 2 回一致にした `restore`/`apply` の確認。バス層の修正 案 C。C3 の後、C4 の前に 1 回）。C4（書き込みモードでの W 系の再確認）は C3 合格後に、`feetech_write_check.md` を直してから行う。**前の段階が合格するまで次へ進まない。**

@@ -429,6 +429,8 @@ Claude が実行するのは、オフラインの試験、ビルド、モック�
 
 **C4 の実機**: C4-a は C2 と同じ端末の構成で、camera.launch.py はキャリブ済みの TF つき。C4-b は C4-a の続きで、ID 1 のタグを使い、定規で測る。
 
+**注記（2026-11-17、F5。`docs/zero_offset_calib_plan.md` の 6.3。上の手順の元の記述は残す）**: 実行の順序は、**センターキャリブ → オフセットキャリブ → カメラのキャリブ（C2・C3）**。オフセットキャリブ（lift・elbow・wrist_flex の `zero_offset_deg`。先端を机に当てた 4 姿勢。手順は `docs/zero_offset_calib_real_check.md`）で得た δ を、J5（F6）で yaml に入れてから、カメラの C2・C3 を行う（pan のずれは外部パラメータに入る）。C3 の再計算（J6）は、J5 の後に、δ を `--joint-offset` で渡すか、yaml 反映後の新しい記録で行う。センターキャリブをやり直したら、オフセットキャリブもやり直す。
+
 ## 11. colcon test の件数の見込み
 
 **事実（`build/*/test_results` から読んだ数え方）**: 件数は pytest、lint、CTest の合計。ik は 294 + 49 + 21 = 364。bringup は pytest 34、lint 7（pep257 2、copyright 2、flake8 1、xmllint 1、lint_cmake 1）、CTest 6（5 つの lint と pytest の 1 本）で 47。新しいパッケージは、.py ごとに copyright と pep257 が 1 件ずつ、それに flake8・xmllint・lint_cmake が 1 件ずつ、CTest は lint の 5 つと pytest のファイル数。
