@@ -3477,3 +3477,13 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - **plan の訂正**: `docs/camera_stage_plan.md` 9.1 のスケールの表を J4d の形（1 ± 0.01 を超えたら警告、1 ± 0.05 を超えたら不合格）に直した。
 - **試験**: camera 370、失敗 0（`colcon test-result` も 0）。ほかのパッケージはコードを変えていないので省略。
 - 実機の確認（あなたが行う）: `camera.launch.py use_apriltag:=true` で `base_link → camera_link` が yaml の値で出ること。
+
+### C3-b の実機の確認（2026-11-17。ユーザーが実機で実施。材料 `~/so_arm101_check/camera_20261117_C3b/`、git 管理外、読むだけ）
+
+- **材料の sha256**: `arm_launch.log` `431d9e1cbdc834c6d8cf82120cc17459159645c7e14a83e874dc0bfb62b14527`、`camera_launch.log` `748512e7f1eccae5b0cf409a7d47dc2abaa7a86b6e6c7c3b6898cca723e741a7`、`C3b_dry.log` `9ee5386822c7b935a88a28eec5579b26214ed211b10cf8a62eadff82a5bb0ae0`、`C3b_write.log` `b338e9e78c837af7b5250d85942e50e4cac3881007343310abe91ec95c85e267`。
+- **カメラの launch**（`camera.launch.py use_apriltag:=true`。腕は読み取り専用の bringup）: `base_to_camera_link_tf` が起動した（`camera_launch.log` 7 行目 `Spinning until stopped - publishing transform`）。no_extrinsics の案内、`Unable to transform`、ERROR は出なかった（`camera_launch.log` で `Unable to transform`・`ERROR` は 0 件）。
+- **tf2_echo base_link camera_link**: Translation [0.450, 0.313, 0.640]、RPY（度）[-1.381, 56.791, -143.570]。yaml（translation_m [0.44973, 0.3128, 0.63983]、rpy [-1.38, 56.79, -143.57]）と一致。
+- **/tf_static**: `base_link → camera_link` は 1 回だけ、`world → base_link` も 1 回だけ（二重なし）。
+- **停止**: 終了コードと、ps・`ros2 node list --no-daemon` の空はユーザーの報告（終了コードの値は報告に書かれていない）。`camera_launch.log` の終わりは、realsense・apriltag・static_transform_publisher がすべて `process has finished cleanly`。
+- **腕側の ERROR（`arm_launch.log` 2 件。既知）**: octomap の `No 3D sensor plugin(s) defined`（74 行目）と、終了時の move_group の exit code -11（313 行目）。どちらも前に記録した既知の挙動（上の inventory の C4 などの節）で、カメラの TF とは無関係。
+- **結論**: yaml → install → `camera.launch.py` → TF の木の経路は、値が一致し二重もなく通った。タグ（`tag36h11_0`）の位置の FK との比較は C4-a で行う。値は暫定のまま（C4 で決着）。
