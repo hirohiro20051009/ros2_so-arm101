@@ -31,6 +31,8 @@ if(BUILD_TESTING)
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
   ament_add_pytest_test(test_camera_extrinsics_tool test/test_camera_extrinsics_tool.py
                         ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
+  ament_add_pytest_test(test_extrinsics_offsets test/test_extrinsics_offsets.py
+                        ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1)
 endif()
 
 ament_package()

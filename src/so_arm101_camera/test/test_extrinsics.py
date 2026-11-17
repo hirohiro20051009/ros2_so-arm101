@@ -92,9 +92,13 @@ def write_csv(path, rows, columns=rec.COLUMNS):
             writer.writerow([row[c] if c != 'idx' else str(i + 1) for c in columns])
 
 
-def meta_dict(link=True):
+def meta_dict(link=True, zero_offsets=True):
+    """Return a meta file; zero_offsets=False makes an older one (no zero offsets recorded)."""
     meta = {'schema': 1, 'identity': {'tag_mount_sha256': 'a' * 64, 'tag_id': 0},
             'tag_mount': {'tag_size_m': 0.06}, 'extra': {}}
+    if zero_offsets:
+        meta['identity']['follower_calibration_sha256'] = 'f' * 64
+        meta['identity']['zero_offset_deg'] = {n: 0.0 for n in ex.ANGLE_JOINTS}
     if link:
         meta['extra']['camera_link_to_optical_frame'] = {
             'parent': 'camera_link', 'child': 'camera_color_optical_frame',

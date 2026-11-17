@@ -38,10 +38,12 @@ from pathlib import Path
 import tempfile
 
 import numpy as np
+from so_arm101_ik import step_runner as sr
 import yaml
 
 from . import camera_config as cc
 from . import record as rec
+from . import tag_mount as tm
 
 # Row selection (all rows that satisfy every condition are used).
 CAM_N_MIN = 10  # frames kept per point (推測: about 2/3 of the 15 asked for)
@@ -366,6 +368,175 @@ def select_rows(rows, exclude=()):
     return points, rejected
 
 
+# ----------------------------------------------------------------------------- zero offsets
+
+ANGLE_JOINTS = tuple(sr.JOINT_NAMES)
+JOINT_OFFSET_MAX_DEG = 10.0  # the same upper limit as the driver (kMaxZeroOffsetDeg)
+BASELINE_TOL_M = 5e-6  # fk_tag recomputed at delta 0 against the CSV (6 digits of q and fk_tag)
+
+
+@dataclasses.dataclass(frozen=True)
+class OffsetPlan:
+    """What is known about the zero offsets of a CSV and what is applied to it."""
+
+    applied: dict  # the --joint-offset values (degrees); empty if none was given
+    recorded: object  # the zero_offset_deg of the meta file (dict), None for an older meta file
+    calibration_sha256: object = None  # follower_calibration_sha256 of the meta file or None
+    fk_source: str = 'csv'  # 'csv' (the fk_tag of the CSV) or 'recomputed'
+    urdf_sha256: object = None
+    tag_offset: object = None
+    baseline_max_m: float = math.nan
+
+
+def parse_joint_offsets(items):
+    """
+    Return {joint: degrees} of the --joint-offset values NAME=DEG (q_true = q_meas + DEG).
+
+    Raises InputError for a missing "=", a name that is not one of the five angle joints (the
+    gripper has no offset), a value that is not a finite number, one over 10 degrees, or a joint
+    given twice.
+    """
+    offsets = {}
+    for item in items:
+        name, separator, text = str(item).partition('=')
+        if not separator:
+            raise InputError(f'--joint-offset {item}: the form is NAME=DEG')
+        if name == 'gripper':
+            raise InputError('--joint-offset gripper: the gripper has no zero offset')
+        if name not in ANGLE_JOINTS:
+            raise InputError(f'--joint-offset {name}: not one of {", ".join(ANGLE_JOINTS)}')
+        try:
+            value = float(text)
+        except ValueError as exc:
+            raise InputError(f'--joint-offset {item}: {text!r} is not a number') from exc
+        if not math.isfinite(value) or abs(value) > JOINT_OFFSET_MAX_DEG:
+            raise InputError(f'--joint-offset {item}: the value must be finite and within '
+                             f'+-{JOINT_OFFSET_MAX_DEG} deg')
+        if name in offsets:
+            raise InputError(f'--joint-offset {name} is given twice')
+        offsets[name] = value
+    return offsets
+
+
+def recorded_offsets(meta):
+    """Return the zero_offset_deg recorded in the identity of the meta file, or None if absent."""
+    identity = meta.get('identity') if isinstance(meta, dict) else None
+    if not isinstance(identity, dict) or 'zero_offset_deg' not in identity:
+        return None
+    value = identity['zero_offset_deg']
+    if (not isinstance(value, dict) or set(value) != set(ANGLE_JOINTS)
+            or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                   or not math.isfinite(v) or abs(v) > JOINT_OFFSET_MAX_DEG
+                   for v in value.values())):
+        raise InputError('the zero_offset_deg of the meta file is not a number for each of '
+                         f'{", ".join(ANGLE_JOINTS)} within +-{JOINT_OFFSET_MAX_DEG} deg')
+    return {name: float(value[name]) for name in ANGLE_JOINTS}
+
+
+def plan_offsets(meta, requested):
+    """
+    Decide what may be done with the zero offsets. Raise InputError if it is not allowed.
+
+    An older meta file (no zero_offset_deg) is accepted only together with --joint-offset (NAME=0
+    says there is none). A meta file that recorded an offset other than 0 was made with a driver
+    that had corrected the angles already: --joint-offset on top of it would count it twice.
+    """
+    recorded = recorded_offsets(meta)
+    if recorded is None and not requested:
+        raise InputError(
+            'the meta file has no record of the zero offsets (it was made before they were '
+            'recorded): give --joint-offset NAME=DEG for the correction (NAME=0 for none)')
+    if requested and recorded is not None and any(v != 0.0 for v in recorded.values()):
+        raise InputError(
+            'the meta file recorded zero offsets other than 0 (the angles of the CSV are '
+            f'already corrected: {recorded}): --joint-offset would count them twice')
+    identity = meta.get('identity') if isinstance(meta, dict) else None
+    sha = identity.get('follower_calibration_sha256') if isinstance(identity, dict) else None
+    return OffsetPlan(dict(requested), recorded, sha)
+
+
+def _tag_offset_of(meta):
+    mount = meta.get('tag_mount') if isinstance(meta, dict) else None
+    value = mount.get('offset_gripper_frame_m') if isinstance(mount, dict) else None
+    return _finite_list('tag_mount.offset_gripper_frame_m', value, 3)
+
+
+def recompute_fk_tag(rows, meta, urdf_path, plan):
+    """
+    Return (rows, plan) with fk_tag_* computed again from q_* plus the offsets of the plan.
+
+    The URDF must be the one of the meta file (sha256), and the fk_tag computed from the q of
+    the CSV without any offset must be the fk_tag of the CSV (within BASELINE_TOL_M); otherwise
+    InputError. The rows given are not changed.
+    """
+    identity = meta.get('identity') if isinstance(meta, dict) else None
+    wanted = identity.get('urdf_sha256') if isinstance(identity, dict) else None
+    try:
+        found = sha256_file(urdf_path)
+    except OSError as exc:
+        raise InputError(f'cannot read {urdf_path}: {exc}') from exc
+    if not isinstance(wanted, str) or found != wanted:
+        raise InputError(f'{urdf_path}: its sha256 {found} is not the urdf_sha256 of the meta '
+                         f'file ({wanted})')
+    offset = _tag_offset_of(meta)
+    try:
+        chain = rec.load_chain(urdf_path)
+    except (OSError, ValueError, KeyError, SyntaxError) as exc:
+        raise InputError(f'cannot use {urdf_path}: {exc}') from exc
+    delta = np.radians([plan.applied.get(name, 0.0) for name in ANGLE_JOINTS])
+    result, baseline = [], 0.0
+    for row in rows:
+        new = dict(row)
+        q = np.array([_number(row['q_' + name]) for name in ANGLE_JOINTS])
+        if not np.all(np.isfinite(q)):
+            for axis in 'xyz':
+                new['fk_tag_' + axis] = 'nan'
+            result.append(new)
+            continue
+        recorded = np.array([_number(row['fk_tag_' + a]) for a in 'xyz'])
+        if np.all(np.isfinite(recorded)):
+            gap = float(np.linalg.norm(tm.fk_tag(chain, q, offset) - recorded))
+            if gap > BASELINE_TOL_M:
+                raise InputError(
+                    f'{row["label"]}: the fk_tag computed from q differs from the CSV by '
+                    f'{gap * 1e6:.1f} um (limit {BASELINE_TOL_M * 1e6:.0f} um): not the same '
+                    'URDF, tag offset or angles')
+            baseline = max(baseline, gap)
+        for axis, value in zip('xyz', tm.fk_tag(chain, q + delta, offset)):
+            new['fk_tag_' + axis] = repr(float(value))
+        result.append(new)
+    return result, OffsetPlan(plan.applied, plan.recorded, plan.calibration_sha256,
+                              'recomputed', found, offset, baseline)
+
+
+def offset_lines(plan, count):
+    """Return the lines that say which zero offsets were applied."""
+    if plan.fk_source == 'csv':
+        return ['zero offsets: none applied; the fk_tag of the CSV is used (the meta file '
+                f'recorded {plan.recorded})']
+    shown = ', '.join(f'{n} {v:+.4g} deg' for n, v in plan.applied.items())
+    return [f'zero offsets applied (q_true = q_meas + delta): {shown}',
+            f'fk_tag computed again from q for {count} rows (without the offsets it differs '
+            f'from the CSV by at most {plan.baseline_max_m * 1e6:.1f} um)']
+
+
+def offsets_record(plan):
+    """Return the part of the record that says which zero offsets were used."""
+    plan = plan or OffsetPlan({}, None)
+    return {
+        'sign': 'q_true = q_meas + delta (degrees, added to the q_ columns before the FK)',
+        'source': 'command_line' if plan.applied else 'none',
+        'applied_deg': dict(plan.applied),
+        'fk_tag_source': plan.fk_source,
+        'meta_zero_offset_deg': plan.recorded if plan.recorded is not None else 'absent',
+        'meta_follower_calibration_sha256': plan.calibration_sha256 or 'absent',
+        'urdf_sha256': plan.urdf_sha256,
+        'tag_offset_gripper_frame_m': list(plan.tag_offset) if plan.tag_offset else None,
+        'baseline_check_max_um': (float(plan.baseline_max_m * 1e6)
+                                  if math.isfinite(plan.baseline_max_m) else None),
+    }
+
+
 # ----------------------------------------------------------------------------- the solution
 
 @dataclasses.dataclass(frozen=True)
@@ -488,7 +659,7 @@ def utc_now_text():
 
 
 def sidecar_text(solution, rejected, csv_path, meta_path, meta, optical, main_text, created,
-                 exclude=()):
+                 exclude=(), offsets=None):
     """Return the text of the record that is written next to the extrinsics file."""
     labels = solution.labels
     mm = 1000.0
@@ -500,6 +671,7 @@ def sidecar_text(solution, rejected, csv_path, meta_path, meta, optical, main_te
         'input': {'csv': Path(csv_path).name, 'csv_sha256': sha256_file(csv_path),
                   'meta_sha256': sha256_file(meta_path)},
         'identity': rec.to_plain(meta.get('identity', {})),
+        'joint_offsets': rec.to_plain(offsets_record(offsets)),
         'rows': {'used': list(labels),
                  'not_used': {label: reason for label, reason in rejected},
                  'excluded': list(exclude)},
