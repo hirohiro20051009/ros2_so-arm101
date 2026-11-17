@@ -37,6 +37,8 @@ from launch_ros.actions import Node
 # argument -> type of the parameter that it overrides
 OVERRIDES = {
     'scale': float, 'rate_hz': float, 'point_time_s': float, 'clutch_mode': str,
+    'max_tracking_error': float, 'gripper_open_rad': float, 'gripper_closed_rad': float,
+    'floor_z': float,
     'button_clutch': int, 'button_open': int, 'button_close': int,
 }
 

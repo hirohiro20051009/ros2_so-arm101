@@ -62,6 +62,8 @@ GRIPPER_LOWER = 0.0  # rad. The driver clamps below the calibrated minimum (raw 
 GRIPPER_UPPER = 1.74533  # rad (URDF upper limit)
 
 SCALE_MAX = 3.0
+FLOOR_SAFE = 0.045  # m: the floor of the arm that can move (docs/p6_plan.md)
+FLOOR_MIN = 0.01  # m: lower floors only for an arm that cannot move (the node checks read_only)
 SINGULAR_EPS = 1e-3  # the in-plane part of the tool axis below which the pitch is undefined
 THETA_ITERATIONS = 4
 
@@ -237,7 +239,7 @@ class FollowConfig:
              'need 0 < resume_ang_deg < jump_ang_deg <= 90')
         need(0.0 < self.stale_s <= 5.0, 'stale_s must be in (0, 5]')
         need(0.0 <= self.joy_timeout_s <= 10.0, 'joy_timeout_s must be in [0, 10]')
-        need(self.floor_z >= 0.045, 'floor_z must be at least 0.045 m')
+        need(self.floor_z >= FLOOR_MIN, 'floor_z must be at least %g m' % FLOOR_MIN)
         need(0.0 < self.elbow_max_deg <= math.degrees(ik.Q_MAX[2]),
              'elbow_max_deg must be in (0, %.2f]' % math.degrees(ik.Q_MAX[2]))
         need(0.0 < self.clutch_windup <= 0.08, 'clutch_windup must be in (0, 0.08] rad')

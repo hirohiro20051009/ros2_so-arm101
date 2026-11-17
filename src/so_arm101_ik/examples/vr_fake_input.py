@@ -21,12 +21,20 @@
 """
 Fake VR input for the VR follow node (P6 b3): a Joy and a PoseStamped in place of the VR.
 
-MOCK ONLY. It refuses to run unless ROS_DOMAIN_ID is 87 (the mock domain) and --mock is given.
-Start the mock arm first (ros2 launch so_arm101_bringup bringup.launch.py mock:=true
+Two modes (exactly one of --mock and --real):
+  --mock: the MOCK arm only. It refuses to run unless ROS_DOMAIN_ID is 87 (the mock domain).
+  --real: the REAL arm (docs/p6_real_check.md). It refuses to run in domain 87, never gives
+          the arm a trajectory (no publisher to /arm_controller/joint_trajectory, no action
+          client), keeps every move of the TARGET of the arm within 30 mm and 20 mm/s, plays
+          only line, stale, jump and gripper, and waits for Enter before each scenario.
+          --arm-read-only (c0) raises the limit to 60 mm, only if the robot_description
+          says read_only; --expect blocked or stationary is for such an arm.
+
+Mock: start the mock arm first (ros2 launch so_arm101_bringup bringup.launch.py mock:=true
 use_rviz:=false), then ros2 launch so_arm101_ik vr_follow.launch.py, then this script.
 
-It moves the mock arm to a working pose (a trajectory to the arm_controller that does not go
-through the follow node), plays the scenarios line, jump, stale, range, rotation, gripper and
+In the mock it moves the arm to a working pose (a trajectory to the arm_controller that does not
+go through the follow node), plays the scenarios line, jump, stale, range, rotation, gripper and
 busy, watches /vr_follow/status, /arm_controller/joint_trajectory, the gripper topic and the
 gripper action, and prints what it checked. The exit code is 0 only if every check passed.
 
@@ -37,15 +45,17 @@ gripper action, and prints what it checked. The exit code is 0 only if every che
 import argparse
 import csv
 import os
+import re
 import sys
 import time
-
 
 from action_msgs.msg import GoalStatusArray
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
+from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import PoseStamped
 import numpy as np
+from rcl_interfaces.srv import GetParameters
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -68,6 +78,18 @@ SCENARIOS = ('line', 'jump', 'stale', 'range', 'rotation', 'gripper', 'busy')
 RANGE_REASONS = ('UNREACHABLE', 'JOINT_RANGE', 'ELBOW_LIMIT', 'FLOOR', 'ORIENT', 'IK_JUMP')
 GRIPPER_STATUS = '/gripper_controller/gripper_cmd/_action/status'
 JTC_ACTION = '/arm_controller/follow_joint_trajectory'
+CONTROLLER_STATE = '/arm_controller/controller_state'
+
+# The real arm (--real; docs/p6_real_check.md). The limits are for the moves of the TARGET of the
+# arm (after the scale): the hand moves target / scale.
+REAL_SCENARIOS = ('line', 'stale', 'jump', 'gripper')
+REAL_MAX_AMPLITUDE_MM = 30.0
+READ_ONLY_MAX_AMPLITUDE_MM = 60.0  # only if the robot_description says read_only (c0)
+REAL_MAX_SPEED_MM_S = 20.0
+REAL_JUMP_MM = 60.0  # the step of the jump scenario: over the 50 mm limit, so the node must stop
+REAL_JUMP_MAX_TIP_MM = 5.0  # the arm must not follow the jump
+STATIONARY_MM = 3.0  # a read-only arm does not move
+EXPECTATIONS = ('normal', 'blocked', 'stationary')
 
 
 # ------------------------------------------------------------------------------ the plan
@@ -147,18 +169,92 @@ def make_plans():
     return plans
 
 
+def description_is_read_only(text):
+    """Return True if a robot_description text says that the arm driver is read_only."""
+    return re.search(r'name="read_only"\s*>\s*true\s*<', text) is not None
+
+
+def check_args(args, domain):
+    """Return the reason to refuse the arguments (a text), or None if they are allowed."""
+    real_plans = bool(getattr(args, 'real_plans', False))
+    if bool(args.mock) == bool(args.real):
+        return 'give exactly one of --mock and --real'
+    if args.mock:
+        if domain != MOCK_DOMAIN:
+            return '--mock needs ROS_DOMAIN_ID=%s (the mock domain)' % MOCK_DOMAIN
+        if not real_plans:
+            return None
+    else:
+        if real_plans:
+            return '--real-plans is only for --mock'
+        if domain == MOCK_DOMAIN:
+            return '--real must not run in the mock domain (ROS_DOMAIN_ID=%s)' % MOCK_DOMAIN
+    if not args.scenarios:
+        return '--real needs --scenarios (%s)' % ' '.join(REAL_SCENARIOS)
+    others = [s for s in args.scenarios if s not in REAL_SCENARIOS]
+    if others:
+        return 'the scenarios %s are not allowed with --real (only %s)' % (
+            ' '.join(others), ' '.join(REAL_SCENARIOS))
+    cap = READ_ONLY_MAX_AMPLITUDE_MM if args.arm_read_only else REAL_MAX_AMPLITUDE_MM
+    if not 1.0 <= args.amplitude_mm <= cap:
+        return '--amplitude-mm must be in [1, %g]%s' % (
+            cap, '' if args.arm_read_only else ' (60 only with --arm-read-only)')
+    if not 1.0 <= args.speed_mm_s <= REAL_MAX_SPEED_MM_S:
+        return '--speed-mm-s must be in [1, %g]' % REAL_MAX_SPEED_MM_S
+    if not 1 <= args.gripper_cycles <= 3:
+        return '--gripper-cycles must be 1, 2 or 3'
+    if args.expect != 'normal' and not args.arm_read_only:
+        return '--expect %s needs --arm-read-only' % args.expect
+    return None
+
+
+def make_real_plan(name, amplitude, speed, scale, cycles=1):
+    """
+    Return the Plan of a real-arm scenario; amplitude (m) and speed (m/s) are of the TARGET.
+
+    The hand moves target / scale. line: 0 -> +A -> -A -> 0 along y. stale: +A, the pose stops for
+    1 s and comes back to the same place. jump: a step of REAL_JUMP_MM of the target that the node
+    must refuse. gripper: only buttons (CLOSE then OPEN), no clutch.
+    """
+    k = 1.0 / scale
+    t1 = amplitude / speed
+    if name == 'line':
+        keys = [(1.0, 0.0), (1.0 + t1, amplitude), (2.0 + t1, amplitude),
+                (2.0 + 3 * t1, -amplitude), (3.0 + 3 * t1, -amplitude), (3.0 + 4 * t1, 0.0)]
+        end = 3.0 + 4 * t1 + 0.5
+        return Plan(end + 1.0, disp=[(t, (0.0, y * k, 0.0)) for t, y in keys],
+                    clutch=[(1.0, end)])
+    if name == 'stale':
+        keys = [(1.0, 0.0), (1.0 + t1, amplitude), (3.5 + t1, amplitude),
+                (3.5 + 2 * t1, 0.0)]
+        end = 3.5 + 2 * t1 + 0.5
+        return Plan(end + 1.0, disp=[(t, (0.0, y * k, 0.0)) for t, y in keys],
+                    clutch=[(1.0, end)], pose_off=[(1.0 + t1 + 0.5, 1.0 + t1 + 1.5)])
+    if name == 'jump':
+        jump = REAL_JUMP_MM / 1000.0
+        keys = [(1.0, 0.0), (2.5, 0.0), (2.5001, jump), (4.0, jump), (4.0001, 0.0), (5.5, 0.0)]
+        return Plan(6.5, disp=[(t, (0.0, y * k, 0.0)) for t, y in keys], clutch=[(1.0, 5.5)])
+    if name == 'gripper':
+        closes = [(1.0 + 4.0 * c, 1.4 + 4.0 * c) for c in range(cycles)]
+        opens = [(3.0 + 4.0 * c, 3.4 + 4.0 * c) for c in range(cycles)]
+        return Plan(1.0 + 4.0 * cycles + 0.5, closes=closes, opens=opens)
+    raise ValueError('no real scenario %s' % name)
+
+
 # ---------------------------------------------------------------------------- the monitor
 
 class Monitor(Node):
     """Publishes the fake inputs and records the state, the points and the gripper."""
 
-    def __init__(self, buttons):
+    def __init__(self, buttons, real=False):
         super().__init__('vr_fake_input')
         self.buttons = buttons  # (clutch, open, close) indices
+        self.real = real
         self.joy_pub = self.create_publisher(Joy, '/vr/right/joy', 10)
         self.pose_pub = self.create_publisher(PoseStamped, '/vr/right/pose', 10)
-        self.traj_pub = self.create_publisher(JointTrajectory, '/arm_controller/joint_trajectory',
-                                              10)
+        if not real:  # the real arm is never given a trajectory by this script
+            self.traj_pub = self.create_publisher(JointTrajectory,
+                                                  '/arm_controller/joint_trajectory', 10)
         latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(String, '/vr_follow/status', self._on_status, latched)
@@ -167,7 +263,13 @@ class Monitor(Node):
         self.create_subscription(Float64, '/vr_follow/gripper', self._on_gripper_amount, latched)
         self.create_subscription(GoalStatusArray, GRIPPER_STATUS, self._on_gripper_status, latched)
         self.create_subscription(JointState, '/joint_states', self._on_joint_state, 50)
-        self.jtc_client = ActionClient(self, FollowJointTrajectory, JTC_ACTION)
+        self.create_subscription(JointTrajectoryControllerState, CONTROLLER_STATE,
+                                 self._on_controller_state, 50)
+        if not real:
+            self.jtc_client = ActionClient(self, FollowJointTrajectory, JTC_ACTION)
+        self.param_client = self.create_client(GetParameters, '/vr_follow/get_parameters')
+        self.rsp_client = self.create_client(GetParameters,
+                                             '/robot_state_publisher/get_parameters')
         self.started = time.monotonic()
         self.status = []  # (t, state, reason, detail)
         self.points = []  # (t, positions)
@@ -176,7 +278,8 @@ class Monitor(Node):
         self.goal_times = []  # (t, id) of the new gripper goals
         self.q = None
         self.gripper = None
-        self.samples = []  # (t, tip xyz, q5, elbow, gripper)
+        self.samples = []  # (t, tip xyz, q5, elbow, gripper, q)
+        self.refs = []  # (t, reference of the arm_controller)
         self.blocked_seen = False
 
     def _on_status(self, msg):
@@ -192,6 +295,12 @@ class Monitor(Node):
         state = parts[0]
         self.blocked_seen = self.blocked_seen or state == 'BLOCKED'
         self.status.append((time.monotonic(), state, parts[1] if len(parts) > 1 else '', detail))
+
+    def _on_controller_state(self, msg):
+        names = list(msg.joint_names)
+        if all(j in names for j in JOINTS):
+            reference = np.array([msg.reference.positions[names.index(j)] for j in JOINTS])
+            self.refs.append((time.monotonic(), reference))
 
     def _on_point(self, msg):
         if msg.points:
@@ -216,7 +325,8 @@ class Monitor(Node):
         if 'gripper' in names:
             self.gripper = msg.position[names.index('gripper')]
         tip = ik.fk(self.q)[0]
-        self.samples.append((time.monotonic(), tip, self.q[4], self.q[2], self.gripper))
+        self.samples.append((time.monotonic(), tip, self.q[4], self.q[2], self.gripper,
+                             self.q.copy()))
 
     def spin(self, seconds):
         end = time.monotonic() + seconds
@@ -302,7 +412,7 @@ def play(monitor, plan):
     wait_for(monitor, lambda: monitor.last_state() == 'IDLE', 5.0, 'the node did not go IDLE')
     t0 = time.monotonic()
     marks = (len(monitor.status), len(monitor.points), len(monitor.amounts),
-             len(monitor.goal_times), len(monitor.samples))
+             len(monitor.goal_times), len(monitor.samples), len(monitor.refs))
     next_joy = next_pose = 0.0
     spikes = sorted(plan.spikes)
     busy_sent = None
@@ -335,7 +445,8 @@ def play(monitor, plan):
     return {
         'status': rel(monitor.status[marks[0]:]), 'points': rel(monitor.points[marks[1]:]),
         'amounts': rel(monitor.amounts[marks[2]:]), 'goals': rel(monitor.goal_times[marks[3]:]),
-        'samples': rel(monitor.samples[marks[4]:]), 'busy_sent': busy_sent,
+        'samples': rel(monitor.samples[marks[4]:]), 'refs': rel(monitor.refs[marks[5]:]),
+        'busy_sent': busy_sent,
     }
 
 
@@ -525,16 +636,191 @@ CHECKS = {
 
 # --------------------------------------------------------------------------------- main
 
+# ------------------------------------------------------ the real arm: checks and the inputs
+
+def tip_excursion(record):
+    """Return the largest distance (m) of the tip from its first position (None: no samples)."""
+    tips = [s[1] for s in record['samples']]
+    if not tips:
+        return None
+    return max(float(np.linalg.norm(tip - tips[0])) for tip in tips)
+
+
+def tracking_stats(record):
+    """Return (max |measured - reference|, max |sent point - measured|) in rad (None: no data)."""
+    refs, samples, points = record['refs'], record['samples'], record['points']
+    error = advance = None
+    if refs and samples:
+        times = np.array([r[0] for r in refs])
+        worst = 0.0
+        for sample in samples:
+            i = int(np.searchsorted(times, sample[0], side='right')) - 1
+            if i >= 0:
+                worst = max(worst, float(np.max(np.abs(sample[5] - refs[i][1]))))
+        error = worst
+    if points and samples:
+        times = np.array([s[0] for s in samples])
+        worst = 0.0
+        for t, positions in points:
+            i = int(np.searchsorted(times, t, side='right')) - 1
+            if i >= 0:
+                worst = max(worst, float(np.max(np.abs(np.array(positions) - samples[i][5]))))
+        advance = worst
+    return error, advance
+
+
+def real_checks(name, record, expect, amplitude, cycles=1):
+    """Return the checks of a scenario on the real arm (expect: normal, blocked, stationary)."""
+    checks = common_checks(record)
+    states = states_of(record['status'])
+    transition_list = transitions(record['status'])
+    excursion = tip_excursion(record)
+    error, advance = tracking_stats(record)
+    still = STATIONARY_MM / 1000.0
+
+    def mm(value):
+        return None if value is None else '%.1f mm' % (value * 1000.0)
+
+    if expect == 'blocked':
+        blocked = [t for t in transition_list if t[1] == 'BLOCKED']
+        checks.append(('TRACKING, then BLOCKED (TRACKING_ERROR)',
+                       is_subsequence(['TRACKING', 'BLOCKED'], states) and bool(blocked)
+                       and blocked[0][2].startswith('TRACKING_ERROR'), str(transition_list)))
+        checks.append(('the arm did not move (tip < %g mm)' % STATIONARY_MM,
+                       excursion is not None and excursion < still, mm(excursion)))
+    elif expect == 'stationary':
+        only = states in (['IDLE', 'TRACKING', 'IDLE'], ['TRACKING', 'IDLE'])
+        checks.append(('IDLE, TRACKING, IDLE only (no BLOCKED)', only, str(states)))
+        checks.append(('the arm did not move (tip < %g mm)' % STATIONARY_MM,
+                       excursion is not None and excursion < still, mm(excursion)))
+    else:
+        bad = [s for s in states if s in ('BLOCKED', 'HOLD_RANGE', 'HOLD_LAG', 'BUSY')]
+        checks.append(('no BLOCKED, HOLD_RANGE, HOLD_LAG or BUSY', not bad, str(states)))
+        if name == 'line':
+            only = states in (['IDLE', 'TRACKING', 'IDLE'], ['TRACKING', 'IDLE'])
+            checks.append(('IDLE, TRACKING, IDLE only', only, str(states)))
+            checks.append(('the tip moved about the amplitude (0.4 to 1.6 times)',
+                           excursion is not None
+                           and 0.4 * amplitude <= excursion <= 1.6 * amplitude
+                           + 0.002, '%s for %s' % (mm(excursion), mm(amplitude))))
+        elif name == 'stale':
+            checks.append(('TRACKING, STALE, TRACKING, IDLE',
+                           is_subsequence(['TRACKING', 'STALE', 'TRACKING', 'IDLE'], states),
+                           str(states)))
+            reasons = {t[2] for t in transition_list if t[1] == 'STALE'}
+            checks.append(('the STALE reason is POSE', reasons == {'POSE'}, str(reasons)))
+        elif name == 'jump':
+            checks.append(('TRACKING, HOLD_JUMP, TRACKING, IDLE',
+                           is_subsequence(['TRACKING', 'HOLD_JUMP', 'TRACKING', 'IDLE'], states),
+                           str(states)))
+            jumps = [d.get('jump_mm', 0.0) for _, s, _, d in record['status'] if s == 'HOLD_JUMP']
+            checks.append(('the jump was seen as 50 mm or more',
+                           bool(jumps) and max(jumps) >= 50.0,
+                           str(jumps[-1:])))
+            checks.append(('the arm did not follow the jump (tip < %g mm)' % REAL_JUMP_MAX_TIP_MM,
+                           excursion is not None and excursion < REAL_JUMP_MAX_TIP_MM / 1000.0,
+                           mm(excursion)))
+        elif name == 'gripper':
+            amounts = [a for _, a in record['amounts']]
+            checks.append(('the gripper topic: CLOSE 1.0 then OPEN 0.0, %d time(s)' % cycles,
+                           amounts == [1.0, 0.0] * cycles, str(amounts)))
+            checks.append(('%d goal(s) to the gripper action' % (2 * cycles),
+                           len(record['goals']) == 2 * cycles, str(len(record['goals']))))
+            checks.append(('the state stayed IDLE (no clutch)', set(states) <= {'IDLE'},
+                           str(states)))
+            checks.append(('the arm did not move (tip < 2 mm)',
+                           excursion is not None and excursion < 0.002, mm(excursion)))
+    checks.append(('INFO max abs(measured - reference)', True,
+                   'n/a' if error is None else '%.4f rad' % error))
+    checks.append(('INFO max abs(sent point - measured)', True,
+                   'n/a' if advance is None else '%.4f rad' % advance))
+    checks.append(('INFO tip excursion', True, str(mm(excursion))))
+    if name == 'gripper':
+        for c in range(cycles):
+            for label, a, b in (('after CLOSE', 2.4 + 4.0 * c, 2.9 + 4.0 * c),
+                                ('after OPEN', 4.4 + 4.0 * c, 4.9 + 4.0 * c)):
+                values = [s[4] for s in window(record, a, b) if s[4] is not None]
+                checks.append(('INFO gripper %s (cycle %d)' % (label, c + 1), True,
+                               'n/a' if not values else '%.4f rad' % float(np.mean(values))))
+    return checks
+
+
+def call_get_parameters(monitor, client, names, timeout=5.0):
+    """Return the values of the parameters of a node (None if the service does not answer)."""
+    if not client.wait_for_service(timeout_sec=timeout):
+        return None
+    request = GetParameters.Request()
+    request.names = list(names)
+    future = client.call_async(request)
+    rclpy.spin_until_future_complete(monitor, future, timeout_sec=timeout)
+    return future.result().values if future.done() else None
+
+
+def read_scale(monitor):
+    """Return the scale of /vr_follow (None if it cannot be read)."""
+    values = call_get_parameters(monitor, monitor.param_client, ['scale'])
+    if not values or values[0].type != 3:  # PARAMETER_DOUBLE
+        return None
+    return values[0].double_value
+
+
+def arm_is_read_only(monitor):
+    """Return True if the robot_description says that the arm driver is read_only."""
+    values = call_get_parameters(monitor, monitor.rsp_client, ['robot_description'])
+    if not values:
+        return False
+    return description_is_read_only(values[0].string_value)
+
+
+def confirm(text):
+    """Show text and return True only if the user presses Enter."""
+    print(text, flush=True)
+    try:
+        answer = input('Press Enter to start (n and Enter to stop here): ')
+    except EOFError:
+        return False
+    return answer.strip().lower() not in ('n', 'no', 'q')
+
+
+def wait_ready(monitor):
+    wait_for(monitor, lambda: monitor.q is not None and monitor.status, 20.0,
+             'no /joint_states or /vr_follow/status: are the arm and vr_follow running?')
+    monitor.spin(0.5)
+
+
+# --------------------------------------------------------------------------------- main
+
 def _parse():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[1])
-    parser.add_argument('--mock', action='store_true', help='required: this is for the mock only')
+    parser.add_argument('--mock', action='store_true', help='the mock arm (ROS_DOMAIN_ID=87)')
+    parser.add_argument('--real-plans', action='store_true',
+                        help='mock only: play the scenarios of --real (same limits, Enter)')
+    parser.add_argument('--real', action='store_true',
+                        help='the real arm: no preparation move, small limits, Enter to start')
     parser.add_argument('--out', required=True, help='directory for the timelines (CSV)')
-    parser.add_argument('--scenarios', nargs='+', default=list(SCENARIOS), choices=SCENARIOS)
+    parser.add_argument('--scenarios', nargs='+', default=None,
+                        help='mock: %s (default all); real: %s (required)' % (
+                            ' '.join(SCENARIOS), ' '.join(REAL_SCENARIOS)))
     parser.add_argument('--buttons', type=int, nargs=3, default=[0, 1, 2],
                         metavar=('CLUTCH', 'OPEN', 'CLOSE'))
+    parser.add_argument('--amplitude-mm', type=float, default=10.0,
+                        help='real: amplitude of the TARGET of the arm in mm (30 at most)')
+    parser.add_argument('--speed-mm-s', type=float, default=10.0,
+                        help='real: speed of the target in mm/s (20 at most)')
+    parser.add_argument('--gripper-cycles', type=int, default=1, help='real: CLOSE and OPEN')
+    parser.add_argument('--arm-read-only', action='store_true',
+                        help='real (c0): the arm is read_only (checked in the robot_description)')
+    parser.add_argument('--expect', choices=EXPECTATIONS, default='normal',
+                        help='real, read_only arm: blocked (C3 stops it) or stationary')
     args = parser.parse_args()
-    if not args.mock or os.environ.get('ROS_DOMAIN_ID') != MOCK_DOMAIN:
-        sys.exit('refused: --mock and ROS_DOMAIN_ID=%s are required' % MOCK_DOMAIN)
+    reason = check_args(args, os.environ.get('ROS_DOMAIN_ID'))
+    if reason:
+        sys.exit('refused: %s' % reason)
+    if args.mock:
+        args.scenarios = args.scenarios or list(SCENARIOS)
+        unknown = [s for s in args.scenarios if s not in SCENARIOS]
+        if unknown:
+            sys.exit('refused: unknown scenarios %s' % ' '.join(unknown))
     os.makedirs(args.out, exist_ok=True)
     return args
 
@@ -551,27 +837,61 @@ def write_csv(path, record):
             writer.writerow(['gripper_amount', '%.3f' % t, amount, '', ''])
         for t, goal in record['goals']:
             writer.writerow(['gripper_goal', '%.3f' % t, goal, '', ''])
-        for t, tip, q5, elbow, gripper in record['samples'][::5]:
+        for t, reference in record['refs'][::2]:
+            writer.writerow(['reference', '%.3f' % t, ' '.join('%.4f' % v for v in reference),
+                             '', ''])
+        for t, tip, q5, elbow, gripper, q in record['samples'][::5]:
             writer.writerow(['sample', '%.3f' % t, ' '.join('%.4f' % v for v in tip),
-                             '%.4f %.4f' % (q5, elbow),
+                             ' '.join('%.4f' % v for v in q),
                              '' if gripper is None else '%.4f' % gripper])
+
+
+def describe(name, plan, scale, args):
+    hand = args.amplitude_mm / scale
+    return ('--- %s on the REAL arm (scale %.2f): target amplitude %g mm (hand %g mm), speed %g '
+            'mm/s, %.1f s. Support the arm and keep a hand near the 12 V switch.' % (
+                name, scale, args.amplitude_mm, hand, args.speed_mm_s, plan.duration))
 
 
 def main():
     args = _parse()
     rclpy.init()
-    monitor = Monitor(tuple(args.buttons))
-    prepare(monitor)
-    plans = make_plans()
+    monitor = Monitor(tuple(args.buttons), real=args.real)
+    plans = {}
+    if args.mock:  # only the mock arm is moved to the working pose (never the real arm)
+        prepare(monitor)
+    real_like = args.real or args.real_plans
+    if real_like:
+        wait_ready(monitor)
+        scale = read_scale(monitor)
+        if scale is None:
+            sys.exit('refused: cannot read the scale of /vr_follow (is vr_follow running?)')
+        if args.arm_read_only and not arm_is_read_only(monitor):
+            sys.exit('refused: the robot_description does not say read_only')
+        for name in args.scenarios:
+            plans[name] = make_real_plan(name, args.amplitude_mm / 1000.0,
+                                         args.speed_mm_s / 1000.0, scale, args.gripper_cycles)
+    else:
+        plans = make_plans()
     failures = 0
     for name in args.scenarios:
         print('=== %s' % name, flush=True)
+        if real_like and not confirm(describe(name, plans[name], scale, args)):
+            sys.exit('stopped before %s (nothing was sent)' % name)
         record = play(monitor, plans[name])
         write_csv(os.path.join(args.out, '%s.csv' % name), record)
         print('  transitions: %s' % ' > '.join(
             '%s%s@%.1f' % (s, '(%s)' % r if r not in ('OK', '-') else '', t)
             for t, s, r in transitions(record['status'])), flush=True)
-        for label, ok, text in CHECKS[name](record):
+        if real_like:
+            checks = real_checks(name, record, args.expect, args.amplitude_mm / 1000.0,
+                                 args.gripper_cycles)
+        else:
+            checks = CHECKS[name](record)
+        for label, ok, text in checks:
+            if label.startswith('INFO'):
+                print('  INFO  %s: %s' % (label[5:], text), flush=True)
+                continue
             failures += 0 if ok else 1
             print('  %s  %s%s' % ('PASS' if ok else 'FAIL', label,
                                   '' if ok else '  [%s]' % text), flush=True)

@@ -17,7 +17,7 @@ vr_follow:
     resume_ang_deg: 10.0       # 再開: 止まった目標からの角度 [度]
     stale_s: 0.5               # pose と joint_states の途切れ [s]
     joy_timeout_s: 1.0         # C4: Joy の途切れ [s]（0 で無効）
-    floor_z: 0.045             # 先端の z の下限 [m]（0.045 以上）
+    floor_z: 0.045             # 先端の z の下限 [m]。0.045 未満（0.01 以上）は、腕が動かない read_only の起動のときだけ（ノードが robot_description で確認し、違えば起動しない。c0 用）
     elbow_max_deg: 91.0        # elbow の上限 [度]
     clutch_windup: 0.06        # クラッチの前の |指令 − 測定| の上限 [rad]
     ik_jump: 0.35              # C1: 1 周期の IK の解の飛び [rad]（0 で無効）

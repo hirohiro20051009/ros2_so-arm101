@@ -186,7 +186,8 @@ def test_the_package_installs_the_node_the_launch_and_the_parameters():
                      cmake)
     assert re.search(r'install\(DIRECTORY\s+launch config\s+DESTINATION share/\$\{PROJECT_NAME\}',
                      cmake)
-    for name in ('test_follow_calc', 'test_follow_machine', 'test_follow_static'):
+    for name in ('test_follow_calc', 'test_follow_machine', 'test_follow_static',
+                 'test_vr_fake_input'):
         assert name in cmake
     package = _text(PACKAGE / 'package.xml')
     for dependency in ('rclpy', 'sensor_msgs', 'geometry_msgs', 'std_msgs', 'trajectory_msgs',
@@ -233,3 +234,33 @@ def test_a_quaternion_message_gives_a_rotation():
     assert abs(node.quaternion_message_to_matrix(q)[1, 0] - 1.0) < 1e-9
     with pytest.raises(ValueError):
         node.quaternion_message_to_matrix(types.SimpleNamespace(x=0.0, y=0.0, z=0.0, w=0.0))
+
+
+def test_a_floor_under_the_safe_floor_needs_a_read_only_arm():
+    text = _text(NODE)
+    guard = text.index('if self.config.floor_z < fc.FLOOR_SAFE:')
+    check = text.index('if not self._arm_is_read_only():', guard)
+    follower = text.index('self.follower = fm.Follower(self.config)')
+    assert guard < check < follower  # refused before the machine, the timers or any publisher
+    assert 'raise RuntimeError(' in text[check:follower]
+    assert r'name="read_only"' in text and 'robot_state_publisher/get_parameters' in text
+    assert fc.FLOOR_SAFE == 0.045 and fc.FLOOR_MIN == 0.01
+
+
+def test_the_launch_overrides_of_c0_and_c2_exist():
+    tree = ast.parse(_text(LAUNCH))
+    overrides = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'OVERRIDES':
+            overrides = {k.value: v.id for k, v in zip(node.value.keys, node.value.values)}
+    for name in ('max_tracking_error', 'gripper_open_rad', 'gripper_closed_rad', 'floor_z'):
+        assert overrides[name] == 'float', name
+
+
+def test_the_read_only_pattern_of_the_node():
+    node = _node_module()
+    assert node.description_is_read_only('<param name="read_only">true</param>')
+    assert node.description_is_read_only('<param name="read_only"> true </param>')
+    assert not node.description_is_read_only('<param name="read_only">false</param>')
+    assert not node.description_is_read_only('')
+    assert not node.description_is_read_only('<param name="use_fake_hardware">true</param>')

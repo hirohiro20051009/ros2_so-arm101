@@ -3516,3 +3516,12 @@ F5 の結果の 5 の「未解決」（床当ては (b)(c) を支持し、R1 の
 - `src/so_arm101_ik/examples/vr_fake_input.py`（偽の Joy・PoseStamped と監視。モック専用: ROS_DOMAIN_ID=87 と --mock が必要）を追加。line・jump・stale・range・rotation・gripper・busy の 7 シナリオが合格（rotation は期待値を直して再実行）。結果は `docs/p6_mock_check.md`。C3（BLOCKED）はモックでは出なかった（見込みどおり）。
 - 手順どおり前景で bringup（mock:=true use_rviz:=false）→ vr_follow.launch.py → 偽入力。停止は kill -INT のみ。ps と `ros2 node list --no-daemon` は空。
 - ik パッケージの colcon test: 576 件、失敗 0（examples の lint を含む）。他のパッケージはコードを変えていないので省略。
+
+## P6c 準備: 実機用の偽入力、床の守り、手順書（2026-11-17）
+
+- `examples/vr_fake_input.py` に実機の入口 `--real`（`--mock` と排他、ROS_DOMAIN_ID 87 は拒否、腕に軌道を送る publisher・クライアントなし、目標の空間で ±30 mm・20 mm/s、シナリオは line・stale・jump・gripper、`scale` を `/vr_follow` から読む、Enter の確認、`controller_state` から「読み − 指令」を出す）。`--arm-read-only`（robot_description が read_only のときだけ 60 mm）、`--expect blocked|stationary`。モック専用の `--real-plans`。
+- `vr_follow.launch.py` の引数に `max_tracking_error`・`gripper_open_rad`・`gripper_closed_rad`・`floor_z` を追加。
+- **c0 の床の守り**: `FollowConfig.floor_z` の下限を 0.045 から 0.01 m に下げた。0.045 m 未満のときは、ノードが `/robot_state_publisher` の robot_description の `read_only` が true であることを確かめ、違えば起動しない（exit 2）。モックで `floor_z:=0.02` の拒否を確認（read_only の true は実機でないと確かめられない）。
+- 手順書 `docs/p6_real_check.md`（c0 は腕を支えず折りたたみのまま。`REFUSED FLOOR` のときだけ c0 に限り `floor_z:=0.02`。c1 以降は既定の床。c1 の `torque_limit:=500` と T の (0, −22, 30, 83, 0) 度は F6 の手順書の段 c と同じ値を確認）。コマンドは端末ごとに `cd` と source の 2 行つきで、フルパス。
+- モックの確認の材料: `~/so_arm101_check/p6/b4_*`（git 管理外）。sha256: `b4_mock_all.txt` `968bc9e76bea53502aecdc734575372b71d6e08e8b99d0c99ec4f13679b1d52b`、`b4_realplans.txt` `cca4765b56826ca9691dd9c0289110fb3ecc11bee7ec098e8c11ac8380b36f2c`、`b4_realplans_jump.txt` `58d948ca32b9586b293d12b23258b64dd750672f2bc8f1b2c58033ba289ea7e2`、`b4_guard_floor002.log` `df5c6da0f4ad58a2e4b9049c3e2a33425bc0752dd9c109c0b14c35c85062f414`、`b4_guard_floor0009.log` `605d0f06ba28a66a2b7f906a4867e1f28dcc02238dbc86f76f8f1da1aba4a077`、`b4_node.log` `960ce055a6b590c69ca997523644d478c8209b53170e5532a4017e8e5cc4b61f`、`b4_bringup.log` `7d910960d01c550f59b44493762bd2f1c7c37960bcd4c29e86d13f9def5d95da`。
+- 試験: ik パッケージ 642 件、失敗 0（follow_calc 94、follow_machine 82、follow_static 21、vr_fake_input 57）。他のパッケージはコードを変えていないので省略。戻し方: 直前のコミット b7a14e7 から取り出せる。

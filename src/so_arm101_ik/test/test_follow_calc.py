@@ -319,7 +319,7 @@ def test_config_q_max_cuts_only_the_elbow():
     {'point_time_s': 0.0}, {'point_time_s': 0.6}, {'point_time_s': math.nan},
     {'jump_pos': 0.01}, {'jump_pos': 0.3}, {'resume_pos': 0.0}, {'resume_ang_deg': 40.0},
     {'jump_ang_deg': 100.0}, {'stale_s': 0.0}, {'stale_s': 6.0}, {'joy_timeout_s': -1.0},
-    {'floor_z': 0.044}, {'elbow_max_deg': 0.0}, {'elbow_max_deg': 97.0},
+    {'floor_z': 0.009}, {'floor_z': -0.1}, {'elbow_max_deg': 0.0}, {'elbow_max_deg': 97.0},
     {'clutch_windup': 0.0}, {'clutch_windup': 0.09}, {'ik_jump': -0.1}, {'ik_jump': 1.5},
     {'max_lag': -0.1}, {'max_lag': 0.6}, {'max_tracking_error': 1.5},
     {'clutch_mode': 'press'}, {'gripper_requires_clutch': 1},
@@ -334,6 +334,7 @@ def test_config_refuses_bad_values(change):
 
 @pytest.mark.parametrize('change', [
     {'ik_jump': 0.0}, {'max_lag': 0.0}, {'max_tracking_error': 0.0}, {'joy_timeout_s': 0.0},
+    {'floor_z': 0.02}, {'floor_z': 0.01},
     {'clutch_mode': 'toggle'}, {'scale': 3.0}, {'input_rotation_rpy_deg': [10, 20, 30]}])
 def test_config_accepts_the_values_that_disable_a_check_and_the_edges(change):
     fc.FollowConfig(**change)

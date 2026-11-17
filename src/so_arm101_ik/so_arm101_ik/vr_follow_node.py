@@ -32,6 +32,8 @@ once per tick and sends what the Output says. Only 'scale' can be changed while 
 """
 
 import dataclasses
+import re
+import sys
 import time
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
@@ -41,6 +43,7 @@ from control_msgs.msg import JointTrajectoryControllerState
 from geometry_msgs.msg import PoseStamped
 import numpy as np
 from rcl_interfaces.msg import SetParametersResult
+from rcl_interfaces.srv import GetParameters
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -89,6 +92,11 @@ def quaternion_message_to_matrix(q):
     return fc.quaternion_to_matrix(q.x, q.y, q.z, q.w)
 
 
+def description_is_read_only(text):
+    """Return True if a robot_description text says that the arm driver is read_only."""
+    return re.search(r'name="read_only"\s*>\s*true\s*<', text) is not None
+
+
 def format_status(output):
     """Return the text of the state topic: STATE REASON key=value ..."""
     parts = [output.state, output.reason.replace(' ', '_') if output.reason else '-']
@@ -116,6 +124,17 @@ class VrFollowNode(Node):
         self.declare_parameter('joy_topic', JOY_TOPIC)
         self.declare_parameter('pose_topic', POSE_TOPIC)
         self.config = self._read_config()
+        if self.config.floor_z < fc.FLOOR_SAFE:
+            # a floor under 0.045 m is only for an arm that cannot move (c0 of p6_real_check.md)
+            if not self._arm_is_read_only():
+                raise RuntimeError(
+                    'floor_z %.3f m is under %.3f m but the arm is not confirmed read_only (the '
+                    'robot_description of /robot_state_publisher): refused' % (
+                        self.config.floor_z, fc.FLOOR_SAFE))
+            self.get_logger().warning(
+                'floor_z %.3f m (default %.3f m): the arm is read_only, so it cannot move. Use '
+                'the default floor from the writing mode on.' % (
+                    self.config.floor_z, fc.FLOOR_SAFE))
         self.buttons = {name: int(self.get_parameter(name).value) for name in BUTTON_PARAMETERS}
         if any(index < 0 for index in self.buttons.values()):
             raise ValueError('the button numbers must be 0 or more')
@@ -160,6 +179,20 @@ class VrFollowNode(Node):
             '(buttons %s). Nothing is sent until the clutch is pressed.' % (
                 self.config.rate_hz, self.config.point_time_s, self.config.scale,
                 self.config.clutch_mode, self.buttons))
+
+    def _arm_is_read_only(self):
+        """Return True if the robot_description says that the arm driver is read_only."""
+        client = self.create_client(GetParameters, '/robot_state_publisher/get_parameters')
+        if not client.wait_for_service(timeout_sec=5.0):
+            return False
+        request = GetParameters.Request()
+        request.names = ['robot_description']
+        future = client.call_async(request)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+        if not future.done() or not future.result().values:
+            return False
+        text = future.result().values[0].string_value
+        return description_is_read_only(text)
 
     # ----------------------------------------------------------------- parameters
 
@@ -339,10 +372,14 @@ class VrFollowNode(Node):
 def main(args=None):
     """Run the node until Ctrl-C (SIGINT). Nothing is sent while the clutch is released."""
     rclpy.init(args=args)
+    exit_code = 0
     node = None
     try:
         node = VrFollowNode()
         rclpy.spin(node)
+    except (RuntimeError, ValueError) as error:
+        print('vr_follow stopped: %s' % error, file=sys.stderr)
+        exit_code = 2
     except KeyboardInterrupt:
         pass
     finally:
@@ -350,6 +387,8 @@ def main(args=None):
             node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == '__main__':
