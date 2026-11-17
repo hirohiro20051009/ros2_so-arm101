@@ -236,7 +236,7 @@ python3 tools/diff_mode_run.py --route direct --max-steps 1 --offset 0.005 0 0 \
 |---|---|---|
 | Goal の elbow_flex（Joints タブの値） | **+90°** | **+91° 超** → Plan しない |
 | 実行の開始位置と実測の差 | 5 関節とも 0.01 rad 以内（`allowed_start_tolerance`） | 拒否された → 実測を読み直して計画し直す（再試行は 1 回まで。2 回目も拒否なら報告） |
-| 着いた後の読み（`e_end_pose.txt`）と `a_start_pose.txt` の差 | 最大 0.02 rad 以内（V8 の実績は最大 0.0184 rad）。elbow の差は 0.01 rad 以内 | 0.03 rad 超 |
+| 着いた後の読み（`e_end_pose.txt`）と、**送った戻し先の目標値**（RViz の Joints タブに入れた整数の度を rad に直した値）の差 | 5 関節とも **0.0082 rad 以内**（V8 の実績の最大。MoveIt の終点のずれ。段 c の T と同じ扱い）。a 段の読みとは比べない（a の elbow の許容幅 88.0〜92.20° のせいで、正常でも差が大きく出うる） | **0.02 rad 超** |
 | A のログ | `clamp: '` の WARN が **0 行** | 1 行でもあれば報告（目標が上限を超えた印） |
 
 ## 段 f. 後始末
