@@ -23,6 +23,7 @@
 import csv
 import fcntl
 import hashlib
+import inspect
 import math
 from pathlib import Path
 import threading
@@ -697,3 +698,485 @@ def test_investigating_needs_no_csv_but_recording_does(tmp_path):
     loop = rec.RecordLoop(io, _chain(), MOUNT, None, IDENTITY)
     assert loop.run('P01') == rec.EXIT_REFUSED
     assert io.waits == [] and list(tmp_path.iterdir()) == []
+
+
+# ------------------------------------------------------------------ C4: verification (pure)
+# The poses are the q_goal of the 4 points of C4-0 (pitch -91 deg, a mark at (0.22, +0.08)).
+REF = MOUNT.reference_point
+C4_POSES = [np.radians(q) for q in (
+    [-26.4, -1.4, 2.8, 89.6, 0.0], [-23.8, 8.0, -3.5, 86.5, 0.0],
+    [-23.8, 8.1, -9.1, 92.0, 0.0], [-21.7, 18.2, -17.7, 90.5, 0.0])]
+
+
+def _truth(delta_deg, chain=None):
+    """Return the points (q_read, physical tip) of a arm whose true angle is read + delta."""
+    chain = chain or _chain()
+    d = np.radians(delta_deg)
+    return [(q, rec.jaw_tip(chain, q + np.array([0.0, d[0], d[1], 0.0, 0.0]), REF))
+            for q in C4_POSES]
+
+
+def test_the_rear_edge_frame_becomes_base_link_x():
+    assert rec.base_x_from_rear(0.221) == pytest.approx(0.1999, abs=1e-9)
+    assert rec.base_x_from_rear(0.0) == pytest.approx(-0.0211)
+
+
+def test_the_mark_in_base_link_from_the_ruler_measurements():
+    x, y, z = rec.mark_in_base(0.221, 0.0, 0.0, 0.0005)
+    assert (x, y) == (pytest.approx(0.1999), 0.0) and z == pytest.approx(-0.0024 + 0.0005)
+
+
+def test_a_desk_higher_than_the_mounting_plane_is_a_positive_difference():
+    delta, thickness = 0.003, 0.001  # the desk is 3 mm higher, ID 1 is 1 mm thick
+    face = rec.tag_face_z(delta, thickness)
+    assert face == pytest.approx(0.0016)
+    z = 0.0596
+    expected = rec.height_above_mount(z) - delta - thickness
+    assert rec.height_above_face(z, face) == pytest.approx(expected)
+    assert rec.height_above_face(z, face) == pytest.approx(0.058)
+
+
+def test_a_desk_lower_than_the_mounting_plane_is_a_negative_difference():
+    delta, thickness = -0.002, 0.0005  # the desk is 2 mm lower
+    face = rec.tag_face_z(delta, thickness)
+    assert face == pytest.approx(-0.0039)
+    z = 0.0596
+    expected = rec.height_above_mount(z) - delta - thickness
+    assert rec.height_above_face(z, face) == pytest.approx(expected)
+    assert rec.height_above_face(z, face) == pytest.approx(0.0635)
+
+
+def test_the_height_above_the_mounting_plane_is_the_height_of_f6():
+    assert rec.height_above_mount(0.05249) == pytest.approx(0.05489)  # F6: 54.89 mm
+
+
+def test_a_hover_target_over_the_mark_with_the_floor_respected():
+    mark = rec.mark_in_base(0.221, 0.0, 0.0, 0.0)
+    hover = rec.hover_target(mark, 0.0, 0.062)
+    assert hover.ok and hover.reason == ''
+    assert hover.target == pytest.approx((0.1999, 0.0, 0.0596))
+    assert hover.h_mount == pytest.approx(0.062) and hover.h_face == pytest.approx(0.062)
+
+
+def test_a_hover_target_below_the_floor_is_refused_with_the_reason():
+    mark = rec.mark_in_base(0.221, 0.0, 0.0, 0.0)
+    hover = rec.hover_target(mark, 0.0, 0.055)  # z = 0.0526 m
+    assert not hover.ok and 'below the floor' in hover.reason
+    assert hover.target[2] == pytest.approx(0.0526)
+
+
+def test_a_higher_desk_raises_the_target_for_the_same_height_above_the_face():
+    mark = rec.mark_in_base(0.221, 0.0, 0.003, 0.001)
+    hover = rec.hover_target(mark, 0.02, 0.058)
+    assert hover.ok and hover.target == pytest.approx((0.2199, 0.0, 0.0596))
+    assert hover.h_face == pytest.approx(0.058) and hover.h_mount == pytest.approx(0.062)
+
+
+def test_a_lower_desk_lowers_the_target_for_the_same_height_above_the_face():
+    mark = rec.mark_in_base(0.221, 0.0, -0.002, 0.0005)
+    assert rec.hover_target(mark, 0.0, 0.057).target[2] == pytest.approx(0.0531)
+    assert not rec.hover_target(mark, 0.0, 0.057).ok  # 0.0531 m is below the floor
+
+
+def test_the_command_of_ik_move_is_the_one_that_is_typed():
+    assert rec.ik_move_command((0.2, 0.0, 0.0596), -91.0, 0.0) == (
+        'python3 -u tools/ik_move_run.py --goal 0.2000 0.0000 0.0596 --pitch-deg -91.0 '
+        '--roll-deg 0.0')
+    assert rec.ik_move_command((0.2, 0.0, 0.0596), -91.0, 0.0, dry_run=True).startswith(
+        'python3 -u tools/ik_move_run.py --dry-run --goal ')
+
+
+def test_the_physical_jaw_tip_is_the_mark_plus_the_ruler_reading():
+    phys = rec.physical_jaw_tip((0.2, 0.0, -0.0024), 0.01, -0.005, 0.0556)
+    assert phys == pytest.approx((0.21, -0.005, 0.0532))
+
+
+def test_the_fraction_is_zero_at_the_reading_one_at_the_reference_and_half_between():
+    read, ref = np.array([0.2, 0.0, 0.05]), np.array([0.2, 0.0, 0.056])
+    assert rec.point_errors(read, read, ref)['fraction'] == pytest.approx(0.0)
+    assert rec.point_errors(ref, read, ref)['fraction'] == pytest.approx(1.0)
+    middle = rec.point_errors((read + ref) / 2.0, read, ref)
+    assert middle['fraction'] == pytest.approx(0.5) and middle['d'] == pytest.approx(0.006)
+
+
+def test_the_part_of_the_tip_off_the_line_is_reported_apart():
+    read, ref = np.zeros(3), np.array([0.006, 0.0, 0.0])
+    errors = rec.point_errors(np.array([0.003, 0.002, 0.0]), read, ref)
+    assert errors['fraction'] == pytest.approx(0.5) and errors['perp'] == pytest.approx(0.002)
+
+
+def test_two_equal_points_have_no_fraction():
+    errors = rec.point_errors(np.ones(3), np.ones(3), np.ones(3))
+    assert errors['fraction'] is None and errors['d'] == 0.0
+
+
+def test_the_jaw_tip_is_the_tcp_plus_the_reference_point_in_the_gripper_axes():
+    chain = _chain()
+    tcp, rotation = chain.fk(Q_T)
+    tip = rec.jaw_tip(chain, Q_T, REF)
+    assert tip == pytest.approx(np.asarray(tcp) + np.asarray(rotation) @ np.asarray(REF))
+    assert np.linalg.norm(tip - np.asarray(tcp)) == pytest.approx(0.0063)
+
+
+def test_applying_the_zero_offset_twice_would_move_the_tip_by_about_23_mm():
+    chain = _chain()  # F6: the elbow correction of -6.3 deg moves the TCP of T by 23.3 mm
+    twice = Q_T + np.array([0.0, 0.0, math.radians(-6.3), 0.0, 0.0])
+    moved = np.linalg.norm(rec.jaw_tip(chain, twice, (0.0, 0.0, 0.0))
+                           - rec.jaw_tip(chain, Q_T, (0.0, 0.0, 0.0)))
+    assert moved == pytest.approx(0.0233, abs=0.0005)
+
+
+def test_the_age_of_a_transform_is_now_minus_its_stamp():
+    assert rec.tf_age_s(2_500_000_000, 1_000_000_000) == pytest.approx(1.5)
+
+
+def test_the_difference_of_the_reference_and_the_goal():
+    vector, largest = rec.goal_difference([0.1, 0.2, 0.3, 0.4, 0.5], [0.1, 0.19, 0.31, 0.4, 0.5])
+    assert largest == pytest.approx(0.01) and vector[1] == pytest.approx(0.01)
+    assert rec.goal_difference(None, [0.0] * 5) == (None, None)
+
+
+def test_the_tilt_of_a_tag_face_from_the_horizontal():
+    assert rec.tag_tilt_deg((0.0, 0.0, 0.0, 1.0)) == pytest.approx(0.0)
+    half = math.radians(10.0) / 2.0
+    assert rec.tag_tilt_deg((math.sin(half), 0.0, 0.0, math.cos(half))) == pytest.approx(10.0)
+    assert rec.tag_tilt_deg((math.sqrt(0.5), 0.0, 0.0, math.sqrt(0.5))) == pytest.approx(90.0)
+
+
+def _errors(fractions, d=0.007):
+    read = np.zeros(3)
+    ref = np.array([d, 0.0, 0.0])
+    return [rec.point_errors(read + f * (ref - read), read, ref) for f in fractions]
+
+
+def test_points_near_the_reference_decide_b():
+    verdict, mean, std, used = rec.decide_ab(_errors([0.9, 1.0, 1.1, 0.8]))
+    assert (verdict, used) == ('B', 4) and mean == pytest.approx(0.95)
+
+
+def test_points_near_the_reading_decide_a():
+    verdict, mean, _, used = rec.decide_ab(_errors([0.1, 0.0, -0.1]))
+    assert (verdict, used) == ('A', 3) and mean == pytest.approx(0.0)
+
+
+def test_only_the_points_with_a_difference_of_4_mm_or_more_decide():
+    low = _errors([1.0, 1.0], d=0.0039)  # 3.9 mm: not used
+    assert rec.decide_ab(low + _errors([0.0, 0.1]))[0] == 'A'
+    assert rec.decide_ab(low + _errors([0.0, 0.1]))[3] == 2
+    assert rec.decide_ab(_errors([0.0, 0.1], d=0.004))[3] == 2  # 4.0 mm: used
+
+
+def test_fewer_than_two_points_with_a_difference_cannot_decide():
+    errors = _errors([1.0], d=0.007) + _errors([1.0, 1.0], d=0.003)
+    verdict, mean, std, used = rec.decide_ab(errors)
+    assert (verdict, mean, std, used) == ('UNDECIDED', None, None, 1)
+
+
+def test_exactly_half_is_not_decided():
+    exact = [{'fraction': 0.25, 'd': 0.007}, {'fraction': 0.75, 'd': 0.007}]
+    assert rec.decide_ab(exact)[0:2] == ('UNDECIDED', 0.5)
+
+
+def test_the_deltas_that_made_the_points_are_found_again():
+    chain = _chain()
+    estimate = rec.estimate_delta(chain, _truth((0.5, -1.5), chain), REF)
+    assert estimate.ok and estimate.delta_deg == pytest.approx((0.5, -1.5), abs=0.1)
+    assert estimate.rms_m < 5e-4  # a linear fit of a small nonlinear effect
+
+
+def test_a_positive_delta_means_the_true_angle_is_larger_than_the_reading():
+    estimate = rec.estimate_delta(_chain(), _truth((2.0, 0.0)), REF)
+    assert estimate.delta_deg[0] > 1.9 and abs(estimate.delta_deg[1]) < 0.2
+
+
+def test_the_ruler_part_of_the_uncertainty_is_the_formula_of_the_least_squares():
+    chain = _chain()
+    stacked = np.vstack([rec.jaw_jacobian(chain, q, REF) for q in C4_POSES])
+    expected = 0.002 * np.sqrt(np.diag(np.linalg.inv(stacked.T @ stacked))) * 180.0 / math.pi
+    estimate = rec.estimate_delta(chain, _truth((0.0, 0.0), chain), REF, ruler_m=0.002)
+    assert estimate.sd_ruler_deg == pytest.approx(tuple(expected))
+    assert max(estimate.sd_ruler_deg) < 1.0  # C4-0: about 0.5 to 0.6 deg
+
+
+def test_a_shift_common_to_every_point_moves_the_estimate_as_the_common_part_says():
+    chain = _chain()
+    base = rec.estimate_delta(chain, _truth((0.0, 0.0), chain), REF, common_m=(0.0, 0.0, 0.001))
+    shifted = [(q, p + np.array([0.0, 0.0, 0.001])) for q, p in _truth((0.0, 0.0), chain)]
+    moved = rec.estimate_delta(chain, shifted, REF)
+    change = np.array(moved.delta_deg) - np.array(base.delta_deg)
+    assert np.abs(change) == pytest.approx(np.array(base.sd_common_deg), abs=0.02)
+    assert max(base.sd_common_deg) > 0.1  # C4-0: about 0.45 deg per mm of z
+    assert base.sd_total_deg[0] >= base.sd_common_deg[0]
+
+
+def test_deltas_that_cannot_be_told_apart_are_refused(monkeypatch):
+    parallel = np.array([[1.0, 2.0], [0.0, 0.0], [1.0, 2.0]])
+    monkeypatch.setattr(rec, 'jaw_jacobian', lambda *args, **kwargs: parallel)
+    estimate = rec.estimate_delta(_chain(), _truth((0.5, -1.5)), REF)
+    assert not estimate.ok and 'not separated' in estimate.reason
+
+
+def test_fewer_than_two_points_give_no_estimate():
+    assert not rec.estimate_delta(_chain(), _truth((0.5, -1.5))[:1], REF).ok
+
+
+def test_no_function_takes_a_zero_offset_and_the_decisions_do_not_take_the_camera():
+    for name in ('jaw_tip', 'jaw_jacobian', 'physical_jaw_tip', 'point_errors', 'decide_ab',
+                 'hover_target', 'estimate_delta', 'goal_difference'):
+        parameters = set(inspect.signature(getattr(rec, name)).parameters)
+        assert not any(word in p for p in parameters for word in ('delta', 'offset', 'zero')), name
+        assert not any('tfb' in p or 'tag' in p for p in parameters), name
+
+
+def test_a_verification_row_is_written_once_per_label(tmp_path):
+    path = tmp_path / 'verify.csv'
+    row = {'time': '1.0', 'q_read_lift': '0.1', 'tfb_tag1_age_s': '0.5',
+           'tfb_tag1_used_for_judgement': '0'}
+    assert rec.write_verify_row(path, 'V01', row) == 1
+    assert rec.write_verify_row(path, 'V02', row) == 2
+    with pytest.raises(rec.SessionError):
+        rec.write_verify_row(path, 'V01', row)
+    with pytest.raises(rec.SessionError):
+        rec.write_verify_row(path, 'bad label', row)
+    with pytest.raises(rec.SessionError):
+        rec.write_verify_row(path, 'V03', dict(row, nonsense='1'))
+    with open(path, newline='', encoding='utf-8') as f:
+        rows = list(csv.DictReader(f))
+    assert [r['label'] for r in rows] == ['V01', 'V02']
+    assert rows[0]['tfb_tag1_used_for_judgement'] == '0' and rows[0]['tfb_tag1_age_s'] == '0.5'
+    assert list(rows[0]) == list(rec.VERIFY_COLUMNS)
+
+
+def test_the_goal_of_the_last_row_of_the_csv_of_ik_move_is_read(tmp_path):
+    path = tmp_path / 'move.csv'
+    path.write_text('input,q_goal,label\n'
+                    'goal,0.1 0.2 0.3 0.4 0.5,a\n'
+                    'goal,-0.00307 -0.38742 0.55160 1.44076 0.00000,b\n', encoding='utf-8')
+    assert rec.read_move_goal(path) == pytest.approx([-0.00307, -0.38742, 0.5516, 1.44076, 0.0])
+    path.write_text('input,q_goal\ngoal,0.1 0.2 0.3 0.4\n', encoding='utf-8')
+    with pytest.raises(rec.SessionError):
+        rec.read_move_goal(path)
+
+
+# ----------------------------------------------- C4: tools/camera_verify_run.py (static and run)
+VERIFY_TOOL = Path(__file__).resolve().parents[3] / 'tools' / 'camera_verify_run.py'
+IK_PACKAGE_XML = Path(__file__).resolve().parents[2] / 'so_arm101_ik' / 'package.xml'
+# control_msgs is not declared in the package.xml of so_arm101_camera: it comes through the
+# exec_depend of so_arm101_ik (the same as tools/ik_move_run.py). It is handled by the clean-up of
+# the exec_depend that follows C4.
+VERIFY_IMPORTS = {
+    'argparse', 'math', 'os', 'sys', 'time', 'ament_index_python', 'control_msgs', 'numpy',
+    'rclpy', 'sensor_msgs', 'so_arm101_camera', 'so_arm101_ik', 'tf2_ros'}
+VERIFY_FORBIDDEN = {
+    'create_publisher', 'create_client', 'create_service', 'ActionClient', 'ActionServer',
+    'publish', 'call_async', 'Serial', 'serial', 'pyrealsense2', 'subprocess', 'Popen', 'socket',
+    'TransformBroadcaster', 'StaticTransformBroadcaster', 'sendTransform', 'write_text',
+    'write_bytes', 'truncate', 'unlink', 'remove', 'rename', 'replace', 'rmtree', 'chmod',
+    'ctypes', 'importlib', 'eval', 'exec', 'fork', 'forkpty', 'killpg', 'system', 'popen', 'kill'}
+VERIFY_ARGUMENTS = {
+    '--verify-plan', '--verify-survey', '--verify-record', '--verify-report', '--mark-rear',
+    '--desk-minus-mount', '--thickness', '--offset', '--pitch-deg', '--roll-deg', '--start-deg',
+    '--csv', '--label', '--move-csv', '--ruler', '--ruler-mm', '--common-mm', '--tag-mount',
+    '--apriltag-yaml', '--urdf', '--calibration-yaml'}
+
+
+def _verify_tree():
+    import ast
+    return ast.parse(VERIFY_TOOL.read_text(encoding='utf-8'))
+
+
+def _verify_tool():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('camera_verify_run', VERIFY_TOOL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_verify_tool_imports_only_the_allowed_modules():
+    import ast
+    import sys
+    imported = set()
+    for node in ast.walk(_verify_tree()):
+        if isinstance(node, ast.Import):
+            imported |= {a.name.split('.')[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            imported.add(node.module.split('.')[0])
+    assert imported <= VERIFY_IMPORTS, imported - VERIFY_IMPORTS
+    assert {m for m in imported if m not in sys.stdlib_module_names} <= VERIFY_IMPORTS
+
+
+def test_control_msgs_comes_through_the_exec_depend_of_so_arm101_ik():
+    import xml.etree.ElementTree as ElementTree
+    root = ElementTree.parse(IK_PACKAGE_XML).getroot()
+    assert 'control_msgs' in {e.text for e in root.findall('exec_depend')}
+
+
+def test_the_verify_tool_names_nothing_that_sends_or_starts_a_process_or_removes_a_file():
+    import ast
+    names = set()
+    for node in ast.walk(_verify_tree()):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names |= {a.name.split('.')[-1] for a in node.names}
+    assert not names & VERIFY_FORBIDDEN, names & VERIFY_FORBIDDEN
+    assert not {n for n in names if n.startswith(('exec', 'spawn', 'kill'))}
+
+
+def test_the_verify_tool_does_not_call_open():
+    import ast
+    calls = [n.lineno for n in ast.walk(_verify_tree()) if isinstance(n, ast.Call)
+             and ((isinstance(n.func, ast.Name) and n.func.id == 'open')
+                  or (isinstance(n.func, ast.Attribute) and n.func.attr == 'open'))]
+    assert not calls, calls
+
+
+def test_the_verify_tool_subscribes_to_the_joint_states_and_the_controller_state_only():
+    import ast
+    tree = _verify_tree()
+    constants = {t.id: node.value.value for node in tree.body if isinstance(node, ast.Assign)
+                 for t in node.targets if isinstance(t, ast.Name)
+                 and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)}
+    topics = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'create_subscription'):
+            topic = node.args[1]
+            topics.append(topic.value if isinstance(topic, ast.Constant) else constants[topic.id])
+    assert sorted(topics) == ['/arm_controller/controller_state', '/joint_states']
+
+
+def test_the_arguments_of_the_verify_tool_are_exactly_the_expected_ones():
+    import ast
+    options = set()
+    for node in ast.walk(_verify_tree()):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == 'add_argument'):
+            options |= {a.value for a in node.args
+                        if isinstance(a, ast.Constant) and str(a.value).startswith('--')}
+    assert options == VERIFY_ARGUMENTS
+
+
+def test_the_decisions_of_the_verify_tool_do_not_take_the_camera():
+    import ast
+    calls = [n for n in ast.walk(_verify_tree()) if isinstance(n, ast.Call)
+             and isinstance(n.func, ast.Attribute) and n.func.attr in ('decide_ab',
+                                                                       'estimate_delta')]
+    assert len(calls) == 2
+    for call in calls:
+        assert 'tfb' not in ast.unparse(call) and 'tag' not in ast.unparse(call)
+
+
+def test_the_plan_needs_no_node_and_the_others_check_before_the_node():
+    import ast
+    functions = {n.name: n for n in _verify_tree().body if isinstance(n, ast.FunctionDef)}
+    plan_names = {n.id for n in ast.walk(functions['run_plan']) if isinstance(n, ast.Name)}
+    assert not plan_names & {'rclpy', 'VerifyNode'}
+    for name in ('run_survey', 'run_record'):
+        first = {}
+        for node in ast.walk(functions[name]):
+            if isinstance(node, ast.Call):
+                func = node.func
+                called = func.attr if isinstance(func, ast.Attribute) else getattr(func, 'id', '')
+                first[called] = min(first.get(called, node.lineno), node.lineno)
+        assert first['load_model'] < first['init'] < first['VerifyNode'], name
+
+
+def test_no_line_of_the_verify_tool_is_longer_than_99_characters():
+    lines = VERIFY_TOOL.read_text(encoding='utf-8').splitlines()
+    assert [i + 1 for i, line in enumerate(lines) if len(line) > 99] == []
+
+
+def test_the_verify_tool_refuses_a_run_without_the_measured_values(capsys):
+    tool = _verify_tool()
+    with pytest.raises(SystemExit):
+        tool.parse_args(['--verify-plan', '--offset', '0', '0.062'])
+    with pytest.raises(SystemExit):
+        tool.parse_args(['--verify-record', '--mark-rear', '0.221', '0', '--desk-minus-mount',
+                         '0', '--thickness', '0', '--offset', '0', '0.062'])
+    args = tool.parse_args(['--verify-report', '--csv', 'x.csv'])
+    assert tool.check_args(args) == []
+
+
+def test_the_plan_prints_the_targets_the_commands_and_the_heights(capsys):
+    tool = _verify_tool()
+    code = tool.main(['--verify-plan', '--mark-rear', '0.221', '0', '--desk-minus-mount', '0',
+                      '--thickness', '0', '--offset', '0', '0.062', '--offset', '0.02', '0.062'])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert '--goal 0.1999 0.0000 0.0596 --pitch-deg -91.0 --roll-deg 0.0' in out
+    assert '--dry-run --goal 0.2199 0.0000 0.0596' in out
+    assert 'H 0.0620 m' in out and 'above the ID 1 face 0.0620 m' in out
+
+
+def test_the_plan_refuses_a_target_below_the_floor(capsys):
+    tool = _verify_tool()
+    code = tool.main(['--verify-plan', '--mark-rear', '0.221', '0', '--desk-minus-mount', '0',
+                      '--thickness', '0', '--offset', '0', '0.055'])
+    out = capsys.readouterr().out
+    assert code == rec.EXIT_REFUSED and 'REFUSED' in out and '--goal' not in out
+
+
+def test_a_higher_desk_changes_the_target_of_the_plan(capsys):
+    tool = _verify_tool()
+    tool.main(['--verify-plan', '--mark-rear', '0.221', '0', '--desk-minus-mount', '0.003',
+               '--thickness', '0.001', '--offset', '0', '0.058'])
+    assert '--goal 0.1999 0.0000 0.0596' in capsys.readouterr().out
+
+
+def _report_csv(tmp_path, physical):
+    """Return the path of a CSV of 4 points; physical = 'read' or 'ref' (where the tip is)."""
+    chain = _chain()
+    path = tmp_path / 'verify.csv'
+    mark = rec.mark_in_base(0.221, 0.0, 0.0, 0.0)
+    for i, q in enumerate(C4_POSES):
+        q_ref = q - np.array([0.0, 0.0, 0.034, 0.0, 0.0])
+        fk_read = rec.jaw_tip(chain, q, REF)
+        fk_ref = rec.jaw_tip(chain, q_ref, REF)
+        phys = fk_read if physical == 'read' else fk_ref
+        ruler = (phys[0] - mark[0], phys[1] - mark[1], phys[2] - mark[2])
+        errors = rec.point_errors(phys, fk_read, fk_ref)
+        row = rec.build_verify_row(
+            1.0 + i, (0.221, 0.0), 0.0, 0.0, offset=(0.0, 0.062), q_read=q, q_ref=q_ref,
+            ruler=ruler, fk_read=fk_read, fk_ref=fk_ref, phys=phys, errors=errors,
+            tfb=(0.1, 0.1, 0.1, 5.0), zero_offset={'elbow_flex': -6.3})
+        rec.write_verify_row(path, f'V{i + 1:02d}', row)
+    survey = rec.build_verify_row(0.0, (0.221, 0.0), 0.0, 0.0, tfb=(0.2005, 0.0, -0.0024, 0.4))
+    rec.write_verify_row(path, 'S01', survey)
+    return path
+
+
+@pytest.mark.parametrize('physical, verdict', [('ref', 'B'), ('read', 'A')])
+def test_the_report_decides_from_the_ruler_and_not_the_camera(tmp_path, capsys, physical, verdict):
+    tool = _verify_tool()
+    path = _report_csv(tmp_path, physical)
+    assert tool.main(['--verify-report', '--csv', str(path)]) == 0
+    out = capsys.readouterr().out
+    assert f'input): {verdict}\n' in out
+    assert '4 points used' in out and 'REFERENCE VALUE (not a result)' in out
+    assert 'S01  (a) tfb_tag1 - ruler' in out  # the survey row, with the camera
+    assert 'delta is not written anywhere' in out
+
+
+def test_a_verification_row_has_the_heights_in_both_bases_and_never_uses_the_camera():
+    chain = _chain()
+    fk = rec.jaw_tip(chain, Q_T, REF)
+    row = rec.build_verify_row(1.0, (0.221, 0.0), 0.003, 0.001, fk_read=fk, fk_ref=fk,
+                               tfb=(0.2, 0.0, 0.0, 0.7))
+    assert set(row) == set(rec.VERIFY_COLUMNS)
+    assert row['tfb_tag1_used_for_judgement'] == '0' and row['tfb_tag1_age_s'] == '0.700000'
+    assert float(row['fk_read_h_mount']) == pytest.approx(fk[2] + 0.0024, abs=1e-6)
+    assert float(row['fk_read_h_face']) == pytest.approx(fk[2] - 0.0016, abs=1e-6)  # face z
+    assert row['q_read_pan'] == '' and row['zero_offset_deg'] == ''
+
+
+def test_the_rows_of_a_verification_csv_are_read_back(tmp_path):
+    path = tmp_path / 'verify.csv'
+    rec.write_verify_row(path, 'V01', rec.build_verify_row(1.0, (0.221, 0.0), 0.0, 0.0,
+                                                           q_read=Q_T, still=True))
+    rows = rec.read_verify_rows(path)
+    assert [r['label'] for r in rows] == ['V01'] and rows[0]['still'] == '1'
+    assert float(rows[0]['q_read_elbow']) == pytest.approx(math.radians(30.0), abs=1e-6)
