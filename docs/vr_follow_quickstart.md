@@ -28,6 +28,7 @@ source install/setup.bash
 
 - **同じこの腕を、別のマシンにつなぐ場合**: リポジトリの `follower_calibration.yaml` を**そのまま使う**。腕の EEPROM と一致しているので、**校正のやり直しは不要（EEPROM は書き直さない）**。変えるのは `zero_offset_deg` だけ: 0 にする（行ごと消してもよい。下の項）。
 - **別の腕の場合**: リポジトリの yaml は使えない。**その腕で校正をやり直す**（下の手順）。`zero_offset_deg` は 0。
+  - `src` の yaml を書き換えず、コピーで校正する方法（遠隔の作業者向けのコマンド一覧）: `docs/calibration_new_arm_remote.md`。
 
 別の腕の校正の手順は `docs/so_arm101_calibration_check.md`（C0〜C3）と `docs/stage2c_plan.md`。要点（ツールは `ros2 run so_arm101_calibration so_arm101_calib`）:
 
@@ -51,11 +52,12 @@ cd ~/ros2_so-arm101
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 # 実機（書き込みモード。腕が動く。トルク ON）
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false torque_limit:=500
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false torque_limit:=500 calibration_file:=<その腕の yaml のパス>
 # モック（腕なし。まず、これで VR 側の動きを確かめてよい）
 ros2 launch so_arm101_bringup bringup.launch.py mock:=true
 ```
 
+- `calibration_file:=` は、**別の腕では `docs/calibration_new_arm_remote.md` で作ったコピー（`~/so_arm101_check/follower_calibration_new_arm.yaml`）を指定する。開発用の腕では省略できる**（省略するとリポジトリの yaml が使われる）。別の腕で省略すると、リポジトリの yaml（開発用の腕のもの）が使われ、書き込みモードは起動を拒否する。
 - `read_only:=true`（既定）の実機は、サーボに書かない（腕は動かない。指令は進むが測定は動かない）。
 - bringup は、**俯瞰カメラを起動しない**（`so_arm101_camera` は別。ここでは使わない）。
 - 実機は、起動前に、腕を折りたたみ姿勢にして支える。起動で `arm_controller`・`gripper_controller`・`joint_state_broadcaster` が active になる（`ros2 control list_controllers`）。
