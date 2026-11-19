@@ -8,6 +8,7 @@
 - **git 管理のファイル（`src/` の yaml を含む）は、この手順では一切変えない。** yaml は、その腕専用のコピー（`$D/follower_calibration_new_arm.yaml`）を作って、そのコピーだけを書き換える。
 - **リポジトリの yaml・手順書（`docs/so_arm101_calibration_check.md` など）にある、開発用の腕の値は、合否に使わない。** 次のものが該当する: `pan 135 / 743 / 3452…` などの EEPROM の期待値、測定中の表の「あと N」（前回の端まで）、`compare` の「今の yaml との差」「zero_shift」の表。別の腕では違って当然。
 - 実行するのは作業者だけ。**止め方は Ctrl-C だけ**（`kill -9`・`pkill`・`killall` は使わない）。`ros2 daemon` は触らない（stop も start もしない）。`ros2 node list` には必ず `--no-daemon` を付ける。
+- **引数のパスに `~` を使わない（`$HOME` か絶対パスを使う。`:=` の後ろの `~` は展開されない）。** `calibration_file:=~/…` と書くと、ドライバに `~` のまま渡り、`cannot read calibration '~/…'; bad file` で起動に失敗する。この手順のコマンドは `$D`・`$YAML` などの変数を使う（シェルが展開するので問題ない）。
 - 想定外の表示が出たら、そこで止めて、ログを貼って報告する。次の手順には進まない。
 - コマンドの `exit=` は、パイプ（`| tee`）の直後の同じ行で読む。`$?` は使わない（`tee` の値になる）。
 - 端末は**新しい端末で、conda を activate していない状態**で。新しい端末を開くたびに、0 章の「毎回の変数」を実行する（`cp` はもう実行しない）。
@@ -15,7 +16,7 @@
 ### 終わった後の連絡事項（依頼者へ）
 次をすべて送る:
 1. 各コマンドの **`exit=` の値**: backup、restore の dry-run、measure（1 回目・2 回目）、compare、apply の dry-run、apply の書き込み。
-2. **ログのファイル名**（すべて `$D` = `~/so_arm101_check/` の中）: `calib_new_backup.log`、`calib_new_restore_dry.log`、`calib_new_measure_1.log`、`calib_new_measure_2.log`、`calib_new_compare.log`、`calib_new_apply_dry.log`、`calib_new_apply.log`、`calib_new_readonly.log`。
+2. **ログのファイル名**（すべて `$D` = `$HOME/so_arm101_check/` の中）: `calib_new_backup.log`、`calib_new_restore_dry.log`、`calib_new_measure_1.log`、`calib_new_measure_2.log`、`calib_new_compare.log`、`calib_new_apply_dry.log`、`calib_new_apply.log`、`calib_new_readonly.log`。
 3. **`compare` の「最大の差」の行**（`calib_new_compare.log` にある）。
 4. **起動の `[diag]` の行**（8 章の `grep` の出力そのまま。`servo settings vs reference` の行も含む）。
 5. ファイル 4 つ: `eeprom_backup_lerobot_orig.json`、`measure_new_1.json`、`measure_new_2.json`、`follower_calibration_new_arm.yaml`。
@@ -69,7 +70,7 @@ ros2 pkg executables so_arm101_calibration
 - 出どころ: `docs/so_arm101_calibration_check.md:10-17`（共通の約束 1〜3）。
 
 ## 2. backup（読み取り専用。腕はトルク OFF）
-バックアップのファイルは `$D/eeprom_backup_lerobot_orig.json`（既定の保存先は `~/so_arm101_check/eeprom_backup_<日時>.json`。`main.cpp:273-277`）。
+バックアップのファイルは `$D/eeprom_backup_lerobot_orig.json`（既定の保存先は `$HOME/so_arm101_check/eeprom_backup_<日時>.json`。`main.cpp:273-277`）。
 `backup` は、同じ名前のファイルがあると**確認なしで上書きする**（`eeprom_backup.cpp:185`）。次の 2 段で進める。
 
 **(a) 単独で確認する:**
@@ -179,7 +180,7 @@ git -C $WS status --short
 `so_arm101_calib` 自体がこの PC でビルド済みであること（1 章の `ros2 pkg executables` に出ること）だけが前提。
 
 ## 8. 読み取り専用で起動 → [diag] の確認 → 停止
-**この腕で起動するときは、毎回 `calibration_file:=<コピーのパス>`（ここでは `calibration_file:=$YAML`）が要る。** 付けないと、リポジトリの yaml（開発用の腕のもの）が使われる。読み取り専用では WARN のまま起動し、書き込みモード（`read_only:=false`）では起動を拒否する。
+**この腕で起動するときは、毎回 `calibration_file:=<コピーのパス>`（ここでは `calibration_file:=$YAML`）が要る。引数のパスに `~` を使わない（`$HOME` か絶対パスを使う。`:=` の後ろの `~` は展開されない）。** 付けないと、リポジトリの yaml（開発用の腕のもの）が使われる。読み取り専用では WARN のまま起動し、書き込みモード（`read_only:=false`）では起動を拒否する。
 `read_only` の既定は true（`bringup.launch.py:145`）。トルクは入らず、腕は動かない。
 
 ```bash

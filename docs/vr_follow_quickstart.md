@@ -52,12 +52,13 @@ cd ~/ros2_so-arm101
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 # 実機（書き込みモード。腕が動く。トルク ON）
-ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false torque_limit:=500 calibration_file:=<その腕の yaml のパス>
+ros2 launch so_arm101_bringup bringup.launch.py mock:=false read_only:=false torque_limit:=500 calibration_file:=<その腕の yaml の絶対パス（$HOME か /home/… で書く。~ は使わない）>
 # モック（腕なし。まず、これで VR 側の動きを確かめてよい）
 ros2 launch so_arm101_bringup bringup.launch.py mock:=true
 ```
 
-- `calibration_file:=` は、**別の腕では `docs/calibration_new_arm_remote.md` で作ったコピー（`~/so_arm101_check/follower_calibration_new_arm.yaml`）を指定する。開発用の腕では省略できる**（省略するとリポジトリの yaml が使われる）。別の腕で省略すると、リポジトリの yaml（開発用の腕のもの）が使われ、書き込みモードは起動を拒否する。
+- `calibration_file:=` は、**別の腕では `docs/calibration_new_arm_remote.md` で作ったコピー（`$HOME/so_arm101_check/follower_calibration_new_arm.yaml`）を指定する。開発用の腕では省略できる**（省略するとリポジトリの yaml が使われる）。別の腕で省略すると、リポジトリの yaml（開発用の腕のもの）が使われ、書き込みモードは起動を拒否する。
+- **引数のパスに `~` を使わない（`$HOME` か絶対パスを使う。`:=` の後ろの `~` は展開されない）。** `calibration_file:=~/…` と書くと、ドライバに `~` のまま渡り、`cannot read calibration '~/…'; bad file` で起動に失敗する。
 - `read_only:=true`（既定）の実機は、サーボに書かない（腕は動かない。指令は進むが測定は動かない）。
 - bringup は、**俯瞰カメラを起動しない**（`so_arm101_camera` は別。ここでは使わない）。
 - 実機は、起動前に、腕を折りたたみ姿勢にして支える。起動で `arm_controller`・`gripper_controller`・`joint_state_broadcaster` が active になる（`ros2 control list_controllers`）。
